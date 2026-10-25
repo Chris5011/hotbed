@@ -48,8 +48,9 @@ func RecipeImageEnsure(stack string) error {
 	}
 	audit.Record("image.build", RecipeImageName(stack), "missing — built during create ("+stack+")")
 	args := []string{
+		"build",
 		"--label", envLabel + ".recipe=" + recipeStamp(),
-		"build", "--target", stack,
+		"--target", stack,
 		"-t", RecipeImageName(stack), "-f", df, root,
 	}
 	out, err := RunTO(20*time.Minute, "docker", args...)
