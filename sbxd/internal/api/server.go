@@ -283,6 +283,7 @@ func (s *Server) attachRoute(w http.ResponseWriter, r *http.Request, sb sandbox.
 		httpError(w, 500, err.Error())
 		return
 	}
+	audit.Record("sandbox.attach", sb.Name, "mode="+in.Mode)
 	ci := attach.ConnInfo(sb, in.Mode, port)
 	ci.TmuxSession = sess
 
@@ -333,8 +334,23 @@ func (s *Server) logsSSE(w http.ResponseWriter, r *http.Request, sb sandbox.Sand
 
 	switch sb.Kind {
 	case sandbox.KindContainer:
-		err := engine.LogsStream(ctx, sb.Name, 300, writerFunc(sendCmd))
-		_ = err
+		// A healthy kit sandbox is silent forever: the entrypoint drops
+		// privileges and sleeps, and the TUI (opencode) runs in the USER's
+		// own exec PTY — docker never sees those bytes, so the raw stream
+		// read as an eternal blank and looked like a broken stream. Say the
+		// source out loud, prefill the sandbox's control-plane trail, then
+		// keep following the raw stdout/stderr (init lines and crashes do
+		// land here).
+		sendCmd("(streaming docker stdout/stderr -- a healthy sandbox sleeps silently; the opencode TUI lives in your terminal: sbx attach " + sb.Name + " / docker exec -it " + sb.Name + " opencode)")
+		if trail := audit.Tail(400); trail != nil {
+			for _, e := range trail {
+				if e.Sandbox != sb.Name {
+					continue
+				}
+				sendCmd(e.TS + "  " + e.Kind + ": " + e.Detail)
+			}
+		}
+		_ = engine.LogsStream(ctx, sb.Name, 300, writerFunc(sendCmd))
 	case sandbox.KindVM:
 		if sb.Backend == sandbox.BackendDocker {
 			_ = engine.SerialStream(ctx, "sbxvmd-"+sb.Name, sb.Name, writerFunc(sendCmd))
@@ -545,6 +561,7 @@ func (s *Server) terminalOpen(w http.ResponseWriter, r *http.Request) {
 		httpError(w, 500, err.Error())
 		return
 	}
+	audit.Record("terminal.open", sb.Name, "mode="+in.Mode)
 	okJSON(w, map[string]any{"ok": true, "spawned": inside})
 }
 
