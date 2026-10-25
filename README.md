@@ -272,13 +272,24 @@ It will:
 
 ```bash
 sbxd-serve
-# → dashboard + API on http://127.0.0.1:7770 (loopback only)
+# → dashboard + API on http://127.0.0.1:7770 (loopback by default)
 ```
 
 `sbxd-serve` is a plain foreground process — run it in a terminal, a tmux
 pane or a systemd unit. The CLIs (`sbx`, `sbxvm`, `sbxd`) also work
 without the daemon (they fall back to direct engine calls); the dashboard
 obviously doesn't.
+
+**On a remote/headless box** the loopback default leaves two, both honest:
+
+- *tunnel* (no exposure): from your workstation, `ssh -L 7770:127.0.0.1:7770
+  <box>` and browse `http://127.0.0.1:7770` there; or
+- *opt-in LAN exposure*: `SBXD_BIND=0.0.0.0 sbxd-serve` (or edit the
+  `sbxd-serve` wrapper). Loud ping: **the dashboard/API has no login** —
+  the CSRF guard protects browsers only, so with a non-loopback bind your
+  *firewall position* is the gate (same trust model as the proxy listener,
+  which must be network-reachable for sandboxes anyway). Prefer
+  `ufw allow from <trusted-subnet>` style scoping, not world-open ports.
 
 ```bash
 curl -s http://127.0.0.1:7770/api/health
@@ -934,8 +945,9 @@ loopback-only dashboard, traversal outside home is rejected).
 ### House rules & security posture (P2 included)
 
 
-- Dashboard binds `127.0.0.1` only, never touches `~/.ssh/sbxvm_key`, never
-  falls back to a TCG-only engine.
+- Dashboard binds loopback by default (`127.0.0.1`, `--bind`/`SBXD_BIND`
+  is explicit opt-in for network reachability), never touches
+  `~/.ssh/sbxvm_key`, never falls back to a TCG-only engine.
 - The proxy **must** be reachable from sandboxes, so it binds `0.0.0.0:7775`
   — the rest is gated: every request needs a minted, non-revoked `sbxk-…`
   key (401 otherwise), wallets can return 429, and config/keys files are
@@ -972,7 +984,8 @@ loopback-only dashboard, traversal outside home is rejected).
   `"phase":"end"`). Between the two signals the dashboard shows an amber
   **booting** state instead of the engine's premature `running`, attach is
   politely refused with a hint, and endpoint security is the daemon's own:
-  loopback-only listener + CSRF origin guard (the kit's curl has no Origin
+  loopback-by-default listener (remote exposure is an explicit `SBXD_BIND`
+  opt-in) + CSRF origin guard (the kit's curl has no Origin
   header, i.e. a native client). A begin that never gets its end expires
   after ~30 minutes (`boot_pending.json` in the state dir, survives daemon
   restarts). On boot-end a synced VM's ssh proxy tunnel is re-established

@@ -19,7 +19,7 @@ never committed (see `.gitignore`).
 | Daemon CLI | `sbxd/internal/cli` (`Serve`, `ps`, `start/stop/rm`, `attach`, `config get/set/init`, `usage`, …) |
 | Daemon dirs (XDG) | config `~/.config/sbxd`, data `~/.local/share/sbxd`, state `~/.local/state/sbxd` (audit.jsonl, usage.jsonl, boot_pending.json, tunnel pid/logs) — all overridable: `SBXD_CONFIG_DIR`, `SBXD_DATA_DIR`, `SBXD_STATE_DIR` |
 | Dashboard | embedded in the binary (`internal/api/web.go`): HTML + a raw-string `const appJS` + CSS. **No node toolchain required** — validate extracted JS with `node --check` (snippet in §2) |
-| Ports | daemon 7770 (loopback only), proxy 7775 (0.0.0.0, token-gated), hermetic suite uses 7790/7794/7795 — never "fix" these |
+| Ports | daemon 7770 (loopback by default; `SBXD_BIND`/`--bind` opt-in to network — README says why), proxy 7775 (0.0.0.0, token-gated), hermetic suite uses 7790/7794/7795 — never "fix" these |
 | Suite | `tests/sbxddsmoke.sh` — hermetic but needs **≥1 running sandbox visible to docker** for its P1 inventory gate; the certification dance spawns a disposable one (§5) |
 | Version | single source: `sbxd/internal/env/env.go` `var Version` — release stamping overrides it via ldflags; do **not** keep a const here |
 | Bash kit | `vm/sbxvm.sh` must stay `bash -n`-clean after every edit; same for `tests/sbxddsmoke.sh` |
@@ -86,7 +86,7 @@ curl -s --max-time 90 -X POST http://127.0.0.1:7770/api/create \
 sleep 2
 cd /home/chris5011/OpenCode-SBX
 SBXD_SMOKE_PORT=7790 bash tests/sbxddsmoke.sh 2>&1 | tail -20
-# gate: "== result: 101 passed, 0 failed ==" (or higher if you added checks — must be 0 failed)
+# gate: "== result: N passed, 0 failed ==" (the count grows with new checks — must be 0 failed)
 /home/chris5011/OpenCode-SBX/sbxd/bin/sbxd rm sbx-certsuite --yes
 sleep 5; /home/chris5011/OpenCode-SBX/sbxd/bin/sbxd ps   # certsuite gone; nothing else touched
 ```
