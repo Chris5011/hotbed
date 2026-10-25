@@ -1,38 +1,43 @@
-# SBX Desktop v0.2.9
+# SBX Desktop v0.2.10
 
-The guest-provisioning-hardening release of **OpenCode-SBX** + **sbxd**:
-fresh sbxvms get opencode from the kit's own ssh channel — guest internet
-egress is no longer part of the install contract.
+The model-wiring release of **OpenCode-SBX** + **sbxd**: a CLI-created VM
+now arrives with its opencode models already wired through the sbx proxy.
 
 ## What's new
 
-- **opencode staging without guest egress** — the seed unit needs guest
-  GitHub egress; one box showed the failure mode that makes this unusable
-  (ICMP + DNS pass, TCP 443 blackholed — the look of a policy router or
-  VPN), and its fresh guests stayed without opencode no matter how hard
-  the seed retried. After cloud-init completes, `sbxvm create` now
-  checks the guest over the kit's own ssh channel and, when the binary
-  is missing, downloads the tarball on the host (hosts already have this
-  egress — they built the kit images from the same URL) and pushes it
-  into the guest: extract + chmod + version check. The unit keeps
-  running in each guest as belt-and-suspenders for egress-capable boxes.
-- Verified end to end on a real docker-backend guest: binary removed —
-  staged back over ssh within seconds, `opencode --version` → 1.19.4.
+- **CLI-created VMs self-sync** — dashboard-created sandboxes run the
+  sync route (mints the proxy key + writes the guest's `opencode.json`
+  model list + establishes the ssh -R tunnel), but `sbxvm create`
+  skipped it entirely: opencode came up with an **empty model list**.
+  After staging, create now POSTs `/api/sandboxes/vm/<name>/sync` to
+  the local controller (scheme-aware, best-effort) and prints the
+  outcome honestly: *wired*, *no controller*, or *no providers* — with
+  the exact cure (`sbxd config init` + `sbxd sync NAME`).
+- Verified end to end on a real docker-backend guest: binary staged +
+  sync + tunnel, then `GET /v1/models` **from inside the guest** through
+  the tunnel returned the provider's real model list (minted `sbxk-…`
+  key accepted).
 
-## Upgrade from v0.2.8
+## Upgrade from v0.2.9
 
 ```bash
 cd ~/OpenCode-SBX
 scripts/update.sh --yes --tls
-# existing egress-blocked guest (create-time staging lands on NEW vms):
-#   curl -fSL …/releases/download/v1.19.4/opencode-linux-x64.tar.gz -o /tmp/oc.tgz
-#   cat /tmp/oc.tgz | sbxvm ssh <vm> -- 'cat > /tmp/opencode.tgz'
-#   sbxvm ssh <vm> -- sudo sh -c 'tar -xz -C /usr/local/bin -f /tmp/opencode.tgz opencode && chmod 0755 /usr/local/bin/opencode'
 ```
 
-## Carried from v0.2.2–v0.2.8
+For an **existing** VM created before this release (opencode present,
+empty model list):
+
+```bash
+./sbxd/bin/sbxd config init        # imports providers from the host's opencode config
+./sbxd/bin/sbxd sync <vm-name>     # mints key + writes guest config + tunnel
+# then: sbxvm ssh <vm-name> -- opencode   → models listed
+```
+
+## Carried from v0.2.2–v0.2.9
 
 `SBXD_BIND` remote exposure, snakeoil TLS, recipe provenance stamps +
 stale-image warns, honest container log stream, TLS-resilient VM boot
-registration, self-healing guest opencode, create-time build-arg fix,
-serial log hygiene, update.sh collision/bind hardening.
+registration, self-healing guest opencode, opencode staging over ssh
+(no guest egress), create-time build-arg fix, serial log hygiene,
+update.sh collision/bind hardening.
