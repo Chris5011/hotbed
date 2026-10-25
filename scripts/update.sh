@@ -78,17 +78,26 @@ if [[ $YES -eq 1 ]]; then
     OLD_PID="$(ss -ltnp 2>/dev/null | grep ':7770 ' | grep -o 'pid=[0-9]*' | cut -d= -f2 | head -1)"
     BIND="127.0.0.1"
     if ss -ltn 2>/dev/null | grep -q ':7770 .* 0.0.0.0:7770'; then BIND="0.0.0.0"; fi
-    ss -ltn 2>/dev/null | grep ':7770 ' | awk '{print $4}' | grep -q . || true
+    OLD_TLS=0
+    if [[ -n "$OLD_PID" && -r "/proc/$OLD_PID/environ" ]] \
+        && tr '\0' '\n' <"/proc/$OLD_PID/environ" 2>/dev/null | grep -q '^SBXD_TLS=1$'; then
+        OLD_TLS=1
+    fi
     if [[ -n "$OLD_PID" ]]; then
         say "stopping old daemon (PID $OLD_PID)…"
         kill "$OLD_PID"; sleep 1
     fi
-    # new daemon out-of-the-way: exact PID from the listener, honest log file
     SDE_LOG="${TMPDIR:-/tmp}/sbxd-update-serve.log"
-    SBXD_BIND="$BIND" nohup "$ROOT/sbxd/bin/sbxd" serve >"$SDE_LOG" 2>&1 &
+    if [[ $OLD_TLS -eq 1 ]]; then
+        SBXD_BIND="$BIND" SBXD_TLS=1 nohup "$ROOT/sbxd/bin/sbxd" serve >"$SDE_LOG" 2>&1 &
+    else
+        SBXD_BIND="$BIND" nohup "$ROOT/sbxd/bin/sbxd" serve >"$SDE_LOG" 2>&1 &
+    fi
     sleep 3
     NEW_PID="$(ss -ltnp 2>/dev/null | grep ':7770 ' | grep -o 'pid=[0-9]*' | cut -d= -f2 | head -1)"
-    say "daemon restarted (PID ${NEW_PID:-unknown}, bind $BIND — log $SDE_LOG)"
+    TLSNOTE=""
+    [[ $OLD_TLS -eq 1 ]] && TLSNOTE=", TLS preserved"
+    say "daemon restarted (PID ${NEW_PID:-unknown}, bind $BIND$TLSNOTE — log $SDE_LOG)"
     curl -s --max-time 5 http://127.0.0.1:7770/api/health \
         | grep -q '"version"' && say "daemon healthy" || warn "daemon not answering /api/health yet — check $SDE_LOG"
 else

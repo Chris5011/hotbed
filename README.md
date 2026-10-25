@@ -290,6 +290,13 @@ obviously doesn't.
   *firewall position* is the gate (same trust model as the proxy listener,
   which must be network-reachable for sandboxes anyway). Prefer
   `ufw allow from <trusted-subnet>` style scoping, not world-open ports.
+- *snakeoil TLS — makes the dashboard a secure context*: `SBXD_TLS=1
+  sbxd-serve` (or `--tls`). Browsers only grant `navigator.clipboard`
+  over https — over plain http on a LAN box the copy buttons degrade to a
+  fallback with a pointed toast. The daemon auto-generates a self-signed
+  cert and pins it at `~/.local/state/sbxd/tls/` (fingerprint printed,
+  stable across restarts, delete the files to regenerate). Combine with
+  `SBXD_BIND` for `https://<box>:7770`.
 
 ```bash
 curl -s http://127.0.0.1:7770/api/health
