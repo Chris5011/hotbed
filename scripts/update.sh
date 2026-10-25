@@ -133,37 +133,88 @@ say "daemon binary installed: sbxd/bin/sbxd <- dist/sbxd-$TAG-linux-$KA"
 # ---- prereqs, wrappers, base image pre-build -----------------------------------
 ./install.sh --yes
 
-# ---- optional daemon restart (bind address preserved via detection) -------------
+# ---- optional daemon restart (bind + TLS preserved via honest detection) ---------
+# lsn prints "<addr>:<port> <pid>" for the given port's listener; the pid rides
+# INSIDE ss's users:(("sbxd",pid=N,...)) token, so match() it anywhere in the
+# tail fields -- a naive grep for "0.0.0.0:7770 twice on one line" never matches
+# and always misread the real bind.
+lsn() {
+    ss -ltnp 2>/dev/null | awk -v p="$1" '
+        $4 ~ ":"p"$" {
+            addr=$4; pid=""
+            for (i=5; i<=NF; i++) if (match($i, /pid=[0-9]+/)) { pid=substr($i, RSTART+4, RLENGTH-4); break }
+            print addr " " pid
+            exit
+        }'
+}
 if [[ $YES -eq 1 ]]; then
-    OLD_PID="$(ss -ltnp 2>/dev/null | grep ':7770 ' | grep -o 'pid=[0-9]*' | cut -d= -f2 | head -1)"
-    BIND="127.0.0.1"
-    if ss -ltn 2>/dev/null | grep -q ':7770 .* 0.0.0.0:7770'; then BIND="0.0.0.0"; fi
+    lread="$(lsn 7770)"
+    OLD_ADDR="${lread%% *}"
+    OLD_PID="${lread#* }"
+    if [[ "$lread" == "$OLD_PID" ]]; then OLD_PID=""; fi
+    base="${OLD_ADDR%:*}"
+    case "$base" in
+        "")                         BIND="127.0.0.1" ;;
+        "127.0.0.1"|"::1"|"[::1]")  BIND="127.0.0.1" ;;
+        "0.0.0.0"|"*"|"[::]"|"::")  BIND="0.0.0.0" ;;
+        *)                          BIND="$base" ;;
+    esac
     OLD_TLS=0
     if [[ -n "$OLD_PID" && -r "/proc/$OLD_PID/environ" ]] \
         && tr '\0' '\n' <"/proc/$OLD_PID/environ" 2>/dev/null | grep -q '^SBXD_TLS=1$'; then
         OLD_TLS=1
     fi
+    TLS_RUN="$OLD_TLS"
+    if [[ $TLS -eq 1 ]]; then
+        TLS_RUN=1
+        say "TLS: requested via --tls flag"
+    elif [[ $OLD_TLS -eq 1 ]]; then
+        say "TLS: preserving the old daemon's SBXD_TLS=1"
+    fi
+    if [[ -n "$OLD_PID" ]]; then
+        TLSNOTE=""
+        if [[ $TLS_RUN -eq 1 ]]; then TLSNOTE=" SBXD_TLS=1"; fi
+        say "resident daemon: PID $OLD_PID on $OLD_ADDR -> restarting with SBXD_BIND=$BIND$TLSNOTE"
+    fi
     if [[ -n "$OLD_PID" ]]; then
         say "stopping old daemon (PID $OLD_PID)..."
-        kill "$OLD_PID"; sleep 1
+        kill "$OLD_PID" 2>/dev/null || true
+        sleep 1
+        if [[ -n "$(lsn 7770)" ]]; then
+            fail "port 7770 still answered after stopping PID $OLD_PID -- not double-starting; check: ss -ltnp | grep 7770"
+        fi
     fi
-    TLS_RUN="$OLD_TLS"
-    [[ $TLS -eq 1 ]] && TLS_RUN=1
     SDE_LOG="${TMPDIR:-/tmp}/sbxd-update-serve.log"
+    : >"$SDE_LOG"
     if [[ $TLS_RUN -eq 1 ]]; then
         SBXD_BIND="$BIND" SBXD_TLS=1 nohup "$ROOT/sbxd/bin/sbxd" serve >"$SDE_LOG" 2>&1 &
     else
         SBXD_BIND="$BIND" nohup "$ROOT/sbxd/bin/sbxd" serve >"$SDE_LOG" 2>&1 &
     fi
     sleep 3
-    NEW_PID="$(ss -ltnp 2>/dev/null | grep ':7770 ' | grep -o 'pid=[0-9]*' | cut -d= -f2 | head -1)"
-    TLSNOTE=""
-    if [[ $TLS_RUN -eq 1 ]]; then TLSNOTE=", TLS on (https)"; fi
-    say "daemon restarted (PID ${NEW_PID:-unknown}, bind $BIND$TLSNOTE -- log $SDE_LOG)"
-    PROTO="http"
-    if [[ $TLS_RUN -eq 1 ]]; then PROTO="https"; fi
-    curl -sk --max-time 5 "$PROTO://127.0.0.1:7770/api/health" \
-        | grep -q '"version"' && say "daemon healthy" || warn "daemon not answering $PROTO://127.0.0.1:7770/api/health yet -- check $SDE_LOG"
+    nread="$(lsn 7770)"
+    NEW_ADDR="${nread%% *}"
+    NEW_PID="${nread#* }"
+    if [[ "$nread" == "$NEW_PID" ]]; then NEW_PID=""; fi
+    say "daemon restarted (PID ${NEW_PID:-?} on ${NEW_ADDR:-nothing} -- log $SDE_LOG)"
+    if [[ $TLS_RUN -eq 1 ]]; then
+        proto="https"
+        fp="$(grep -ao 'cert sha256 fingerprint: [0-9a-f]\{64\}' "$SDE_LOG" | grep -o '[0-9a-f]\{64\}' | head -1)"
+        if [[ -n "$fp" ]]; then
+            say "cert fingerprint: $fp  (pinned -- browser warns once)"
+        else
+            warn "no snakeoil fingerprint in $SDE_LOG -- TLS did not come up; log tail:"
+            tail -n 6 "$SDE_LOG" | sed 's/^/    /'
+        fi
+    else
+        proto="http"
+    fi
+    if curl -sk --max-time 5 "$proto://127.0.0.1:7770/api/health" | grep -q '"version"'; then
+        say "daemon healthy ($proto)"
+    else
+        warn "daemon not answering $proto://127.0.0.1:7770/api/health -- log tail:"
+        tail -n 6 "$SDE_LOG" | sed 's/^/    /'
+    fi
 else
     say "done. restart the daemon to pick up the new binary:"
     say "  kill \$(ss -ltnp 2>/dev/null | grep :7770 | grep -o 'pid=[0-9]*' | cut -d= -f2 | head -1)"
