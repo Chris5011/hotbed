@@ -28,10 +28,15 @@ func RunStdin(to time.Duration, stdin []byte, name string, args ...string) (stri
 }
 
 // RunTO executes a command with an explicit timeout and trimmed output.
+// WaitDelay keeps the timeout wall-honest: when the context fires the
+// direct child is killed, but grandchildren (shims, wrappers) holding the
+// output pipes would keep CombinedOutput blocked forever without it.
 func RunTO(to time.Duration, name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), to)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.WaitDelay = 500 * time.Millisecond
+	out, err := cmd.CombinedOutput()
 	return strings.TrimRight(string(out), "\n"), err
 }
 
@@ -41,9 +46,11 @@ func LookPath(bin string) bool {
 	return err == nil
 }
 
-// DockerUp checks that the docker engine answers.
+// DockerUp checks that the docker engine answers. Bounded short: health
+// probes use this on every refresh tick, so a wedged/unprivileged docker
+// must not hold a scan for classic CLI-retry timeouts.
 func DockerUp() bool {
-	out, err := Run("docker", "info", "--format", "{{.ServerVersion}}")
+	out, err := RunTO(4*time.Second, "docker", "info", "--format", "{{.ServerVersion}}")
 	if err != nil {
 		return false
 	}

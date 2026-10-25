@@ -135,7 +135,7 @@ func rowFromMap(m map[string]any) *ContainerRow {
 // `docker stats` samples every container; on busy Docker Desktop installs
 // that can take noticeably longer than a plain ps — generous ceiling.
 func DockerStats() map[string]ContainerStat {
-	rows, err := RunJSONTO(45*time.Second, "docker", "stats", "--no-stream", "--format", "{{json .}}")
+	rows, err := RunJSONTO(8*time.Second, "docker", "stats", "--no-stream", "--format", "{{json .}}")
 	out := map[string]ContainerStat{}
 	if err != nil {
 		return out
