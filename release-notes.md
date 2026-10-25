@@ -1,51 +1,47 @@
-# SBX Desktop v0.2.11
+# SBX Desktop v0.3.0
 
-The async-create release of **OpenCode-SBX** + **sbxd**: pressing Create
-answers the moment the VM is spawned — not after it finished booting — and
-every VM now gets its models wired automatically at first boot-end.
+The dashboard-refresh release of **OpenCode-SBX** + **sbxd**: an Overview
+start page with live host & sandbox metrics, and a create button that
+cannot be triggered twice.
 
 ## What's new
 
-- **Create returns at spawn, boot continues in background** — the
-  dashboard's create button used to idle on the creation page for the
-  whole VM boot (~2 min): the route ran the kit's full create pipeline
-  (ssh wait + cloud-init + staging + sync) synchronously. The kit now
-  honors `SBXVM_SPAWN_ONLY=1` inside `create` (returns right after
-  rebuild/seed/spawn, docker and libvirt arms) and grew a `postboot`
-  verb for the second half; the daemon spawns, answers the create call
-  immediately with `"booting":true`, and drives post-boot in a
-  background goroutine. Live-verified: API answered in ~6 s, boot
-  confirmed ~97 s later.
-- **VMs auto-sync at boot-end** — a VM reaching boot-end without a sync
-  target (dashboard-created VMs never synced before; a CLI-create whose
-  self-sync failed) now gets exactly ONE controller-side sync: mint key
-  + write the guest's `opencode.json` model list + establish the ssh -R
-  tunnel — the same work the dashboard sync button does, automatic.
-  Audited (`sandbox.sync — models wired automatically at boot-end …`);
-  failure text is recorded honestly (e.g. no providers configured).
-  Idempotent by design: the kit's own create-time sync POST lands
-  *before* its boot-end, so the target already exists then and the
-  attempt is skipped — no double mint.
-- Verified end to end on a real docker-backend guest: async create →
-  booting state → running; opencode staged, `GET /v1/models` from
-  INSIDE the guest answered through the tunnel; with target + tunnel
-  removed, a synthetic boot-end rebuilt both automatically.
+- **Overview start page** — the dashboard now opens onto a live
+  overview (also in the sidebar): CPU percent + load + core count,
+  memory incl. swap, disk per relevant mount (root, home, docker data
+  root, kit tree — de-duplicated per filesystem), kernel, uptime,
+  engine badges (docker / libvirt / tmux) and grouped inventory counts
+  (containers / VMs · libvirt / VMs · docker — running and known).
+  Refreshes every 5 s. Served by a new `GET /api/stats`: plain `/proc`
+  reads + `statfs`, no exec; CPU% comes from a lazily-started 2 s
+  sampler (the first call double-samples 250 ms apart so it answers
+  honestly immediately); counts come from the collector's cached
+  snapshot — the route never re-scans.
+- **Create button busy-state** — pressing Create in the wizard now
+  disables the button with a spinner ring until the create call
+  resolves or fails, on all of its three kind paths (container, VM ·
+  libvirt, VM · docker): a hurried double-click can no longer fire a
+  second `POST /api/create`. The stale wizard copy ("blocks until the
+  guest is up") was updated to the v0.2.11 reality: creation returns
+  the moment the machine is spawned, the guest finishes booting in the
+  background, models wire up automatically at boot-end.
+- Suite grows to **127 checks** (+4 for the stats contract: sample
+  fields, disk statfs, count groups, version field).
 
-## Upgrade from v0.2.10
+## Upgrade from v0.2.11
 
 ```bash
 cd ~/OpenCode-SBX
 scripts/update.sh --yes --tls
+# hard-refresh the browser tab once (Ctrl+Shift+R) — the dashboard is
+# served with no-cache headers, but a pinned tab may keep its old HTML.
 ```
 
-VMs created before this release sync exactly once on their next
-boot-end — or right now, manually: `./sbxd/bin/sbxd sync <vm-name>`
-(needs `sbxd config init` first if providers were never imported).
-
-## Carried from v0.2.2–v0.2.10
+## Carried from v0.2.2–v0.2.11
 
 `SBXD_BIND` remote exposure, snakeoil TLS, recipe provenance stamps +
 stale-image warns, honest container log stream, TLS-resilient VM boot
 registration, self-healing guest opencode, opencode staging over ssh
-(no guest egress), CLI-create self-sync, create-time build-arg fix,
-serial log hygiene, update.sh collision/bind hardening.
+(no guest egress), CLI-create self-sync, async VM create (returns at
+spawn) + boot-end auto-sync, create-time build-arg fix, serial log
+hygiene, update.sh collision/bind hardening.
