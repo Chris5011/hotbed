@@ -117,8 +117,20 @@ swall="$(curl -s -o /tmp/sbxddsmoke.sbx.out -w '%{time_total}' --max-time 20 \
 awk -v w="$swall" 'BEGIN{exit !(w < 8)}' \
     && pass "wedged engine: sandboxes answer promptly (wall ${swall%%.*}s < 8s)" \
     || fail "wedged engine: sandboxes answered slowly (wall=${swall}s)"
+grep -aqF '"sandboxes":[]' /tmp/sbxddsmoke.sbx.out \
+    && pass "empty engine: sandboxes payload is an array, not null (renderList contract)" \
+    || fail "empty engine: sandboxes payload must be an array, not null"
 kill "$FDPID" 2>/dev/null
 wait "$FDPID" 2>/dev/null
+
+hdr "SSE shape contract"
+# the browser assigns ev.data straight into state.list and calls forEach —
+# the first snapshot (and every tick) must be a bare array, never null and
+# never a wrapped {sandboxes:…} object (both shipped by older builds).
+sse1="$(curl -sN --max-time 3 "http://127.0.0.1:$PORT/api/events" 2>/dev/null | grep -a '^data: ' | head -1)"
+[[ "$sse1" == "data: ["* ]] \
+    && pass "SSE initial snapshot is a bare array" \
+    || fail "SSE initial snapshot is a bare array (got: ${sse1:-empty})"
 
 # perm-denied shape: docker exists but the engine refuses instantly — the
 # real remote-box case. Everything must be prompt, no retry-drag.
