@@ -130,13 +130,16 @@ fi
 # box the first dashboard create would otherwise dangle on 'pull access
 # denied for sbx'. Any other stack builds on demand in the same path.
 if [[ ${dusable:-0} = 1 ]] && ! timeout 10 docker image inspect sbx:base >/dev/null 2>&1; then
-    say "stack image sbx:base missing — building it now (one-time, layer-cached)…"
-    if SBX_ROOT="$ROOT" "$ROOT/bin/sbx" build base >/dev/null 2>&1; then
+    say "stack image sbx:base missing — building it now (one-time, layer-cached; takes a bit)…"
+    blog="$(mktemp)"
+    if SBX_ROOT="$ROOT" "$ROOT/bin/sbx" build base >"$blog" 2>&1; then
         say "sbx:base ready — container creation from the dashboard works out of the box"
     else
-        say "sbx:base build failed (non-fatal) — the first dashboard create retries it"
-        say "  automatically; manual build: $ROOT/bin/sbx build base"
+        say "sbx:base build failed (non-fatal) — last build log lines:"
+        tail -n 5 "$blog" | sed 's/^/    /'
+        say "  the first dashboard create retries it automatically; manual build: $ROOT/bin/sbx build base"
     fi
+    rm -f "$blog"
 fi
 
 virtmiss=()
