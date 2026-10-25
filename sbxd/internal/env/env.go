@@ -17,6 +17,11 @@ const (
 	// DefaultPort the daemon (dashboard/API) listens on (localhost only).
 	DefaultPort = "7770"
 
+	// DefaultBind is the dashboard/API listener address. Loopback on
+	// purpose — remote exposure is opt-in via `--bind` / SBXD_BIND and
+	// comes with an explicit unauthenticated-warning; see serve().
+	DefaultBind = "127.0.0.1"
+
 	// DefaultProxyPort for the LLM token-accounting proxy. Unlike the
 	// dashboard this listener is reachable from sandboxes by design
 	// (per-sandbox bearer keys gate it).

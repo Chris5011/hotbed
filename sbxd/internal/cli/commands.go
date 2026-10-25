@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -56,12 +57,41 @@ func ensureTunnelsLoop(cfg *config.Config) {
 
 // --------------------------------------------------------------- serve ---
 
+// loopbackHost reports whether a bind address is loopback — by default the
+// dashboard is only reachable from this machine (NOT an auth boundary by
+// itself: SBXD_BIND=0.0.0.0 opts into network exposure, gated by the loud
+// warning above and by the user's firewall position).
+func loopbackHost(h string) bool {
+	s := strings.ToLower(strings.TrimSpace(h))
+	if s == "" || s == "localhost" {
+		return true
+	}
+	if ip, err := netip.ParseAddr(s); err == nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
 func serve(args []string) error {
 	port := env.DefaultPort
+	bind := env.DefaultBind
 	for i := 0; i < len(args); i++ {
-		if args[i] == "--port" && i+1 < len(args) {
-			port = args[i+1]
-			i++
+		switch args[i] {
+		case "--port":
+			if i+1 < len(args) {
+				port = args[i+1]
+				i++
+			}
+		case "--bind":
+			if i+1 < len(args) {
+				bind = strings.TrimSpace(args[i+1])
+				i++
+			}
+		}
+	}
+	if bind == env.DefaultBind {
+		if v := strings.TrimSpace(os.Getenv("SBXD_BIND")); v != "" {
+			bind = v
 		}
 	}
 
@@ -179,7 +209,10 @@ func serve(args []string) error {
 		go ensureTunnelsLoop(cfg)
 	}
 
-	addr := "127.0.0.1:" + port
+	addr := bind + ":" + port
+	if !loopbackHost(bind) {
+		fmt.Fprintf(os.Stderr, "\033[33;1msbxd:\033[0m WARNING: dashboard/API listening on %s — UNAUTHENTICATED on the network; the CSRF guard protects browsers only, native clients pass — gate it (firewall) or use an ssh tunnel\n", addr)
+	}
 	httpSrv := &http.Server{Addr: addr, Handler: srv.Handler()}
 
 	go func() {
@@ -191,7 +224,11 @@ func serve(args []string) error {
 		_ = httpSrv.Shutdown(ctx)
 	}()
 
-	fmt.Printf("\033[36;1msbxd:\033[0m dashboard http://%s  (Ctrl-C to stop)\n", addr)
+	if loopbackHost(bind) {
+		fmt.Printf("\033[36;1msbxd:\033[0m dashboard http://%s  (Ctrl-C to stop)\n", addr)
+	} else {
+		fmt.Printf("\033[36;1msbxd:\033[0m dashboard http://<this-host>:%s  (listening on %s; Ctrl-C to stop)\n", port, addr)
+	}
 	if len(cfg.Opencode.Providers) > 0 {
 		fmt.Printf("\033[36;1msbxd:\033[0m LLM proxy    :%s  (%d upstream provider(s), wallets from config.json)\n",
 			cfg.Proxy.Port, len(cfg.Opencode.Providers))
