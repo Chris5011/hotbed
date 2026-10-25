@@ -182,10 +182,24 @@ vm_ip() {
 # overlays an honest "booting" state between the two signals and restores
 # proxy tunnels on boot-end. Strictly best-effort: a missing or unreachable
 # controller never fails a boot (standalone sbxvm usage, foreign boots).
+#
+# Scheme is resolved ONCE per sbxvm.sh run: an SBXD_TLS=1 listener answers
+# plain http with Go's "Client sent an HTTP request to an HTTPS server" 400 —
+# which silently ate every registration and made fresh boots show an instant
+# fake "running" instead of an honest "booting".
+_SBXVM_CTL=""
 notify_controller() {
     local phase="$1" name="$2"
     [[ -n "$name" ]] || return 0
-    curl -s --max-time 2 -X POST "http://127.0.0.1:${SBXD_PORT:-7770}/api/vm/boot" \
+    local port="${SBXD_PORT:-7770}"
+    if [[ -z "$_SBXVM_CTL" ]]; then
+        if curl -sk --max-time 2 "https://127.0.0.1:${port}/api/health" 2>/dev/null | grep -q '"version"'; then
+            _SBXVM_CTL="https"
+        else
+            _SBXVM_CTL="http"
+        fi
+    fi
+    curl -sk --max-time 2 -X POST "${_SBXVM_CTL}://127.0.0.1:${port}/api/vm/boot" \
         -H 'Content-Type: application/json' \
         -d "{\"name\":\"${name}\",\"phase\":\"${phase}\"}" >/dev/null 2>&1 || true
 }
@@ -322,17 +336,21 @@ write_files:
   - path: /etc/systemd/system/sbx-opencode-install.service
     permissions: '0644'
     content: |
-      # runs at every boot until the binary is in place: the FIRST-boot cloud-init
-      # download is a one-shot and a transient network miss at that window used
-      # to leave guests without opencode permanently. Retry-friendly unit.
+      # self-heal: runs at every boot and, since systemd restarts the failed
+      # oneshot every minute (StartLimitIntervalSec=0), also CONTINUES inside
+      # a single boot until the binary exists. A transient TLS miss at boot
+      # used to leave guests without opencode until the next reboot.
       [Unit]
       Description=sbxvm: ensure the opencode binary is installed
       Wants=network-online.target
       After=network-online.target
+      StartLimitIntervalSec=0
       [Service]
       Type=oneshot
       RemainAfterExit=yes
-      ExecStart=/bin/sh -c 'test -x /usr/local/bin/opencode || { curl -fsSL ${OCCODE_URL} | tar -xz -C /usr/local/bin opencode && chmod 0755 /usr/local/bin/opencode; }'
+      Restart=on-failure
+      RestartSec=60
+      ExecStart=/bin/sh -c 'test -x /usr/local/bin/opencode || { i=0; while [ "\$i" -lt 5 ]; do curl -fsSL ${OCCODE_URL} -o /tmp/opencode.tgz && tar -xz -C /usr/local/bin -f /tmp/opencode.tgz opencode && chmod 0755 /usr/local/bin/opencode && rm -f /tmp/opencode.tgz && exit 0; i=\$(( i + 1 )); sleep 5; done; exit 1; }'
       [Install]
       WantedBy=multi-user.target
 # NOTE: no cloud-init "mounts" module — it writes fstab and fails the whole
