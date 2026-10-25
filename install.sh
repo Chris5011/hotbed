@@ -96,6 +96,7 @@ done
 # user running sbxd can't reach /var/run/docker.sock (socket group) or the
 # engine isn't running. Non-fatal: warn with the exact remedy.
 duser="${SUDO_USER:-$USER}"
+dusable=0
 if timeout 10 docker info >/dev/null 2>&1; then
     # launched via sudo? root reaches the socket even when sbxd's real user
     # cannot — check that user's group membership despite root's success.
@@ -103,8 +104,10 @@ if timeout 10 docker info >/dev/null 2>&1; then
         say "docker reachable — but '$duser' (the user who will run sbxd) is NOT in the"
         say "  docker socket group → the dashboard's health badge says \"down\". Remedy:"
         say "    sudo usermod -aG docker \"$duser\"   # re-login for the group change"
+        dusable=1
     else
         say "docker engine reachable — container sandboxes are ready"
+        dusable=1
     fi
 else
     derr="$(timeout 10 docker info 2>&1 || true)"
@@ -119,6 +122,20 @@ else
     else
         say "docker installed, but 'docker info' did not answer cleanly (first line:"
         say "  ${derr%%$'\n'*}) — check: sudo systemctl status docker"
+    fi
+fi
+
+# ---- container stack image: build sbx:base once so dashboard create works ----
+# 'sbx:<stack>' is a kit-built image with no registry upstream. On a fresh
+# box the first dashboard create would otherwise dangle on 'pull access
+# denied for sbx'. Any other stack builds on demand in the same path.
+if [[ ${dusable:-0} = 1 ]] && ! timeout 10 docker image inspect sbx:base >/dev/null 2>&1; then
+    say "stack image sbx:base missing — building it now (one-time, layer-cached)…"
+    if SBX_ROOT="$ROOT" "$ROOT/bin/sbx" build base >/dev/null 2>&1; then
+        say "sbx:base ready — container creation from the dashboard works out of the box"
+    else
+        say "sbx:base build failed (non-fatal) — the first dashboard create retries it"
+        say "  automatically; manual build: $ROOT/bin/sbx build base"
     fi
 fi
 
