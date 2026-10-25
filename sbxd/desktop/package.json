@@ -1,0 +1,15 @@
+{
+  "name": "sbx-desktop",
+  "productName": "SBX Desktop",
+  "version": "0.1.0",
+  "description": "Electron shell for the sbxd dashboard (OpenCode-SBX)",
+  "main": "main.js",
+  "author": "chris5011",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}

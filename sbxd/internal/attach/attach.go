@@ -1,0 +1,439 @@
+// Package attach manages persistent tmux sessions for sandboxes and
+// pre-rolls every connection string variant (tmux, one-shot, Windows shell).
+package attach
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"os/user"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
+	"time"
+
+	"sbxd/internal/audit"
+	"sbxd/internal/cfgsync"
+	"sbxd/internal/engine"
+	"sbxd/internal/env"
+	"sbxd/internal/sandbox"
+)
+
+// Session name for a sandbox's persistent tmux session.
+func SessionName(name string) string {
+	return "sbx-" + name
+}
+
+// TmuxPresent checks the tmux CLI.
+func TmuxPresent() bool { return engine.LookPath("tmux") }
+
+// HasSession reports whether the session exists.
+func HasSession(sess string) bool {
+	out, err := engine.Run("bash", "-c", "tmux has-session -t "+shellQuote(sess)+" 2>/dev/null && echo yes || echo no")
+	return err == nil && strings.Contains(out, "yes")
+}
+
+// KillSession removes a stale session (used when the sandbox was recreated).
+func KillSession(sess string) { _, _ = engine.Run("tmux", "kill-session", "-t", sess) }
+
+// EnsureSession idempotently creates a detached tmux session that keeps a
+// live connection (opencode TUI or shell) into the sandbox.
+func EnsureSession(sb sandbox.Sandbox, mode string, port string) (string, error) {
+	if !TmuxPresent() {
+		return "", fmt.Errorf("tmux not found (sudo apt install tmux)")
+	}
+	sess := SessionName(sb.Name)
+	if HasSession(sess) {
+		// still alive? if the pane died the session dies with it — trust tmux
+		return sess, nil
+	}
+
+	uid, gid := hostID()
+	var inner string
+	switch sb.Kind {
+	case sandbox.KindContainer:
+		xdg := ""
+		if mode == "opencode" {
+			if tg, ok := cfgsync.Lookup(sb.Name); ok && tg.XDGOverride {
+				xdg = "-e XDG_CONFIG_HOME=" + cnXdgEnvValue + " "
+			}
+		}
+		switch mode {
+		case "opencode":
+			inner = fmt.Sprintf("docker exec -it -u %s:%s -w /workspace -e TERM=xterm-256color %s%s opencode", uid, gid, xdg, sb.Name)
+		default:
+			inner = fmt.Sprintf("docker exec -it -u %s:%s -w /workspace -e TERM=xterm-256color %s bash", uid, gid, sb.Name)
+		}
+	case sandbox.KindVM:
+		ssh := SSHCommand(sb, port)
+		if ssh == "" {
+			return "", fmt.Errorf("no ssh endpoint known for %s yet (wait for the lease/port)", sb.Name)
+		}
+		if mode == "opencode" {
+			inner = ssh + " -- 'cd /workspace 2>/dev/null; opencode'"
+		} else {
+			inner = ssh
+		}
+	default:
+		return "", fmt.Errorf("unknown kind %q", sb.Kind)
+	}
+
+	outer := []string{"new-session", "-d", "-s", sess, "bash", "-c", inner}
+	if out, err := engine.Run("tmux", outer...); err != nil {
+		return "", fmt.Errorf("tmux new-session: %v (%s)", err, strings.TrimSpace(out))
+	}
+	return sess, nil
+}
+
+// SSHCommand returns a ready-to-run ssh command into a VM sandbox.
+// The collector pre-rolls sb.SSH as "SSH_CMD=<complete command>" — reuse it.
+func SSHCommand(sb sandbox.Sandbox, portOverride string) string {
+	if sb.Kind != sandbox.KindVM {
+		return ""
+	}
+	if strings.HasPrefix(sb.SSH, "SSH_CMD=") {
+		return strings.TrimPrefix(sb.SSH, "SSH_CMD=")
+	}
+	// fallback: resolve the endpoint on the fly
+	key := os.Getenv("HOME") + "/.ssh/sbxvm_key"
+	if sb.Backend == sandbox.BackendDocker {
+		p := portOverride
+		if p == "" {
+			p = engine.DockerPort(env.VMDockerPrefix + sb.Name)
+		}
+		if p == "" {
+			return ""
+		}
+		return "ssh -i " + key + " -o StrictHostKeyChecking=accept-new -p " + p + " dev@127.0.0.1"
+	}
+	return ""
+}
+
+// ConnInfo rolls every connection variant for the UI/CLI.
+func ConnInfo(sb sandbox.Sandbox, mode string, port string) sandbox.ConnInfo {
+	ci := sandbox.ConnInfo{}
+	uid, gid := hostID()
+	sess := SessionName(sb.Name)
+	attachWSL := "tmux attach -t " + sess
+	ci.TmuxSession = sess
+	ci.TmuxAttach = attachWSL
+
+	var inner string
+	switch sb.Kind {
+	case sandbox.KindContainer:
+		if mode == "" {
+			mode = "shell"
+		}
+		ci.BackendCmd = fmt.Sprintf("docker exec -it -u %s:%s -w /workspace -e TERM=xterm-256color %s opencode", uid, gid, sb.Name)
+		ci.ShellCmd = fmt.Sprintf("docker exec -it -u %s:%s -w /workspace -e TERM=xterm-256color %s bash", uid, gid, sb.Name)
+		inner = "docker exec -it -u " + uid + ":" + gid + " -w /workspace -e TERM=xterm-256color " + sb.Name + " bash"
+	case sandbox.KindVM:
+		ssh := SSHCommand(sb, port)
+		ci.ShellCmd = ssh
+		inner = ssh
+		if mode == "opencode" {
+			ci.BackendCmd = ssh + " -- 'cd /workspace 2>/dev/null; opencode'"
+			inner = ci.BackendCmd
+		}
+	}
+	if inner != "" {
+		ci.WTCommand = WTCommand(inner)
+	}
+	ci.AttachHTTP = "/api/sandboxes/" + sb.Kind + "/" + sb.Name + "/attach"
+	return ci
+}
+
+// WTCommand produces a command line that opens Windows Terminal (from any
+// Windows shell) and attaches to the sandbox inside tmux.
+func WTCommand(insideTmux string) string {
+	distro := os.Getenv("WSL_DISTRO_NAME")
+	if distro == "" {
+		distro = "kali-linux"
+	}
+	return fmt.Sprintf("wt.exe new-tab --title sbx -- wsl.exe -d %s -- bash -lc %q",
+		distro, insideTmux)
+}
+
+// SpawnTerminal launches the Windows Terminal tab that attaches to a session
+// (best-effort: requires WSL interop and a Windows Terminal install).
+func SpawnTerminal(inside string) error {
+	distro := os.Getenv("WSL_DISTRO_NAME")
+	if distro == "" {
+		distro = "kali-linux"
+	}
+	if r := runtime.GOOS; r != "linux" {
+		return fmt.Errorf("terminal spawn only supported on WSL (goos=%s)", r)
+	}
+	// wt.exe is on PATH via WSL interop; fall back to cmd start
+	if engine.LookPath("wt.exe") {
+		cmd := exec.Command("wt.exe", "new-tab", "--title", "sbx", "--",
+			"wsl.exe", "-d", distro, "--", "bash", "-lc", inside)
+		return cmd.Start()
+	}
+	if engine.LookPath("cmd.exe") {
+		cmd := exec.Command("cmd.exe", "/C", "start", "", "wsl.exe", "-d", distro, "--", "bash", "-lc", inside)
+		return cmd.Start()
+	}
+	return fmt.Errorf("no wt.exe / cmd.exe interop available — use the copy-connection command instead")
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+func hostID() (uid, gid string) {
+	if u, err := user.Current(); err == nil {
+		return u.Uid, u.Gid
+	}
+	return "1000", "1000"
+}
+
+// --- write transports (used by cfgsync) -------------------------------------
+
+// Kit layout paths mirrored from bin/sbx (container) and sbxvm provisioning (VM).
+const (
+	cnXdgEnvValue        = "/home/sbx/.config/opencode-sbx"
+	cfgsyncContainerPath = "/home/sbx/.config/opencode-sbx/opencode/opencode.json"
+	cfgsyncVMPath        = "/home/dev/.config/opencode/opencode.json"
+)
+
+// WriteTransport returns a file-writer into the sandbox plus the canonical
+// opencode config path for its kind.
+func WriteTransport(sb sandbox.Sandbox, port string) (cfgsync.Transport, string, error) {
+	uid, gid := hostID()
+	switch sb.Kind {
+	case sandbox.KindContainer:
+		return containerWriter(sb.Name, uid, gid), cfgsyncContainerPath, nil
+	case sandbox.KindVM:
+		ssh := SSHCommand(sb, port)
+		if ssh == "" {
+			return nil, "", fmt.Errorf("no ssh endpoint known for %s (is it running?)", sb.Name)
+		}
+		return sshWriter(ssh), cfgsyncVMPath, nil
+	}
+	return nil, "", fmt.Errorf("unknown kind %q", sb.Kind)
+}
+
+type writerFuncT func(path string, payload []byte) error
+
+func (f writerFuncT) WriteRemote(path string, payload []byte) error { return f(path, payload) }
+
+func remoteTee(bin string, fields []string, path string, payload []byte, to time.Duration) error {
+	script := "mkdir -p \"$(dirname " + shellQuote(path) + ")\" && cat > " + shellQuote(path) + " && echo synced"
+	out, err := engine.RunStdin(to, payload, bin, append(fields, "bash", "-c", script)...)
+	if err != nil {
+		return fmt.Errorf("%v: %s", err, strings.TrimSpace(out))
+	}
+	return nil
+}
+
+func containerWriter(cn, uid, gid string) cfgsync.Transport {
+	return writerFuncT(func(path string, payload []byte) error {
+		return remoteTee("docker", []string{"exec", "-i", "-u", uid + ":" + gid, cn}, path, payload, 30*time.Second)
+	})
+}
+
+func sshWriter(sshCmd string) cfgsync.Transport {
+	f := strings.Fields(sshCmd)
+	return writerFuncT(func(path string, payload []byte) error {
+		if len(f) < 2 {
+			return fmt.Errorf("malformed ssh command")
+		}
+		// ssh joins argv into one remote command line; quoting the script
+		// keeps the remote `bash -c` receiving it as exactly one argument.
+		args := append(append([]string{}, f[1:]...), "bash", "-c", shellQuote(remoteTeeScript(path)))
+		return remoteTeeSSH(f[0], args, payload)
+	})
+}
+
+func remoteTeeScript(path string) string {
+	return "mkdir -p \"$(dirname " + shellQuote(path) + ")\" && cat > " + shellQuote(path) + " && echo synced"
+}
+
+// --- proxy reachability --------------------------------------------------------
+
+// TunnelPIDFile remembers the ssh -R tunnel per sandbox
+// (~/.local/state/sbxd/tunnel-<sandbox>.pid).
+func TunnelPIDFile(sandbox string) string {
+	return filepath.Join(env.StateDir(), "tunnel-"+sandboxName(sandbox)+".pid")
+}
+
+func sandboxName(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '_':
+			b.WriteRune(r)
+		}
+	}
+	if b.Len() == 0 {
+		return "_"
+	}
+	return b.String()
+}
+
+// EnsureTunnel keeps a persistent ssh remote-forward alive that pins the
+// sandbox's loopback <port> onto the host proxy port (guest 127.0.0.1:port
+// → host 127.0.0.1:port). VMs have no other reliable path to the proxy in
+// Docker-Desktop WSL setups. Returns the ssh process PID (spawned or kept).
+func EnsureTunnel(sb sandbox.Sandbox, proxyPort string) (int, string, error) {
+	if sb.Kind != sandbox.KindVM {
+		return 0, "", fmt.Errorf("tunnel only applies to VMs")
+	}
+	ssh := SSHCommand(sb, "")
+	if ssh == "" {
+		return 0, "", fmt.Errorf("no ssh endpoint known for %s", sb.Name)
+	}
+	pidFile := TunnelPIDFile(sb.Name)
+	// reuse a still-alive tunnel
+	if b, err := os.ReadFile(pidFile); err == nil {
+		if pid, e := strconv.Atoi(strings.TrimSpace(string(b))); e == nil && pid > 0 && procAlive(pid) {
+			return pid, pidFile, nil
+		}
+		_ = os.Remove(pidFile)
+	}
+	f := strings.Fields(ssh)
+	args := append([]string{}, f[1:]...)
+	args = append(args,
+		"-o", "ExitOnForwardFailure=yes",
+		"-o", "ServerAliveInterval=25",
+		"-o", "ServerAliveCountMax=3",
+		"-N",
+		"-R", "127.0.0.1:"+proxyPort+":127.0.0.1:"+proxyPort,
+	)
+	if err := os.MkdirAll(env.StateDir(), 0o700); err != nil {
+		return 0, "", err
+	}
+	log, err := os.OpenFile(filepath.Join(env.StateDir(), "tunnel-"+sandboxName(sb.Name)+".log"),
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return 0, "", err
+	}
+	_ = os.MkdirAll(filepath.Dir(pidFile), 0o700)
+	cmd := exec.Command(f[0], args...)
+	if log != nil {
+		cmd.Stdout, cmd.Stderr = log, log
+	}
+	if err := cmd.Start(); err != nil {
+		return 0, "", err
+	}
+	pid := cmd.Process.Pid
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(pid)), 0o600); err != nil {
+		return 0, "", err
+	}
+	return pid, pidFile, nil
+}
+
+// TunnelAlive reports whether the persisted tunnel process still exists.
+func TunnelAlive(sandbox string) bool {
+	b, err := os.ReadFile(TunnelPIDFile(sandbox))
+	if err != nil {
+		return false
+	}
+	pid, e := strconv.Atoi(strings.TrimSpace(string(b)))
+	return e == nil && pid > 0 && procAlive(pid)
+}
+
+// ProbeReach checks whether the sandbox itself can open a TCP connection to
+// host:port — used to pick a reachable base URL for containers (and to
+// verify VM tunnels). Docker Desktop's WSL setup blocks normal host routes,
+// so sync probes a candidate list instead of trusting one guess.
+func ProbeReach(sb sandbox.Sandbox, host, port string) error {
+	script := fmt.Sprintf(
+		`timeout 4 bash -c "</dev/tcp/%s/%s" >/dev/null 2>&1 && echo REACHABLE`,
+		shellQuote(host), shellQuote(port))
+	switch sb.Kind {
+	case sandbox.KindContainer:
+		out, err := engine.Run("docker", "exec", sb.Name, "bash", "-c", script)
+		if err != nil || !strings.Contains(out, "REACHABLE") {
+			return fmt.Errorf("%s unreachable from sandbox %s", host, sb.Name)
+		}
+		return nil
+	case sandbox.KindVM:
+		ssh := SSHCommand(sb, "")
+		if ssh == "" {
+			return fmt.Errorf("no ssh endpoint known for %s", sb.Name)
+		}
+		f := strings.Fields(ssh)
+		args := append(append([]string{}, f[1:]...), "bash", "-c", shellQuote(script))
+		out, err := engine.Run(f[0], args...)
+		if err != nil || !strings.Contains(out, "REACHABLE") {
+			return fmt.Errorf("%s unreachable from sandbox %s", host, sb.Name)
+		}
+		return nil
+	}
+	return fmt.Errorf("unknown kind %q", sb.Kind)
+}
+
+func procAlive(pid int) bool {
+	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline")
+	return err == nil && len(b) > 0
+}
+
+// ResolveProxyURL decides which proxy base URL a sandbox can actually reach
+// and returns (baseURL, via, err):
+//   - VMs: a persistent ssh -R tunnel (guest loopback → host proxy); verified
+//     live across sbxvmd-in-docker and libvirt backends. Persisted PID so a
+//     daemon restart can re-ensure it (sbxd StartTunnels).
+//   - containers: probed candidates in order — WSL eth0 IP, then
+//     host.docker.internal (published-port path) — first reachable wins.
+func ResolveProxyURL(sb sandbox.Sandbox, proxyPort string) (string, string, error) {
+	if sb.Kind == sandbox.KindVM {
+		if _, _, err := EnsureTunnel(sb, proxyPort); err != nil {
+			return "", "", fmt.Errorf("tunnel for %s: %w", sb.Name, err)
+		}
+		return "http://127.0.0.1:" + proxyPort + "/v1", "ssh tunnel (guest loopback)", nil
+	}
+	var lastErr error
+	lastVia := ""
+	for _, host := range []string{cfgsync.HostIP(), "host.docker.internal"} {
+		if host == "" {
+			continue
+		}
+		if err := ProbeReach(sb, host, proxyPort); err == nil {
+			if host == "host.docker.internal" {
+				lastVia = "host.docker.internal (published port)"
+			} else {
+				lastVia = "direct (WSL eth0 IP)"
+			}
+			return "http://" + host + ":" + proxyPort + "/v1", lastVia, nil
+		} else {
+			lastErr = err
+		}
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no reachable route")
+	}
+	// Docker Desktop's engine runs in its own VM whose containers cannot
+	// reach this distro — spawn (or reuse) the in-engine proxy relay and
+	// route through the engine's bridge gateway instead. Every declined or
+	// failed attempt is audited so "why no relay?" is always answerable.
+	if sb.Kind == sandbox.KindContainer {
+		switch {
+		case env.RelayDisabled():
+			audit.Record("relay.skip", sb.Name, "disabled (SBXD_RELAY_DISABLE=1)")
+		case !engine.IsDockerDesktop():
+			audit.Record("relay.skip", sb.Name, "engine not detected as Docker Desktop — no in-engine relay")
+		default:
+			if gw, e := engine.EnsureRelay(proxyPort); e != nil {
+				audit.Record("relay.skip", sb.Name, "EnsureRelay: "+e.Error())
+			} else if pr := ProbeReach(sb, gw, proxyPort); pr != nil {
+				audit.Record("relay.skip", sb.Name, "relay up but "+gw+":"+proxyPort+" unreachable from sandbox: "+pr.Error())
+			} else {
+				return fmt.Sprintf("http://%s:%s/v1", gw, proxyPort),
+					"sbxd proxy relay (in-engine, " + gw + ")", nil
+			}
+		}
+	}
+	return "", "", fmt.Errorf("proxy unreachable from container %s (%v) — options: run the sandbox with SBX_NET=host, or a bridge-setup WSL docker (non-Docker-Desktop)", sb.Name, lastErr)
+}
+
+// remoteTeeSSH pipes payload into a pre-built ssh argument vector.
+func remoteTeeSSH(bin string, args []string, payload []byte) error {
+	out, err := engine.RunStdin(40*time.Second, payload, bin, args...)
+	if err != nil {
+		return fmt.Errorf("%v: %s", err, strings.TrimSpace(out))
+	}
+	return nil
+}
