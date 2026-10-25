@@ -278,7 +278,18 @@ func runKitVMTO(backend string, args []string, to time.Duration, extraEnv ...str
 	return err
 }
 
-// VMCreate provisions and boots a new VM through the kit's own pipeline
+func kitVMCreateArgs(name string, cpu, memMB, diskGB int, share string) []string {
+	args := []string{"create", name,
+		"--cpu", strconv.Itoa(cpu),
+		"--mem", strconv.Itoa(memMB),
+		"--disk", strconv.Itoa(diskGB)}
+	if s := strings.TrimSpace(share); s != "" {
+		args = append(args, "--share", s)
+	}
+	return args
+}
+
+// VMCreate provisions and boots a new VM through the kit's full pipeline
 // (`sbxvm.sh create NAME --cpu N --mem MB --disk GB [--share DIR]`).
 // Blocking by design: the kit handles image seeding, provisioning and boot
 // end-to-end. share "" = VM-local /workspace only (kit default).
@@ -287,14 +298,8 @@ func runKitVMTO(backend string, args []string, to time.Duration, extraEnv ...str
 // Logs tab tails that capture (docker-backed VMs capture by design inside
 // the sbxvmd image; this flag covers the libvirt backend).
 func VMCreate(name, backend string, cpu, memMB, diskGB int, share string) error {
-	args := []string{"create", name,
-		"--cpu", strconv.Itoa(cpu),
-		"--mem", strconv.Itoa(memMB),
-		"--disk", strconv.Itoa(diskGB)}
-	if s := strings.TrimSpace(share); s != "" {
-		args = append(args, "--share", s)
-	}
-	if err := runKitVMTO(backend, args, 15*time.Minute, "SBXVM_SERIAL_FILE=1"); err != nil {
+	if err := runKitVMTO(backend, kitVMCreateArgs(name, cpu, memMB, diskGB, share),
+		15*time.Minute, "SBXVM_SERIAL_FILE=1"); err != nil {
 		return err
 	}
 	shareTxt := strings.TrimSpace(share)
@@ -303,4 +308,39 @@ func VMCreate(name, backend string, cpu, memMB, diskGB int, share string) error 
 	}
 	audit.Record("sandbox.spawn", name, fmt.Sprintf("VM created (%s backend, cpu=%d mem=%dMB disk=%dGB share=%s)", backend, cpu, memMB, diskGB, shareTxt))
 	return nil
+}
+
+// VMCreateSpawn provisions a new VM but answers as soon as the machine is
+// spawned — kit env SBXVM_SPAWN_ONLY=1 tells `sbxvm.sh create` to stop
+// after rebuild/seed/spawn and skip the ssh wait, provisioning wait,
+// opencode staging and proxy sync. Used by the dashboard's create route:
+// the create API call must not idle the creation page until the machine
+// finished booting; the remaining boot continues in a background
+// goroutine via VMPostBoot. Same serial-capture flag as VMCreate.
+func VMCreateSpawn(name, backend string, cpu, memMB, diskGB int, share string) error {
+	if err := runKitVMTO(backend, kitVMCreateArgs(name, cpu, memMB, diskGB, share),
+		10*time.Minute, "SBXVM_SPAWN_ONLY=1", "SBXVM_SERIAL_FILE=1"); err != nil {
+		return err
+	}
+	shareTxt := strings.TrimSpace(share)
+	if shareTxt == "" {
+		shareTxt = "(vm-local /workspace)"
+	}
+	audit.Record("sandbox.spawn", name, fmt.Sprintf("VM spawned (%s backend, cpu=%d mem=%dMB disk=%dGB share=%s) — boot continues in background", backend, cpu, memMB, diskGB, shareTxt))
+	return nil
+}
+
+// VMPostBoot drives the second half of a daemon-spawned VM create: the
+// kit's `postboot` verb waits for ssh + cloud-init provisioning (worst
+// case ≈30 min across wait_ssh's cap, wait_ready's cap and the kernel-
+// reboot re-wait), stages opencode into the guest from the host (no guest
+// egress needed) and asks
+// the local controller to sync the proxy (mint key + write the guest's
+// opencode.json + establish the ssh -R tunnel) before posting the boot-end
+// callback. Runs in a background goroutine; the generous timeout must
+// cover a slow first boot (image pull, cloud-init apt) without cutting
+// it off.
+func VMPostBoot(name, backend string) error {
+	return runKitVMTO(backend, []string{"postboot", name}, 35*time.Minute,
+		"SBXVM_SERIAL_FILE=1")
 }

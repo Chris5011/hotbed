@@ -1048,7 +1048,7 @@ func (s *Server) createVM(w http.ResponseWriter, in createReq) {
 			return
 		}
 	}
-	if err := engine.VMCreate(name, backend, cpu, mem, disk, share); err != nil {
+	if err := engine.VMCreateSpawn(name, backend, cpu, mem, disk, share); err != nil {
 		httpError(w, 500, "VM create failed: "+err.Error())
 		return
 	}
@@ -1069,8 +1069,26 @@ func (s *Server) createVM(w http.ResponseWriter, in createReq) {
 		"disk":    disk,
 		"warn":    warn,
 		"attach":  "sbxd attach " + name,
-		"sync":    "sync after boot: the sync button on the Burn overview (or POST /api/sandboxes/vm/" + name + "/sync)",
+		"booting": true,
+		"sync":    "models wire up automatically once the guest finishes booting (manual fallback: the Burn overview sync button or POST /api/sandboxes/vm/" + name + "/sync)",
 	})
+	// Post-boot continues in the background: the kit's `postboot` verb
+	// waits for ssh + cloud-init, stages opencode (host-side, no guest
+	// egress) and self-syncs the proxy via its begin/end callbacks — the
+	// end callback triggers restoreVMBootSync, which now also wires an
+	// unsynced VM's models. The belt-check below covers a kit-side
+	// controller miss: if postboot completed, the boot marker is cleared
+	// and the sync hook runs even when the kit's own end POST never
+	// landed. The handler does NOT block on any of this: a create must
+	// return at spawn time, not when the machine finished booting.
+	go func() {
+		if err := engine.VMPostBoot(name, backend); err != nil {
+			audit.Record("vm.boot", name, "post-boot failed: "+err.Error())
+			return
+		}
+		sandbox.NoteBootEnd(name)
+		go s.restoreVMBootSync(name)
+	}()
 }
 
 // vmBootRoute is the kit's self-registration callback: sbxvm.sh curls
@@ -1129,18 +1147,52 @@ func (s *Server) vmBootRoute(w http.ResponseWriter, r *http.Request) {
 	okJSON(w, map[string]any{"ok": true, "name": in.Name, "phase": in.Phase})
 }
 
-// restoreVMBootSync mirrors cli.ensureTunnelsLoop's revive step for exactly
-// one sandbox: re-establish the per-sandbox ssh -R tunnel only for synced
-// sandboxes whose proxy target is tunnel-based, and only while the sandbox
-// is actually running. Runs on the boot-end callback so a freshly booted
-// guest regains the proxy immediately instead of waiting for the 15s loop.
+// restoreVMBootSync runs on the boot-end callback for exactly one sandbox:
+//
+//  1. Auto-wire: a VM that reaches boot-end WITHOUT a sync target has never
+//     been synced (dashboard-created VMs before v0.2.11 got no sync at all;
+//     the kit's own self-sync for CLI creates may have failed or found no
+//     controller). One controller-side sync attempt is made — the same work
+//     the dashboard sync button does: mint key + write the guest's
+//     opencode.json + establish the ssh -R tunnel. Idempotent by design:
+//     a CLI-create's own sync POST lands BEFORE its boot-end, so the target
+//     already exists here and the attempt is skipped — no double mint.
+//  2. Revive (pre-existing behavior, any kind): re-establish the
+//     per-sandbox ssh -R tunnel only for synced sandboxes whose proxy
+//     target is tunnel-based, and only while the sandbox is actually
+//     running — so a freshly booted guest regains the proxy immediately
+//     instead of waiting for the 15s ensureTunnelsLoop.
+//
+// Runs in a goroutine; occupies itself at worst ~25s when the inventory
+// cache (5s refresh) has not yet caught up with a just-spawned VM.
 func (s *Server) restoreVMBootSync(name string) {
 	if s.Cfg == nil || s.Collector == nil {
 		return
 	}
+	if sb, found := s.Collector.Find("", name); found && sb.Kind == sandbox.KindVM {
+		if _, ok := cfgsync.Lookup(name); !ok {
+			// Unsynced VM at boot-end: try the controller-side sync once.
+			// The collector cache refreshes every 5s; give it a couple of
+			// ticks if the VM was spawned seconds ago.
+			for i := 0; !found && i < 5; i++ {
+				time.Sleep(5 * time.Second)
+				sb, found = s.Collector.Find("", name)
+			}
+			if found {
+				if _, _, err := s.syncSandbox(sb, ""); err == nil {
+					audit.Record("sandbox.sync", name, "models wired automatically at boot-end (VM had no sync target)")
+				} else {
+					audit.Record("sandbox.sync", name, "boot-end auto-sync failed: "+err.Error())
+				}
+			}
+		}
+	}
 	tg, ok := cfgsync.Lookup(name)
-	if !ok || !strings.Contains(tg.BaseURL, "127.0.0.1:"+s.Cfg.Proxy.Port) {
-		return // not a tunnel-based target (direct/container syncs need nothing at boot)
+	if !ok {
+		return // still no target (auto-sync failed or absent, or not a VM) — nothing to revive
+	}
+	if !strings.Contains(tg.BaseURL, "127.0.0.1:"+s.Cfg.Proxy.Port) {
+		return // not tunnel-based (direct/URL targets need nothing at boot)
 	}
 	if attach.TunnelAlive(name) {
 		return
