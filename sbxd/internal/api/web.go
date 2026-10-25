@@ -373,10 +373,22 @@ function toast(msg, kind){
   return t;
 }
 function copy(text){
-  if(navigator.clipboard && navigator.clipboard.writeText){
+  if(navigator.clipboard && window.isSecureContext){
     navigator.clipboard.writeText(text).then(function(){ toast('Copied to clipboard','ok'); },
-      function(){ toast('Clipboard blocked — see Connection tab','err'); });
-  }else{ toast('Clipboard unavailable','err'); }
+      function(){ legacyCopy(text); });
+  }else{ legacyCopy(text); }
+}
+// browsers only grant navigator.clipboard on secure contexts (https, or
+// localhost) — over plain http on a LAN box, execCommand('copy') still works;
+// when even that fails the toast names the actual cure (SBXD_TLS / https).
+function legacyCopy(text){
+  var ta=document.createElement('textarea'); ta.value=text;
+  ta.style.position='fixed'; ta.style.opacity='0';
+  document.body.appendChild(ta); ta.focus(); ta.select();
+  var okc=false; try{ okc=document.execCommand('copy'); }catch(e){}
+  document.body.removeChild(ta);
+  if(okc){ toast('Copied to clipboard','ok'); }
+  else{ toast('Clipboard needs a secure context — open via https:// (SBXD_TLS=1) or localhost','err'); }
 }
 
 /* ---------- list rendering ---------- */
