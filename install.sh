@@ -97,7 +97,17 @@ done
 if (( ${#virtmiss[@]} )); then
     say "VM · libvirt backend needs: ${virtmiss[*]} (skip → docker-backend VMs still work: apt install libvirt-daemon-system libvirt-clients virtinst xorriso)"
 else
-    say "libvirt stack present — both VM backends available"
+    if virsh -c qemu:///system uri >/dev/null 2>&1; then
+        say "libvirt stack present — both VM backends available"
+    else
+        say "libvirt tools found, but the SYSTEM DAEMON is not running/reachable — the"
+        say "  VM · libvirt backend will fail until this is settled (docker backend won't):"
+        say "    sudo apt install -y libvirt-daemon-system libvirt-daemon-config-network"
+        say "    sudo usermod -aG libvirt \"\$USER\"   # re-login for the group change"
+        say "    sudo systemctl enable --now libvirtd            # classic distros"
+        say "      # or, on modular distros (Debian 12+, Ubuntu 24.04+):"
+        say "    sudo systemctl enable --now virtqemud.socket virtnetworkd.socket"
+    fi
 fi
 
 # ---- cloud master image (the only big artifact; fetched, never shipped) --------
