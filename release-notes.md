@@ -1,51 +1,46 @@
-# SBX Desktop v0.2.1
+# SBX Desktop v0.2.2
 
-First tagged release of the **OpenCode-SBX** kit + **sbxd** daemon: three sandbox
-vessels (kit containers `sbx`, libvirt VMs `sbxvm-*`, docker-backend VMs
-`sbxvmd-*`) behind one CLI and one embedded, loopback-only dashboard.
+The remote-deployment & install-hardening release of the **OpenCode-SBX** kit
++ **sbxd** daemon. Built from the first live remote deployment of the whole
+tree (headless Ubuntu box, release asset + `install.sh`).
 
-## What ships
+## What's new
 
-- `sbxd-v0.2.1-linux-amd64` / `sbxd-v0.2.1-linux-arm64` — daemon + CLI + dashboard
-  in one static binary (verify: `SHA256SUMS`; stamp: `sbxd version`)
-- source tree (~1 MB): kit (`bin/sbx`, `vm/sbxvm.sh`, Dockerfiles), Go daemon,
-  hermetic smoke suite, agent-grade release playbook (`docs/RELEASING.md`),
-  `install.sh` one-liner
+- **`SBXD_BIND` / `sbxd serve --bind`** — the dashboard/API listens on
+  `127.0.0.1` by default as before; remote boxes can now opt into network
+  reachability explicitly (`SBXD_BIND=0.0.0.0 sbxd-serve`). Non-loopback
+  binds print a loud unauthenticated-warning: the CSRF origin guard protects
+  browsers only, your firewall position is the gate for everything else
+  (same trust model as the token-gated proxy listener).
+- **`install.sh` adopts release assets** — drop a downloaded
+  `sbxd-v…-linux-<arch>` binary into `dist/` (or the kit root) and the
+  installer wires it up itself (`adopted release binary: … → sbxd/bin/sbxd`);
+  no Go toolchain needed. Honest failure when neither binary nor Go exists.
+- **Honest libvirt gating** — the installer previously said "libvirt stack
+  present" whenever `virsh` et al existed, even though the system daemon
+  (`libvirt-daemon-system`) was missing; VM ops failed much later at
+  `fetch-image`. It now probes `virsh -c qemu:///system uri` and prints the
+  exact remedy (apt packages, `libvirt` group + re-login, classic
+  `libvirtd` vs. modular `virtqemud.socket`+`virtnetworkd.socket`).
+- **Install guide with real fetch paths** — step-by-step install section in
+  the README: prerequisite tables, release-asset routes (`gh release
+  download`, token'd curl, direct rsync), PATH behavior spelled out, and the
+  `config init`-is-an-import note for fresh headless boxes.
 
-The heavy Debian cloud master (~1 GB unpacked) is **not** shipped — fetched once
-at runtime via `sbxvm fetch-image` / prompted by `install.sh`.
-
-## Install
+## Upgrade from v0.2.1
 
 ```bash
-git clone https://github.com/Chris5011/OpenCode-SBX && cd OpenCode-SBX
-./install.sh               # dep checks + entry points + optional image fetch
-sbxd-serve                 # dashboard/API at http://127.0.0.1:7770
+# download the new asset (or rsync from a box that has it), verify, drop into the tree:
+curl -fLO https://github.com/Chris5011/OpenCode-SBX/releases/download/v0.2.2/sbxd-v0.2.2-linux-amd64
+sha256sum -c SHA256SUMS --ignore-missing
+install -m755 sbxd-v0.2.2-linux-amd64 sbxd/bin/sbxd      # in the kit tree
+# restart the daemon (loopback unchanged unless you opt in):
+sbxd-serve
 ```
 
-Requires: bash, docker, tmux, ssh, curl, jq. VM · libvirt add-ons
-(`libvirt-daemon-system libvirt-clients virtinst xorriso`) are optional —
-the docker VM backend works without them.
+## Highlights carried from v0.2.1
 
-## Highlights since the 0.2.0 reference build
-
-- **Create wizard covers all three vessels** — container and both VM kinds with
-  sizing (vCPU/MEM/disk/share), backend auto-pick by engine reachability, kit-rule
-  validation; VM lifecycle (start/stop/delete) spans GUI + CLI.
-- **Boot self-registration** — VMs signal the controller at boot-begin and when
-  truly up; the dashboard shows an honest amber **booting** state instead of a
-  premature `running`, and proxy tunnels are re-established right after boot-end.
-- **Stopped VMs stay in the sidebar** — `virsh list --all` parser fix; shut-off
-  domains render with their own pill.
-- **Live logs that actually work** — container `docker logs` streaming, VM
-  serial capture (serial-file device wired into daemon-created VMs) plus a guest
-  `journalctl` fallback over the kit's ssh channel for hosts where libvirt runs
-  qemu privileged; correct JSON payload rendering in the logbox.
-- **Much more responsive UI** — first-load spinner (with slow-scan and reconnection
-  hints), optimistic stop/start with amber `stopping…/starting…` pending pills,
-  locked action buttons, and bigger, color-coded toasts.
-- **Burn view** — per-sandbox token/cost ledger with stale-record hiding, pins,
-  and bulk purge; budgets enforced at the proxy.
-- **Honest file/deletion semantics** — double-delete is a 404, deletion re-verifies
-  engine-level existence; loopback-only daemon with CSRF origin guard; token
-  accounting with budget ceilings; portable tmux attach flow.
+Create wizard across all three vessels, boot self-registration + `booting`
+state, shut-off-VM inventory, working live logs (serial + guest journal),
+first-load spinner, pending stop/start UX, burn view, honest deletes,
+loopback-only dashboard with CSRF guard, token accounting with budgets.
