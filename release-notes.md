@@ -1,53 +1,38 @@
-# SBX Desktop v0.2.8
+# SBX Desktop v0.2.9
 
-The hygiene + usability-fix release of **OpenCode-SBX** + **sbxd**: a fresh
-box's python/node create works again, a serial firehose can no longer crush
-the browser tab, and gate rigidity grew.
+The guest-provisioning-hardening release of **OpenCode-SBX** + **sbxd**:
+fresh sbxvms get opencode from the kit's own ssh channel — guest internet
+egress is no longer part of the install contract.
 
 ## What's new
 
-- **Fix: create-time stack builds (v0.2.7 regression)** — the provenance
-  label was passed *before* the `build` verb (`docker --label X build …`),
-  which made docker print its usage banner and fail every create-time
-  stack build on a fresh box (`sbx:python` hit exactly this). Now
-  `docker build --label … --target …`; the suite's fake-docker shim
-  asserts the invocation is docker-valid. Existing-box fix for the
-  warning path: `bin/sbx build <stack> --no-cache` re-stamps as before.
-- **Serial log hygiene** — the sbxvmd serial feed arrives as an
-  ANSI-crime firehose with multi-kB lines: it rendered *malformed* and a
-  single wide line was enough to crush the browser tab (DOM/reflow OOM).
-  Every stream source (docker serial tail, libvirt capture, guest journal
-  ssh, container logs) now passes through line hygiene before SSE
-  framing: CSI/OSC/C1 escapes stripped, CRs folded, control bytes
-  removed, blank spam collapsed, lines capped at 4000 chars
-  (`…(+n kB line truncated)`); a newline-free flood flushes capped at
-  512 KiB. The browser caps rendered node width too (8000 chars).
-  Result on the repro case: a 300 kB junk line shows as ~1 capped line
-  instead of the raw megabyte.
-- **Suite: 123 checks** — new: the fake-docker shim asserts the ensure
-  call is docker-valid (`build --label … --target`); a fake `sbxvmd-`
-  container feeding 300 kB of urandom + ANSI junk must stream sanitized
-  (no ANSI/CR bytes, wide line capped, marker intact — and the check now
-  waits for the collector's 5 s inventory refresh instead of racing it).
-- **Suite: stale-port guard** — the gate now hard-fails when the smoke
-  port is already bound: a stale suite daemon silently answering health
-  checks poisoned a whole gate run (found by a real incident here).
-- **Guest opencode** — unchanged from v0.2.7 (per-create seed + retrying
-  unit, `systemd-analyze` verified). If a *newly created* sbxvm still
-  lacks opencode, run the three-line diagnostic from the release
-  discussion; the two usual answers are a guest seeded before the update
-  (recreate the VM from the updated tree) or guest egress/DNS.
+- **opencode staging without guest egress** — the seed unit needs guest
+  GitHub egress; one box showed the failure mode that makes this unusable
+  (ICMP + DNS pass, TCP 443 blackholed — the look of a policy router or
+  VPN), and its fresh guests stayed without opencode no matter how hard
+  the seed retried. After cloud-init completes, `sbxvm create` now
+  checks the guest over the kit's own ssh channel and, when the binary
+  is missing, downloads the tarball on the host (hosts already have this
+  egress — they built the kit images from the same URL) and pushes it
+  into the guest: extract + chmod + version check. The unit keeps
+  running in each guest as belt-and-suspenders for egress-capable boxes.
+- Verified end to end on a real docker-backend guest: binary removed —
+  staged back over ssh within seconds, `opencode --version` → 1.19.4.
 
-## Upgrade from v0.2.7
+## Upgrade from v0.2.8
 
 ```bash
 cd ~/OpenCode-SBX
 scripts/update.sh --yes --tls
+# existing egress-blocked guest (create-time staging lands on NEW vms):
+#   curl -fSL …/releases/download/v1.19.4/opencode-linux-x64.tar.gz -o /tmp/oc.tgz
+#   cat /tmp/oc.tgz | sbxvm ssh <vm> -- 'cat > /tmp/opencode.tgz'
+#   sbxvm ssh <vm> -- sudo sh -c 'tar -xz -C /usr/local/bin -f /tmp/opencode.tgz opencode && chmod 0755 /usr/local/bin/opencode'
 ```
 
-## Carried from v0.2.2–v0.2.7
+## Carried from v0.2.2–v0.2.8
 
 `SBXD_BIND` remote exposure, snakeoil TLS, recipe provenance stamps +
-stale-image warns, honest container log stream (source banner + audit
-trail prefill), TLS-resilient VM boot registration, self-healing guest
-opencode, update.sh collision/bind hardening.
+stale-image warns, honest container log stream, TLS-resilient VM boot
+registration, self-healing guest opencode, create-time build-arg fix,
+serial log hygiene, update.sh collision/bind hardening.
