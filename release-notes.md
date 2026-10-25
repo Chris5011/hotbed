@@ -1,54 +1,58 @@
-# SBX Desktop v0.2.4
+# SBX Desktop v0.2.5
 
-The first-remote-week fixes-of-record for **OpenCode-SBX** + **sbxd**: the
-two live defects reported from the remote headless box — a dashboard that
-crashed exactly when you hit *create* on an empty inventory, and an
-installer that let "docker installed" stand in for "docker usable".
+The create-workflow release of **OpenCode-SBX** + **sbxd**, cut from live
+remote-box feedback: the first create on a fresh box dangled on a missing
+kit image, and guests could end up without opencode.
 
 ## What's new
 
-- **Create no longer crashes the dashboard on an empty inventory** — the
-  browser's snapshot listener assigns the SSE payload straight into
-  `state.list` and calls `forEach` on it. Older builds shipped two wrong
-  shapes on a fresh box: the initial `/api/events` event was a wrapped
-  `{"sandboxes":…}` object and every 5 s broadcast tick marshalled the
-  empty Go slice to literal `null` — so clicking *create* died with
-  `TypeError: Cannot read properties of null (reading 'forEach')`
-  (`renderList ← showGlobal` — the stack you saw). The contract is now
-  unambiguous and enforced at every layer: `Scan()` returns a non-nil
-  slice (`[]`, not null), `BroadcastSnapshot` nil-guards, the SSE
-  initial write is a bare array, and the browser normalizes
-  array / legacy-wrapped / null before rendering, as defense in depth.
-  Wire proof on an empty inventory: `data: []` and
-  `{"sandboxes":[],…}`.
-- **install.sh: docker is now probed for USABILITY, not presence** —
-  following-the-docs boxes previously passed the dependency gate while
-  the dashboard honestly reported "down". The installer runs a bounded
-  `docker info` and prints the exact remedy per failure shape:
-  permission denied on the socket (→ `sudo usermod -aG docker "$USER"`
-  + re-login), engine down (→ `sudo systemctl enable --now docker`),
-  or an unclassified failure (→ `systemctl status docker`). Because
-  root passes the socket probe trivially, running the installer under
-  `sudo` additionally checks the *real* daemon user's group membership.
-- **Suite: two wire-contract checks** — the first `/api/events` snapshot
-  must be a bare array and an empty-engine `/api/sandboxes` payload must
-  be `"sandboxes":[]`. Gate grew to **112 passed / 0 failed**.
+- **Create-time image ensure** — `sbx:<stack>` is a kit-built image with
+  no registry upstream; the dashboard's first create on a fresh box used
+  to die with `pull access denied for sbx`. The daemon now inspects and,
+  when absent, builds the stack image through the shared
+  `containers/Dockerfile` (same flags as `bin/sbx build <stack>`, 20 min
+  cap, one-time — layers are cached afterwards), with an
+  `image.build` audit row and an honest remedy hint if the kit build
+  files aren't reachable.
+- **Tiny build contexts** — the kit Dockerfiles build with the repo root
+  as context but COPY only `containers/entrypoint.sh` /
+  `vm/sbxvmd/entry`; a root `.dockerignore` now keeps `vm/images/`
+  (~1 GB!) and everything else out: context transfers measured
+  651 B / 2.5 kB with all layers CACHED.
+- **Install builds `sbx:base`** — the default dashboard stack image is
+  pre-built inside the docker-reachable install branches
+  (non-fatal on failure; on-demand ensure covers the rest).
+- **Landing page after create** — success no longer parks the user on
+  the form: the dashboard jumps straight to the new machine's overview,
+  polling while the collector surfaces it (≤ ~5 s), honest fallback to
+  the list. The create button meanwhile explains the one-time image
+  build that may hold the first request.
+- **VM guests self-heal opencode** — the guest's opencode install was a
+  one-shot cloud-init `runcmd`; a transient first-boot network miss
+  left VMs without the binary forever (caught live on `sbxvm-test`). It
+  is now a guarded systemd unit (`sbx-opencode-install.service`,
+  network-online-aware, one-shot per BOOT — retries every boot until
+  the binary is present).
+- **Suite +2** — fake-docker create checks: a missing stack image must
+  auto-build through the daemon and the build must precede the
+  container create (order asserted on a recorded shim call log). Gate:
+  **114 passed / 0 failed**.
 
-## Upgrade from v0.2.3
+## Upgrade from v0.2.4
 
 ```bash
-curl -fLO https://github.com/Chris5011/OpenCode-SBX/releases/download/v0.2.4/sbxd-v0.2.4-linux-amd64
+curl -fLO https://github.com/Chris5011/OpenCode-SBX/releases/download/v0.2.5/sbxd-v0.2.5-linux-amd64
 sha256sum -c SHA256SUMS --ignore-missing
-install -m755 sbxd-v0.2.4-linux-amd64 ~/OpenCode-SBX/sbxd/bin/sbxd
-# re-run the installer once to get the new docker usability probe:
-cd ~/OpenCode-SBX && ./install.sh --yes
-# restart the daemon by exact PID (keep your bind choice):
+install -m755 sbxd-v0.2.5-linux-amd64 ~/OpenCode-SBX/sbxd/bin/sbxd
+# one-off guest fix if a VM already lacks the binary (future VMs self-heal):
+~/OpenCode-SBX/bin/sbxvm ssh <name> \
+  'curl -fsSL https://github.com/sst/opencode/releases/download/v1.19.4/opencode-linux-x64.tar.gz | tar -xz -C /usr/local/bin opencode && chmod 0755 /usr/local/bin/opencode'
 kill $(ss -ltnp 2>/dev/null | grep :7770 | grep -o 'pid=[0-9]*' | cut -d= -f2 | head -1)
 SBXD_BIND=0.0.0.0 sbxd-serve
 ```
 
-## Carried from v0.2.2 / v0.2.3
+## Carried from v0.2.2–v0.2.4
 
-`SBXD_BIND`/`--bind` remote exposure with a loud warning, bounded wedged-engine
-scan gating (4 s probe + wall-honest caps), installer release-asset adoption,
-honest libvirt gating, step-by-step install guide.
+`SBXD_BIND` remote exposure, bounded wedged-engine scan gating, bare-array
+snapshot contract (empty-inventory crash), installer docker-usability +
+libvirt probes, release-asset adoption, honest install guide.
