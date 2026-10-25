@@ -19,7 +19,7 @@ machine.
         │                                                             │
         │  containers/  image definitions (1 Dockerfile, 5 stacks)    │
         │  vm/          master image, per-VM disks, seeds             │
-        │  tests/       22-check container suite + 16-check VM suite  │
+        │  tests/       container · VM · SBX Desktop test suites      │
         └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -81,21 +81,19 @@ waiting to happen. This kit gives every project a throwaway environment:
 
 ## Requirements
 
-### Host we've verified this on
+### Hosts
 
-- Windows box running **WSL2**, distro: Kali (everything is WSL2-kernel
-  specific below on purpose — that's the environment where the tricky bugs
-  live and were solved).
-- CPU with nested virtualization available to WSL (`nested=Y` under
+- Any Linux host works; on Windows run the kit inside **WSL2** — the notes
+  below that mention Docker Desktop apply to any WSL2 distro.
+- CPU with nested virtualization (`nested=Y` under
   `/sys/module/kvm_intel/parameters/nested`), `/dev/kvm` writable.
-- 20-core / ≥ 23 GB RAM allocated to WSL is plenty for host + Docker Desktop
-  (8 GB) + one VM (2–4 GB).
+- RAM budget: ≥ 8 GB for the docker engine plus 2–4 GB per running VM.
 
 ### Container side (sbx)
 
-- **Docker Desktop installed on Windows** with
-  *Settings → Resources → WSL Integration → kali-linux* enabled (so that this
-  distro's paths are bind-mountable into containers).
+- **A running docker engine.** Docker Desktop on Windows/WSL2: enable
+  *Settings → Resources → WSL Integration* for your distro (so its paths are
+  bind-mountable into containers).
 - Engine memory ≥ 8 GB (`Settings → Resources → MemoryMiB`) for comfy builds.
 - The `docker` CLI shim that ships with Desktop (`/usr/bin/docker`) must stay
   first in `$PATH` — it matches the engine version. Don't shadow it with a
@@ -107,7 +105,7 @@ waiting to happen. This kit gives every project a throwaway environment:
 
 ### VM side (sbxvm)
 
-Packages (Debian/Kali names):
+Packages (Debian-family names):
 
 ```bash
 sudo apt install -y libvirt-clients virtinst qemu-system-x86 qemu-utils \
@@ -116,8 +114,7 @@ sudo apt install -y libvirt-clients virtinst qemu-system-x86 qemu-utils \
 # debugfs (used by the image patcher) in e2fsprogs
 ```
 
-Two one-time systemd/libvirt settings (**already applied on this machine** —
-they are listed here to reproduce the setup on a new box):
+Two one-time systemd/libvirt settings (once per host):
 
 ```bash
 # 1. keep libvirtd resident (needed because spawns go through the unix socket)
@@ -193,17 +190,17 @@ compile, run servers — none of it lands on the host.
 
 ### Stacks
 
-| stack   | image      | extra tooling                                        | last measured build |
-|---------|------------|------------------------------------------------------|---------------------|
-| `node`  | `sbx:node` | Node 22 LTS + npm + corepack                         | Node 22.23.4        |
-| `python`| `sbx:python`| python3-dev, pipx, uv                               | 3.13.5 + uv 0.13.5  |
-| `go`    | `sbx:go`   | latest stable Go + module cache volume               | Go 1.27.3           |
-| `rust`  | `sbx:rust` | rustup stable, minimal profile                       | Rust 1.99.1         |
-| `base`  | `sbx:base` | fallback: git, build tools, python3                  | —                   |
+| stack    | image        | tooling you get                                 |
+|----------|--------------|-------------------------------------------------|
+| `node`   | `sbx:node`   | Node 22 LTS + npm + corepack                    |
+| `python` | `sbx:python` | python3-dev, pipx, uv                           |
+| `go`     | `sbx:go`     | latest stable Go + module cache volume          |
+| `rust`   | `sbx:rust`   | rustup stable, minimal profile                  |
+| `base`   | `sbx:base`   | fallback: git, build tools, python3             |
 
 All stacks also get: git, curl/wget, jq, ripgrep, openssh-client, build
 toolchain (gcc/make/pkg-config), python3+pip, sudo (passwordless *inside*
-only), and a baked opencode fallback binary (official v1.19.4 release).
+only), and a baked opencode fallback binary (an official release).
 
 Auto detection (`sbx stack` to print; override with `--stack NAME`):
 
@@ -278,7 +275,7 @@ tail-to-back by cloud-init. The same CLI also runs a second backend with
   (`~/.ssh/sbxvm_key`), **passwordless sudo**, docker group membership.
 - Preinstalled via cloud-init: `docker.io`, `build-essential`, git, jq,
   ripgrep, pipx/venv, openssh-server and the official opencode release
-  (v1.19.4) at `/usr/local/bin/opencode`.
+  at `/usr/local/bin/opencode`.
 - Your chosen host directory shared at `/workspace` via virtio 9p — files the
   VM writes appear host-owned (`you`:`libvirt-qemu` mapping), and vice versa.
 - A full private distro: it has network (NAT), its own kernel (full
@@ -567,10 +564,10 @@ re-reads config on every request).
 
 #### Reachability: the in-engine proxy relay (Docker Desktop)
 
-On the verified setup the engine is **Docker Desktop** — its containers run
-in a separate utility VM whose sandboxes *cannot* reach the WSL distro's
-proxy listener on any route (distro IP, bridge gateway or
-`host.docker.internal`). sbxd fixes this instead of failing loudly:
+On Docker Desktop engines the containers run in a separate utility VM whose
+sandboxes *cannot* reach the WSL distro's proxy listener on any route
+(distro IP, bridge gateway or `host.docker.internal`); sbxd fixes this
+instead of failing loudly:
 
 - the **first container sync** spawns `sbx-proxy-relay`, a `--network host`
   container running this same binary in a dedicated **`sbxd proxy`**
@@ -858,7 +855,7 @@ loopback-only dashboard, traversal outside home is rejected).
 - **9p share**: `--filesystem type=mount,…,target=hostshare` +
   accessmode `mapped`. Guest side mounts it with a systemd `.mount` unit
   (`options=trans=virtio,version=9p2000.L`; requested `msize=104857600`
-  negotiates down to ~512 KiB — normal virtio behavior, ~140 MB/s this box).
+  negotiates down to ~512 KiB — normal virtio behavior).
   Host-side ownership lands as `you:libvirt-qemu` because qemu runs as you.
 
 ---
@@ -908,7 +905,7 @@ grep -ac 'Booting' serial.log        # counts reset loops
 **"ssh did not come up"**: check `sbxvm ls` for the lease IP, and the serial
 for cloud-init progress. First-boot provisioning needs ~60–90 s at fastest.
 
-**tmpfs trap:** `/tmp` in WSL2 is a ~12 GB *RAM-backed* tmpfs. Multi-GB
+**tmpfs trap:** `/tmp` in WSL2 setups is a *RAM-backed* tmpfs. Multi-GB
 qcow2/raw conversions go to `vm/.work` (disk-backed), never `/tmp`.
 
 **Docker Desktop on Windows**: engine down → "docker engine unreachable";
@@ -926,11 +923,16 @@ The seed's `/etc/docker/daemon.json` `bip` fix exists for exactly this — see
 ## Tests
 
 ```bash
-tests/smoke.sh      # containers — 22 checks, ~1 min
-tests/vmsmoke.sh    # VMs (libvirt backend) — 16 checks, ~6 min (boots a real VM)
-tests/vmdsmoke.sh   # VMs (docker backend) — 17 checks, ~8 min (boots a VM in a container)
-tests/sbxddsmoke.sh # sbxd daemon — 42 checks, ~1 min (P1 non-mutating + P2 hermetic)
+tests/smoke.sh      # container sandboxes — stacks, mounts, fresh runs, rm/prune
+tests/vmsmoke.sh    # VMs (libvirt backend) — boots a real throwaway VM
+tests/vmdsmoke.sh   # VMs (docker backend) — boots a VM inside a container
+tests/sbxddsmoke.sh # SBX Desktop suite — the comprehensive gate (see below)
 ```
+
+Every suite prints its own tally (`== result: N passed, 0 failed ==`); the
+gate is **0 failed**. The daemon suite runs hermetic scratch daemons on
+scratch ports but needs ≥ 1 running sandbox visible to the inventory for its
+P1 section — the invocation dance is documented in `docs/RELEASING.md` §4.
 
 `smoke.sh`: doctor sane, all four stack autodetections (`package.json` → node,
 `pyproject.toml` → python, `go.mod` → go, `Cargo.toml` → rust, empty → base),
@@ -978,10 +980,10 @@ bin/sbx                    container sandbox CLI (the daily driver)
 bin/sbxvm → vm/sbxvm.sh    VM CLI (symlinked by install-self)
 containers/Dockerfile      5 stack images from one shared base layer
 containers/entrypoint.sh   runtime uid/sudo/ownership bootstrap
-tests/smoke.sh             22-check container suite
-tests/vmsmoke.sh           16-check VM suite (libvirt; boots a real throwaway VM)
-tests/vmdsmoke.sh          17-check VM suite (docker backend; VM = container)
-tests/sbxddsmoke.sh        42-check sbxd suite (scratch ports; P1 + hermetic P2)
+tests/smoke.sh             container suite (all stacks; no VMs needed)
+tests/vmsmoke.sh           VM suite (libvirt; boots a real throwaway VM)
+tests/vmdsmoke.sh          VM suite (docker backend; VM = container)
+tests/sbxddsmoke.sh        SBX Desktop suite — comprehensive gate (P1+P2+P3)
 sbxd/                      SBX Desktop: Go daemon + dashboard + docker-style CLI
 SECURITY.md                full security survey: fixed findings + accepted risks
   cmd/sbxd/                entrypoint (main.go)
