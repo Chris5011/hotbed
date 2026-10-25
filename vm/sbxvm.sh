@@ -319,15 +319,30 @@ write_files:
       Options=trans=virtio,version=9p2000.L,msize=104857600
       [Install]
       WantedBy=multi-user.target
+  - path: /etc/systemd/system/sbx-opencode-install.service
+    permissions: '0644'
+    content: |
+      # runs at every boot until the binary is in place: the FIRST-boot cloud-init
+      # download is a one-shot and a transient network miss at that window used
+      # to leave guests without opencode permanently. Retry-friendly unit.
+      [Unit]
+      Description=sbxvm: ensure the opencode binary is installed
+      Wants=network-online.target
+      After=network-online.target
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/bin/sh -c 'test -x /usr/local/bin/opencode || { curl -fsSL ${OCCODE_URL} | tar -xz -C /usr/local/bin opencode && chmod 0755 /usr/local/bin/opencode; }'
+      [Install]
+      WantedBy=multi-user.target
 # NOTE: no cloud-init "mounts" module — it writes fstab and fails the whole
 # first boot while the (pre-installed) kernel lacks 9p. The .mount unit above
 # activates on any boot (with the full kernel installed by packages:).
 runcmd:
   - mkdir -p /workspace /home/dev/go
-  - curl -fsSL ${OCCODE_URL} | tar -xz -C /usr/local/bin opencode
-  - chmod 0755 /usr/local/bin/opencode
   - usermod -aG docker dev
   - systemctl enable docker$([[ -n "${2:-}" ]] && printf ' workspace.mount')
+  - systemctl enable sbx-opencode-install.service
   # make the full kernel the (only) GRUB default: both flavors may share the
   # same version — grub would keep the cloud one otherwise
   - [ "sh", "-c", 'PKGS=\$(dpkg -l | awk ''/linux-image-[0-9].*cloud-amd64 / {print \$2}''); [ -n "\$PKGS" ] && DEBIAN_FRONTEND=noninteractive apt-get purge -y \$PKGS' ]
