@@ -15,6 +15,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SBXD="$ROOT/sbxd/bin/sbxd"
 PORT="${SBXD_SMOKE_PORT:-7790}"
 export SBXD_PORT="$PORT"
+if ss -ltn 2>/dev/null | grep -q ":$PORT "; then
+    echo "FATAL: port $PORT already bound before the suite started (a stale sbxd daemon?) — kill the exact pid from ss first" >&2
+    exit 1
+fi
 PASS=0; FAIL=0
 DAEMON_PID=""
 
@@ -165,6 +169,10 @@ ord="$(awk '/--target base/{b=NR} /create --name sbx-imgtest/{c=NR} END{ if(b&&c
 [[ "$ord" == "ok" ]] \
     && pass "image build happened before the container create" \
     || fail "image build happened before the container create (order=${ord:-empty})"
+bline="$(grep -m1 -- '--target base' "$FD2/order" 2>/dev/null)"
+grep -aqE '^build --label dev\.sbx\.recipe=[0-9a-f]* --target' <<<"$bline" \
+    && pass "ensure build args are docker-valid (label after the build verb)" \
+    || fail "ensure build args are docker-valid (line: ${bline:0:90})"
 kill "$IDPID" 2>/dev/null
 wait "$IDPID" 2>/dev/null
 
@@ -847,6 +855,43 @@ PYJ
     fi
 else
     pass "sweeper: e2e skipped (no docker engine)"
+fi
+
+hdr "log hygiene (fake sbxvmd serial firehose)"
+if docker image inspect busybox >/dev/null 2>&1 && docker ps >/dev/null 2>&1; then
+    HN="hyg$((RANDOM % 9000 + 1000))"
+    scratch="$(mktemp -d /tmp/opencode/sbxddsmoke.XXXXXX)"
+    docker rm -f "sbxvmd-$HN" >/dev/null 2>&1 || true
+    docker run -d --name "sbxvmd-$HN" busybox sh -c \
+        "mkdir -p /store/vms/$HN; { printf '\033]0;t\007\033[31mRED\033[0m\015\012'; head -c 300000 /dev/urandom | tr -d '\012'; printf '\015\012'; echo tail-marker-line; sleep 600; } > /store/vms/$HN/serial.log" >/dev/null
+    # collector refreshes its snapshot every 5s — wait for the fake VM to be
+    # inventoried, exactly like the sync round-trip below does for containers
+    for _ in $(seq 1 15); do
+        curl -s --max-time 2 "http://127.0.0.1:$PORT/api/sandboxes" | grep -q '"name":"'"$HN"'"' && break
+        sleep 1
+    done
+    hyg_streamed=0
+    for _ in 1 2 3; do
+        curl -sN --max-time 6 "http://127.0.0.1:$PORT/api/sandboxes/vm/$HN/logs" >"$scratch/hyg" 2>/dev/null
+        grep -aq 'tail-marker-line' "$scratch/hyg" && { hyg_streamed=1; break; }
+        sleep 1
+    done
+    if [[ "$hyg_streamed" -eq 1 ]]; then
+        esc=0; cr=0
+        grep -aq $'\033' "$scratch/hyg" && esc=1
+        grep -aq $'\r' "$scratch/hyg" && cr=1
+        if grep -aq 'line truncated' "$scratch/hyg" && [[ "$esc" -eq 0 && "$cr" -eq 0 ]]; then
+            pass "serial firehose sanitized: ANSI/CR stripped, 300 kB line capped, marker intact"
+        else
+            cp "$scratch/hyg" /tmp/opencode/sbxddsmoke.hyg-fail.txt 2>/dev/null || true
+            fail "serial firehose sanitized (esc=$esc cr=$cr)"
+        fi
+    else
+        cp "$scratch/hyg" /tmp/opencode/sbxddsmoke.hyg-fail.txt 2>/dev/null || true
+        fail "fake sbxvmd serial streamed (inventory/resolve)"
+    fi
+    docker rm -f "sbxvmd-$HN" >/dev/null 2>&1 || true
+    rm -rf "$scratch" 2>/dev/null || true
 fi
 
 printf '\n\e[1m== result: %d passed, %d failed ==\e[0m\n' "$PASS" "$FAIL"
