@@ -535,11 +535,35 @@ dcreate() {
         || die "docker run failed for sbxvmd-$name (details: docker logs sbxvmd-$name)"
 
     SECONDS=0
+    if [[ "${SBXVM_SPAWN_ONLY:-0}" == "1" ]]; then
+        # daemon-driven create: provisioning ends here; the post-boot
+        # (ssh wait + opencode stage + sync) runs via `sbxvm postboot`
+        # from the daemon's background goroutine — the create API must not
+        # idle on the creation page until the machine is booted.
+        return 0
+    fi
     wait_ssh "$name" 900
     wait_ready "$name"
     ensure_guest_opencode "$name"
     sync_guest_models "$name"
     notify_controller end "$name"   # guest confirmed up → controller drops the "booting" state
+}
+
+# postboot NAME: the second half of a daemon-spawned create (the kit's own
+# `create` runs everything when SBXVM_SPAWN_ONLY is unset). Blocks until the
+# guest is confirmed up, stages opencode without guest egress, wires the
+# proxy sync, then fires the controller's boot-end.
+postboot() {
+    require_cmds
+    local name="$1"
+    [[ -n "$name" ]] || die "usage: sbxvm postboot NAME"
+    require_vm "$name"
+    notify_controller begin "$name"   # daemon re-drive may start ahead of the spawn signal
+    wait_ssh "$name" 900
+    wait_ready "$name"
+    ensure_guest_opencode "$name"
+    sync_guest_models "$name"
+    notify_controller end "$name"
 }
 
 create() {
@@ -640,6 +664,13 @@ create() {
 
     "${VIRT_INSTALL[@]}" "${args[@]}"
     SECONDS=0
+    if [[ "${SBXVM_SPAWN_ONLY:-0}" == "1" ]]; then
+        # daemon-driven create: provisioning ends here; the post-boot
+        # (ssh wait + opencode stage + sync) runs via `sbxvm postboot`
+        # from the daemon's background goroutine — same split as the
+        # docker arm above.
+        return 0
+    fi
     wait_ssh "$name" 900
     wait_ready "$name"
     ensure_guest_opencode "$name"
@@ -926,6 +957,7 @@ USAGE: sbxvm COMMAND ...
 
   fetch-image                 download the Debian cloud master image (once)
   create NAME [opts]          create + boot a VM (––cpu N ––mem MB ––disk GB ––share DIR)
+  postboot NAME               finish a daemon-spawned create (wait ssh + stage opencode + sync)
   ssh NAME [-] command        ssh as dev@ (interactive shell if no command)
   shell NAME                  alias of ssh NAME
   opencode NAME [--] [args]   run opencode TUI inside the VM (cwd /workspace)
@@ -957,6 +989,7 @@ SUBCMD="${1:-help}"; shift || true
 case "$SUBCMD" in
     fetch-image) require_cmds; fetch_image ;;
     create)      require_cmds; create "$@" ;;
+    postboot)    require_cmds; postboot "$@" ;;
     start)       require_cmds; cmd_start "$@" ;;
     stop)        require_cmds; cmd_stop "$@" ;;
     destroy)     require_cmds; cmd_destroy "$@" ;;
