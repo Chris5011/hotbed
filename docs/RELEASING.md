@@ -137,6 +137,11 @@ Prove the stamp before shipping:
 
 ## 7. Git + GitHub flow (user authenticates via `gh` beforehand)
 
+Day-to-day tree hygiene lives in **`CONTRIBUTING.md`** — conventional commits,
+`type/<topic>` branches, squash-merge PRs into a releasable `main`. Release
+releases additionally honor it: tags are cut on `main` only, and the release
+flow below starts from a branch that is main itself once all PRs are squashed.
+
 ```bash
 gh auth status                    # must be Logged in before anything git-remote
 

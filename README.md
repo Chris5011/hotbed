@@ -1083,3 +1083,13 @@ per-VM seed ISOs are generated, not committed. Concretely:
   `dist/sbxd-v<ver>-linux-{amd64,arm64}` + `SHA256SUMS` (Go toolchain only).
 - **Agents doing the release**: follow `docs/RELEASING.md` to the letter —
   it encodes the verified build/suite/git flow and the known pitfalls.
+
+### Contributing & repo hygiene
+
+- Day-to-day rules live in **`CONTRIBUTING.md`**: conventional commits
+  (`feat|fix|docs|refactor|test|chore(scope): summary`), one intent per
+  `type/<topic>` branch, squash-merged PRs into an always-releasable `main`,
+  tags only on `main`, hotfix flow from shipped tags.
+- PRs get the repo's `.github/PULL_REQUEST_TEMPLATE.md` (what / how-verified /
+  evidence checklists) — titles must be valid conventional commit subjects,
+  because squashing turns them into history.
