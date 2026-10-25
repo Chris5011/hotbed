@@ -42,9 +42,32 @@ ask()  { # ask QUESTION [default]
 mkdir -p "$BIN_DIR"
 say "install root: $ROOT"
 
-# ---- daemon binary: build if missing ----------------------------------------
+# ---- daemon binary: adopt a release asset, else build from source ------------
 SBXD="$ROOT/sbxd/bin/sbxd"
-[[ -x "$SBXD" ]] || { command -v go >/dev/null 2>&1 || fail "no daemon binary and no Go toolchain — run 'make build' or download a release first"; }
+if [[ ! -x "$SBXD" ]]; then
+    # No binary yet? A downloaded release asset (sbxd-v…-linux-<arch>) is
+    # perfectly usable — look for the one matching this host's arch in the
+    # places people drop it: dist/ and the kit root.
+    case "$(uname -m)" in
+        x86_64)  KA=amd64 ;;
+        aarch64) KA=arm64 ;;
+        *)       KA=""    ;;
+    esac
+    if [[ -n "$KA" ]]; then
+        shopt -s nullglob
+        local_globs=( "$ROOT"/dist/sbxd-v*-linux-"$KA" "$ROOT"/sbxd-v*-linux-"$KA" )
+        shopt -u nullglob
+        if (( ${#local_globs[@]} > 0 )); then
+            pick="$(printf '%s\n' "${local_globs[@]}" | sort -V | tail -1)"
+            mkdir -p "$ROOT/sbxd/bin"
+            install -m 755 "$pick" "$SBXD"
+            say "adopted release binary: ${pick#"$ROOT"/} → sbxd/bin/sbxd"
+        fi
+    fi
+fi
+if [[ ! -x "$SBXD" ]]; then
+    command -v go >/dev/null 2>&1 || fail "no daemon binary and no Go toolchain — download a release asset into dist/ or the kit root, or run 'make build'"
+fi
 if [[ ! -x "$SBXD" ]]; then
     ( cd "$ROOT/sbxd" && go build -o bin/sbxd ./cmd/sbxd ) && say "built sbxd from source"
 fi
