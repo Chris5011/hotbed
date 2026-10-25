@@ -1150,7 +1150,13 @@ function openEvents(){
   var es=new EventSource('/api/events');
   state.es=es;
   es.addEventListener('snapshot', function(ev){
-    try{ state.list=JSON.parse(ev.data); }catch(e){ return; }
+    // contract: ev.data is a bare array. Older daemons shipped null or a
+    // wrapped {sandboxes:…} object — normalize all three to an array so
+    // renderList can never see anything but an array.
+    try{
+      var d=JSON.parse(ev.data);
+      state.list=Array.isArray(d) ? d : (d && Array.isArray(d.sandboxes) ? d.sandboxes : []);
+    }catch(e){ return; }
     state.firstData=true;
     renderList();
     if(state.sel){

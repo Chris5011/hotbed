@@ -1255,7 +1255,10 @@ func (s *Server) eventsSSE(w http.ResponseWriter, r *http.Request) {
 	}
 	sub := globalHub.subscribe()
 	defer globalHub.unsubscribe(sub)
-	if b, err := json.Marshal(map[string]any{"sandboxes": s.Collector.Snapshot()}); err == nil {
+	// bare array — the exact shape the browser's snapshot listener (and every
+	// later BroadcastSnapshot tick) expects; a wrapped object here would hand
+	// JS an object where it wants `state.list.forEach`.
+	if b, err := json.Marshal(s.Collector.Snapshot()); err == nil {
 		if _, werr := fmt.Fprintf(w, "event: snapshot\ndata: %s\n\n", b); werr != nil {
 			return
 		}
@@ -1285,7 +1288,12 @@ func (s *Server) eventsSSE(w http.ResponseWriter, r *http.Request) {
 }
 
 // BroadcastSnapshot is called by the refresher loop after each scan.
+// The JSON contract of a snapshot is ALWAYS a bare array — a nil slice
+// would marshal to `null` and hand the browser's renderList a crash.
 func BroadcastSnapshot(sb []sandbox.Sandbox) {
+	if sb == nil {
+		sb = []sandbox.Sandbox{}
+	}
 	b, _ := json.Marshal(sb)
 	payload := fmt.Sprintf("event: snapshot\ndata: %s\n\n", b)
 	globalHub.broadcast([]byte(payload))

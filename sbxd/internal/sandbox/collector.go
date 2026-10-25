@@ -23,7 +23,9 @@ type Collector struct {
 // is skipped entirely instead of dragging every refresh tick: an empty
 // docker section comes back promptly until the engine works again.
 func (c *Collector) Scan() []Sandbox {
-	var out []Sandbox
+	// never nil: an empty inventory must cross the wire as [] , not null
+	// (JSON null is what crashed the dashboard's renderList on a fresh box).
+	out := make([]Sandbox, 0)
 	dockerUp := engine.DockerUp()
 	var stats map[string]engine.ContainerStat
 
