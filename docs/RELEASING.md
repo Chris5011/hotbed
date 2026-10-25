@@ -153,11 +153,13 @@ git push -u origin main
 git tag -a vX.Y.Z -m "sbxd v0.2.1 — VM GUI create, boot self-registration,
 booting state, shutoff-VM inventory, live logs (serial+journald), WM UX polish"
 git push origin vX.Y.Z
+# NOTE: keep release-notes.md in the REPO ROOT (one file per release, committed)
+# — v0.2.1 ships one; update it instead of writing scratch notes in /tmp.
 gh release create vX.Y.Z dist/sbxd-vX.Y.Z-linux-amd64 dist/sbxd-vX.Y.Z-linux-arm64 dist/SHA256SUMS \
-    --title "SBX Desktop vX.Y.Z" --notes-file /tmp/opencode/release-notes.md
+    --title "SBX Desktop vX.Y.Z" --notes-file release-notes.md
 ```
 
-Release notes checklist (paste-worthy bullets for `/tmp/opencode/release-notes.md`):
+Release notes checklist for `release-notes.md` (repo root, committed per release):
 build/verify steps for the user (git clone → `./install.sh` → `sbxd-serve`),
 requirements (docker; libvirt stack optional), what's new (burn view, VM create
 wizard incl. sbxvm/sbxvmd, boot self-registration + booting pill, shutoff VMs
