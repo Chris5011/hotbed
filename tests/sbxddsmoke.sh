@@ -289,12 +289,40 @@ if [[ "$KIND" == "vm" ]]; then
         grep -m1 -q '^event: log' "$scratch/logs" && { lg_ok=1; break; }
     done
     [[ "$lg_ok" -eq 1 ]] && pass "log/serial SSE frames flow" || fail "log/serial SSE frames flow"
+else
+    lg_ok=0
+    for _ in 1 2; do
+        curl -sN --max-time 6 "http://127.0.0.1:$PORT/api/sandboxes/$KIND/$NAME/logs" >"$scratch/logs" 2>/dev/null
+        grep -aq 'healthy sandbox sleeps silently' "$scratch/logs" \
+            && grep -aq 'sandbox\.' "$scratch/logs" && { lg_ok=1; break; }
+    done
+    [[ "$lg_ok" -eq 1 ]] \
+        && pass "container stream names its source + prefill trail (no fake blank)" \
+        || fail "container stream names its source + prefill trail"
 fi
 curl -s --max-time 2 "http://127.0.0.1:$PORT/" | grep -q 'SBX Desktop' \
     && pass "dashboard index served" || fail "dashboard index served"
 curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/static/app.js" \
     && pass "dashboard app.js served" || fail "dashboard app.js served"
 rm -rf "$scratch" 2>/dev/null || true
+
+hdr "vm boot registration (kit scheme probe)"
+if bash -n "$ROOT/vm/sbxvm.sh" 2>/dev/null; then
+    pass "vm/sbxvm.sh syntax"
+    scratch="$(mktemp -d /tmp/opencode/sbxddsmoke.XXXXXX)"
+    # resolve the controller scheme once (TLS listener -> https), then land
+    # begin+end on the daemon; SBXD_TLS=1 box previously ATE these silently.
+    sed -n '/^_SBXVM_CTL=/,/^}/p' "$ROOT/vm/sbxvm.sh" >"$scratch/vmboot.sh"
+    ( set -e; . "$scratch/vmboot.sh" 2>/dev/null; \
+      SBXD_PORT="$PORT" notify_controller begin "smoke-vmboot-$$" >/dev/null 2>&1; \
+      SBXD_PORT="$PORT" notify_controller end "smoke-vmboot-$$" >/dev/null 2>&1 )
+    grep -aq '"sandbox":"smoke-vmboot-'"$$"'"' ~/.local/state/sbxd/audit.jsonl 2>/dev/null \
+        && pass "kit notify_controller lands (scheme probe + POST)" \
+        || fail "kit notify_controller lands (scheme probe + POST)"
+    rm -rf "$scratch" 2>/dev/null || true
+else
+    fail "vm/sbxvm.sh syntax"
+fi
 
 hdr "doctor"
 "$SBXD" doctor 2>&1 | grep -q 'sbxd daemon' \
