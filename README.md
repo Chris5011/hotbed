@@ -209,7 +209,11 @@ for developing.
 It will:
 
 - symlink `sbx`, `sbxd` and a `sbxd-serve` wrapper (pins `SBX_ROOT` so the
-  daemon always finds this tree) into `~/.local/bin`;
+  daemon always finds this tree) into `~/.local/bin`. That dir is on your
+  PATH on Debian-family setups once it exists (they auto-add it on the next
+  login shell; in an open terminal: `export PATH="$HOME/.local/bin:$PATH"`).
+  The installer prints a note if it isn't on PATH; without it, run the
+  binaries straight from the tree;
 - gate-check the stack above and print exactly what's missing, split into
   required vs. optional;
 - offer the one-time Debian master-image fetch (~330 MB download, ~950 MB
