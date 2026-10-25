@@ -88,6 +88,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/api/health", s.health)
+	mux.HandleFunc("/api/stats", s.statsRoute)
 	mux.HandleFunc("/api/sandboxes", s.listSandboxes)
 	mux.HandleFunc("/api/sandboxes/", s.sandboxRoute)
 	mux.HandleFunc("/api/events", s.eventsSSE)
