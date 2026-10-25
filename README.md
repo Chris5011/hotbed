@@ -172,10 +172,13 @@ The daemon itself has one of two routes (installer or binary):
 - **Prebuilt binary** (no Go needed): take `sbxd-vX.Y.Z-linux-<arch>` +
   `SHA256SUMS` from the
   [Releases](https://github.com/Chris5011/OpenCode-SBX/releases) page
-  (arch map: `x86_64` → `amd64`, `aarch64` → `arm64`), then:
+  (arch map: `x86_64` → `amd64`, `aarch64` → `arm64`), verify, and drop the
+  binary anywhere in the kit tree — `install.sh` adopts it into
+  `sbxd/bin/sbxd` itself (the explicit equivalent is
+  `install -m755 sbxd-vX.Y.Z-linux-amd64 sbxd/bin/sbxd`):
   ```bash
   sha256sum -c SHA256SUMS --ignore-missing
-  cp sbxd-vX.Y.Z-linux-amd64 sbxd/bin/sbxd && chmod +x sbxd/bin/sbxd
+  mv sbxd-vX.Y.Z-linux-amd64 dist/           # or the kit root — both work
   ```
   *What the binary is:* every SBX Desktop piece — the `sbxd` CLI, the REST
   + SSE controller and the embedded dashboard — in one static, stdlib-only
@@ -217,8 +220,9 @@ rsync -av --exclude vm/images --exclude vm/vms --exclude dist \
       --exclude sbxd/bin SRC_TREE/ newbox:apps/OpenCode-SBX/
 ```
 
-Then `sha256sum -c SHA256SUMS --ignore-missing`, place the binary at
-`sbxd/bin/sbxd`, and continue at step 3.
+Then `sha256sum -c SHA256SUMS --ignore-missing`, drop the binary into the
+tree (`dist/` or the root — `install.sh` adopts either), and continue at
+step 3.
 
 ### 3 · Run the installer
 
