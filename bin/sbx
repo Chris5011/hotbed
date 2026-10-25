@@ -108,6 +108,11 @@ build_image() {
     local args=()
     if [[ -n "${SBX_PLATFORM:-}" ]]; then args+=(--platform "$SBX_PLATFORM"); fi
     if [[ "$OPT_NO_CACHE" == "1" ]]; then args+=(--no-cache); fi
+    # recipe provenance: same stamp the daemon's create-time ensure() writes;
+    # bin/sbx and sbxd must agree, or the create-time freshness check cries wolf.
+    local stamp
+    stamp="$(sha256sum "$SBX_ROOT/containers/Dockerfile" 2>/dev/null | awk '{print substr($1,1,8)}')"
+    if [[ -n "$stamp" ]]; then args+=(--label "dev.sbx.recipe=$stamp"); fi
     args+=(--target "$st" -t "sbx:$st" -f "$SBX_ROOT/containers/Dockerfile" "$SBX_ROOT")
     require_engine
     "$DOCKER" build "${args[@]}" "$@"

@@ -904,7 +904,7 @@ func (s *Server) createRoute(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	cn, err := engine.SpawnRecipeContainer(engine.RecipeSpawn{
+	cn, imgWarn, err := engine.SpawnRecipeContainer(engine.RecipeSpawn{
 		Name:    in.Name,
 		Stack:   in.Stack,
 		Mounts:  in.Mounts,
@@ -917,7 +917,7 @@ func (s *Server) createRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.reloadCfg()
-	warn := ""
+	warn := imgWarn
 	if err := s.Cfg.SetWallets(cn, in.BudgetUSD, in.BudgetTokens); err != nil {
 		warn = "wallets: " + err.Error()
 	}

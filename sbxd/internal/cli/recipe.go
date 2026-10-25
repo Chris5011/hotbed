@@ -192,7 +192,7 @@ func recipeUp(args []string) error {
 		kb := kitRootSbx()
 		return fmt.Errorf("kit image %s is not built — run `%s build %s` first (one-time per stack)", engine.RecipeImageName(r.Stack), kb, r.Stack)
 	}
-	cn, err2 := engine.SpawnRecipeContainer(engine.RecipeSpawn{
+	cn, imgWarn, err2 := engine.SpawnRecipeContainer(engine.RecipeSpawn{
 		Name:    r.Name,
 		Stack:   r.Stack,
 		Mounts:  mounts,
@@ -202,6 +202,9 @@ func recipeUp(args []string) error {
 	})
 	if err2 != nil {
 		return err2
+	}
+	if imgWarn != "" {
+		fmt.Printf("\033[33;1msbxd:\033[0m %s\n", imgWarn)
 	}
 	ok("spawned %s (stack=%s) — syncing dashboard in ~5s\n", cn, r.Stack)
 

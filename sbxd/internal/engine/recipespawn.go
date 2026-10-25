@@ -7,6 +7,8 @@ package engine
 // cache volume, plus the recipe's own mounts/envs/ports.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -45,13 +47,43 @@ func RecipeImageEnsure(stack string) error {
 			RecipeImageName(stack), root, stack)
 	}
 	audit.Record("image.build", RecipeImageName(stack), "missing — built during create ("+stack+")")
-	out, err := RunTO(20*time.Minute, "docker", "build", "--target", stack,
-		"-t", RecipeImageName(stack), "-f", df, root)
+	args := []string{
+		"--label", envLabel + ".recipe=" + recipeStamp(),
+		"build", "--target", stack,
+		"-t", RecipeImageName(stack), "-f", df, root,
+	}
+	out, err := RunTO(20*time.Minute, "docker", args...)
 	if err != nil {
 		return fmt.Errorf("building %s failed (one-time per stack; manual: bin/sbx build %s): %s",
 			RecipeImageName(stack), stack, tailLines(out, 4))
 	}
 	return nil
+}
+
+// recipeStamp: 8-hex sha256 of containers/Dockerfile, the kit recipe's
+// identity. Both build paths stamp it onto the image (bin/sbx build and
+// this daemon one), so a later check can tell a pre-provenance or
+// recipe-drifted base from a fresh one — the quiet trap where a stale
+// previously-built sbx:<stack> kept serving containers that no longer match
+// the kit tree (the classic "caching problem").
+func recipeStamp() string {
+	b, err := os.ReadFile(filepath.Join(env.Root(), "containers", "Dockerfile"))
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])[:8]
+}
+
+// imageRecipeStamp reads an image's dev.sbx.recipe label. Empty return =
+// unstamped (built before provenance existed) or unreadable.
+func imageRecipeStamp(image string) string {
+	out, err := RunTO(15*time.Second, "docker", "image", "inspect",
+		"--format", `{{index .Config.Labels "dev.sbx.recipe"}}`, image)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
 }
 
 // tailLines is the honest-error helper: build logs are long, the lines that
@@ -83,23 +115,40 @@ type RecipeSpawn struct {
 }
 
 // SpawnRecipeContainer creates+starts the sandbox. The returned name is the
-// container the sandbox will be known as.
-func SpawnRecipeContainer(s RecipeSpawn) (string, error) {
+// container the sandbox will be known as; the returned warn ("" when clean)
+// tells whether a pre-existing stack image predates/mismatches the current
+// kit recipe — the "caching problem": a stale sbx:<stack> serves containers
+// whose provisioning no longer matches the tree.
+func SpawnRecipeContainer(s RecipeSpawn) (string, string, error) {
 	cn := "sbx-" + s.Name
 	if _, err := Run("docker", "inspect", cn); err == nil {
-		return cn, fmt.Errorf("container %s already exists (recipe names must be unique; `sbx rm` or docker rm it first)", cn)
+		return cn, "", fmt.Errorf("container %s already exists (recipe names must be unique; `sbx rm` or docker rm it first)", cn)
 	}
 	uid, gid, home := homeUIDGID()
 	if s.Stack == "" {
-		return cn, fmt.Errorf("stack: required to spawn (`stack: go|node|python|rust|base`)")
+		return cn, "", fmt.Errorf("stack: required to spawn (`stack: go|node|python|rust|base`)")
 	}
+	existed := RecipeImageExists(s.Stack)
 	if err := RecipeImageEnsure(s.Stack); err != nil {
-		return cn, err
+		return cn, "", err
+	}
+	warn := ""
+	if existed {
+		if st := imageRecipeStamp(RecipeImageName(s.Stack)); st != recipeStamp() {
+			if st == "" {
+				warn = fmt.Sprintf("image %s predates recipe stamping (no provenance label) — if provisioning looks stale, rebuild it once: bin/sbx build %s --no-cache",
+					RecipeImageName(s.Stack), s.Stack)
+			} else {
+				warn = fmt.Sprintf("image %s was built from an older kit recipe (stamp %s, current %s) — rebuild it once: bin/sbx build %s --no-cache",
+					RecipeImageName(s.Stack), st, recipeStamp(), s.Stack)
+			}
+			audit.Record("image.stale", RecipeImageName(s.Stack), "serving from a "+(map[bool]string{true: "drifted", false: "unstamped"}[st != ""])+" image")
+		}
 	}
 	if v, ok := RecipeStacks[s.Stack]; ok {
 		if _, err := RunTO(10*time.Second, "docker", "volume", "inspect", v); err != nil {
 			if _, e2 := RunTO(10*time.Second, "docker", "volume", "create", v); e2 != nil {
-				return cn, fmt.Errorf("cache volume %s: %w", v, e2)
+				return cn, warn, fmt.Errorf("cache volume %s: %w", v, e2)
 			}
 		}
 	}
@@ -108,8 +157,7 @@ func SpawnRecipeContainer(s RecipeSpawn) (string, error) {
 		"--label", envLabel + "=1",
 		"--label", env.OwnerLabelKey + "=" + env.OwnerLabel(),
 		"--label", envLabel + ".project=" + s.Project,
-		"--label", envLabel + ".stack=" + s.Stack,
-		"--env", "SBX_UID=" + uid,
+		"--label", envLabel + ".stack=" + s.Stack, "--env", "SBX_UID=" + uid,
 		"--env", "SBX_GID=" + gid,
 		"--env", "SBX_PROJECT=" + s.Name,
 	}
@@ -155,13 +203,13 @@ func SpawnRecipeContainer(s RecipeSpawn) (string, error) {
 	}
 	args = append(args, RecipeImageName(s.Stack))
 	if out, err := RunTO(60*time.Second, "docker", args...); err != nil {
-		return cn, wrapErr(err, out)
+		return cn, warn, wrapErr(err, out)
 	}
 	if err := StartContainer(cn); err != nil {
-		return cn, fmt.Errorf("created but start failed: %w", err)
+		return cn, warn, fmt.Errorf("created but start failed: %w", err)
 	}
 	audit.Record("sandbox.spawn", cn, "stack="+s.Stack)
-	return cn, nil
+	return cn, warn, nil
 }
 
 const envLabel = "dev.sbx"
