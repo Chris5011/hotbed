@@ -177,14 +177,28 @@ The daemon itself has one of two routes (installer or binary):
   sha256sum -c SHA256SUMS --ignore-missing
   cp sbxd-vX.Y.Z-linux-amd64 sbxd/bin/sbxd && chmod +x sbxd/bin/sbxd
   ```
+  *What the binary is:* every SBX Desktop piece — the `sbxd` CLI, the REST
+  + SSE controller and the embedded dashboard — in one static, stdlib-only
+  Go file. Not included: the `sbx`/`sbxvm` CLIs, which are bash scripts
+  living in the kit tree (see step 2). The daemon alone can inventory,
+  start/stop, log and attach to everything that already exists and spawn
+  new *containers* natively — but *creating VMs* and their journal
+  fallback shell out to the kit's `vm/sbxvm.sh`, so you'll want the tree
+  too.
 - **Go 1.26+ toolchain**: `install.sh` (next steps) builds `sbxd` itself.
 
-### 2 · Get the source
+### 2 · Get the kit tree
 
 ```bash
 git clone https://github.com/Chris5011/OpenCode-SBX.git
 cd OpenCode-SBX
 ```
+
+Cloning is just the easiest way to fetch: **nothing in the kit or the
+daemon runs git at runtime** — any plain copy of the tree works, e.g. the
+release page's *Source code (zip / tar.gz)* archive unpacks into exactly
+this shape. In daily use you only need the directory; the git history is
+for developing.
 
 ### 3 · Run the installer
 
