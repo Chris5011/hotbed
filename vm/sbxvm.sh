@@ -222,6 +222,31 @@ wait_ssh() {
     die "ssh did not come up within ${deadline}s. Check boot logs:  sbxvm console $name"
 }
 
+# ensure_guest_opencode NAME: guests must not depend on their OWN internet
+# egress for provisioning — filtered/half-blocked egress (ICMP+DNS pass,
+# TCP 443 blackholed — seen behind policy routers/VPNs) left the seed unit's
+# GitHub download spinning forever. The kit instead pushes the fallback
+# binary over its OWN ssh channel right after cloud-init: the host already
+# holds egress (it built the kit images from the same URL) and this channel
+# is the exact one `sbxvm ssh` uses. The seeded unit stays as belt-and-
+# suspenders for the cases where egress DOES work.
+ensure_guest_opencode() {
+    local name="$1"
+    conn_raw "command -v opencode >/dev/null 2>&1" >/dev/null 2>&1 && return 0
+    local tgz="/tmp/sbx-opencode-stage.tgz"
+    curl -fsSL --retry 3 --connect-timeout 10 "$OCCODE_URL" -o "$tgz" \
+        || { warn "opencode stage: host download failed — guest keeps its in-guest retrying unit"; rm -f "$tgz"; return 0; }
+    info "pushing opencode into the guest over the kit ssh channel (no guest egress needed)"
+    if cat "$tgz" | conn_raw "sudo sh -c 'cat > /tmp/opencode.tgz && tar -xz -C /usr/local/bin -f /tmp/opencode.tgz opencode && chmod 0755 /usr/local/bin/opencode && rm -f /tmp/opencode.tgz'" >/dev/null 2>&1 \
+        && rm -f "$tgz" \
+        && conn_raw "opencode --version" >/dev/null 2>&1; then
+        ok "guest opencode staged: $(conn_raw 'opencode --version' 2>/dev/null | head -1)"
+    else
+        rm -f "$tgz"
+        warn "opencode push failed — guest keeps its in-guest retrying unit"
+    fi
+}
+
 # wait_ready NAME: poll cloud-init until provisioning is done; then, since the
 # first boot runs the cloud-flavor kernel and packages just installed the full
 # one, issue one reboot into it when needed; finally verify the workspace 9p
@@ -484,6 +509,7 @@ dcreate() {
     SECONDS=0
     wait_ssh "$name" 900
     wait_ready "$name"
+    ensure_guest_opencode "$name"
     notify_controller end "$name"   # guest confirmed up → controller drops the "booting" state
 }
 
@@ -587,6 +613,7 @@ create() {
     SECONDS=0
     wait_ssh "$name" 900
     wait_ready "$name"
+    ensure_guest_opencode "$name"
     notify_controller end "$name"   # guest confirmed up → controller drops the "booting" state
 }
 
