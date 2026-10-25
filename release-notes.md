@@ -1,46 +1,52 @@
-# SBX Desktop v0.2.2
+# SBX Desktop v0.2.3
 
-The remote-deployment & install-hardening release of the **OpenCode-SBX** kit
-+ **sbxd** daemon. Built from the first live remote deployment of the whole
-tree (headless Ubuntu box, release asset + `install.sh`).
+The cold-host hardening release of the **OpenCode-SBX** kit + **sbxd**
+daemon. Built from the *real* first remote deployment: the dashboard went
+unresponsive during sandbox scans and reported a working docker as "down".
 
 ## What's new
 
-- **`SBXD_BIND` / `sbxd serve --bind`** — the dashboard/API listens on
-  `127.0.0.1` by default as before; remote boxes can now opt into network
-  reachability explicitly (`SBXD_BIND=0.0.0.0 sbxd-serve`). Non-loopback
-  binds print a loud unauthenticated-warning: the CSRF origin guard protects
-  browsers only, your firewall position is the gate for everything else
-  (same trust model as the token-gated proxy listener).
-- **`install.sh` adopts release assets** — drop a downloaded
-  `sbxd-v…-linux-<arch>` binary into `dist/` (or the kit root) and the
-  installer wires it up itself (`adopted release binary: … → sbxd/bin/sbxd`);
-  no Go toolchain needed. Honest failure when neither binary nor Go exists.
-- **Honest libvirt gating** — the installer previously said "libvirt stack
-  present" whenever `virsh` et al existed, even though the system daemon
-  (`libvirt-daemon-system`) was missing; VM ops failed much later at
-  `fetch-image`. It now probes `virsh -c qemu:///system uri` and prints the
-  exact remedy (apt packages, `libvirt` group + re-login, classic
-  `libvirtd` vs. modular `virtqemud.socket`+`virtnetworkd.socket`).
-- **Install guide with real fetch paths** — step-by-step install section in
-  the README: prerequisite tables, release-asset routes (`gh release
-  download`, token'd curl, direct rsync), PATH behavior spelled out, and the
-  `config init`-is-an-import note for fresh headless boxes.
+- **Scan-path is no longer hostage to a down/wedged docker engine** — a
+  cold or remote box used to drag every refresh tick for the full
+  ps/stats/ports fanout (the stats call alone capped at 45 s), and any API
+  client arriving before the first successful scan blocked on the whole
+  pile: the dashboard looked frozen for ~a minute. `Scan()` now answers a
+  bounded 4 s probe first and, while the engine is down or wedged, skips
+  the docker fanout entirely — an empty docker section comes back
+  promptly (with libvirt VMs still rendered) until the engine works again.
+- **Wall-honest engine timeouts** — `docker info` (health probe) drops
+  15 s → 4 s, `docker stats` 45 s → 8 s, and `RunTO` now uses
+  `exec.WaitDelay`, so mere grandchildren holding inherited output pipes
+  (shims, wrappers) can no longer keep a nominal cap running past its
+  deadline (probed with a fake wedged docker: wall 7.0 s → 4.5 s).
+- **Honest "down" badge, promptly** — `/api/health` reports
+  `"docker":false` the moment the engine refuses (permission-denied
+  socket, stopped daemon, wedged engine), instead of hanging on
+  CLI-retry timeouts. Note: docker reported "down" on a box where it was
+  *installed* almost always means the CLI can't reach the socket — see
+  the fix in the release notes of your install guide / README step 5
+  (`sudo usermod -aG docker $USER` + re-login, or
+  `sudo systemctl enable --now docker`).
+- **Suite: wedged-engine regression checks** — the hermetic smoke suite
+  now splices a fake `docker` into a scratch daemon (wedged: `info` past
+  the cap, everything else hanging 40 s; and perm-denied: instant
+  refusal) and asserts health + sandboxes answer inside seconds, badge
+  honest. Gate grew to **110 passed / 0 failed**.
 
-## Upgrade from v0.2.1
+## Upgrade from v0.2.2
 
 ```bash
-# download the new asset (or rsync from a box that has it), verify, drop into the tree:
-curl -fLO https://github.com/Chris5011/OpenCode-SBX/releases/download/v0.2.2/sbxd-v0.2.2-linux-amd64
+# download the new asset, verify, drop into the tree:
+curl -fLO https://github.com/Chris5011/OpenCode-SBX/releases/download/v0.2.3/sbxd-v0.2.3-linux-amd64
 sha256sum -c SHA256SUMS --ignore-missing
-install -m755 sbxd-v0.2.2-linux-amd64 sbxd/bin/sbxd      # in the kit tree
-# restart the daemon (loopback unchanged unless you opt in):
-sbxd-serve
+install -m755 sbxd-v0.2.3-linux-amd64 ~/OpenCode-SBX/sbxd/bin/sbxd
+# restart the daemon (keep your bind choice):
+kill <old-pid>        # exact PID from `ss -ltnp | grep 7770`
+cd ~/OpenCode-SBX && SBXD_BIND=0.0.0.0 sbxd-serve
 ```
 
-## Highlights carried from v0.2.1
+## Carried from v0.2.2
 
-Create wizard across all three vessels, boot self-registration + `booting`
-state, shut-off-VM inventory, working live logs (serial + guest journal),
-first-load spinner, pending stop/start UX, burn view, honest deletes,
-loopback-only dashboard with CSRF guard, token accounting with budgets.
+`SBXD_BIND`/`--bind` remote exposure opt-in with a loud warning, installer
+release-asset adoption, honest libvirt daemon gating, step-by-step install
+guide with real fetch routes.

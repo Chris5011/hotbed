@@ -11,7 +11,7 @@
 # VERSION stamps the binary via -ldflags "-X sbxd/internal/env.Version=…"
 # (the source default remains archival). Bump this default alongside the tag.
 
-VERSION ?= 0.2.2
+VERSION ?= 0.2.3
 
 GO     ?= go
 GOFMT  ?= gofmt
