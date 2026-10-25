@@ -51,6 +51,38 @@ echo "$health" | grep -q '"version"' && pass "daemon answers /api/health" \
 echo "$health" | grep -q '"docker":true' && pass "docker probe healthy" || fail "docker probe healthy"
 echo "$health" | grep -q '"tmux":true'   && pass "tmux probe healthy"   || fail "tmux probe healthy"
 
+hdr "SBXD_BIND (non-loopback opt-in)"
+"$SBXD" serve --port 7796 --bind 127.0.0.2 >/tmp/sbxddsmoke.bind.log 2>&1 &
+BIND_PID=$!
+bhealth=""
+for _ in $(seq 1 12); do
+    bhealth="$(curl -s --max-time 1 "http://127.0.0.2:7796/api/health" 2>/dev/null)" && [[ -n "$bhealth" ]] && break
+    sleep 0.25
+done
+echo "$bhealth" | grep -q '"version"' \
+    && pass "SBXD_BIND=127.0.0.2: daemon answers on the bound address" \
+    || fail "SBXD_BIND not honored (see /tmp/sbxddsmoke.bind.log)"
+curl -s --max-time 1 "http://127.0.0.1:7796/api/health" >/dev/null 2>&1 \
+    && fail "exact bind broken: daemon answered instead on 127.0.0.1:7796" \
+    || pass "bind is exact: no listener on other addresses"
+grep -aq "non-loopback" /tmp/sbxddsmoke.bind.log \
+    && fail "loopback bind must stay quiet (no warning)" \
+    || pass "loopback bind stays quiet (no warning)"
+"$SBXD" serve --port 7797 --bind 0.0.0.0 >/tmp/sbxddsmoke.anybind.log 2>&1 &
+ANY_PID=$!
+warn=""
+for _ in $(seq 1 16); do
+    grep -aq "UNAUTHENTICATED" /tmp/sbxddsmoke.anybind.log && warn=1 && break
+    sleep 0.25
+done
+[[ -n "$warn" ]] \
+    && pass "bind: loud unauthenticated warning printed for 0.0.0.0" \
+    || fail "bind: loud unauthenticated warning printed for 0.0.0.0"
+kill "$ANY_PID" 2>/dev/null
+wait "$ANY_PID" 2>/dev/null
+kill "$BIND_PID" 2>/dev/null
+wait "$BIND_PID" 2>/dev/null
+
 hdr "inventory (ps)"
 list="$("$SBXD" ps 2>&1)"
 echo "$list" | grep -q 'NAME.*KIND.*STATE' && pass "ps prints unified table" || fail "ps prints unified table"
