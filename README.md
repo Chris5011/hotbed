@@ -200,6 +200,26 @@ release page's *Source code (zip / tar.gz)* archive unpacks into exactly
 this shape. In daily use you only need the directory; the git history is
 for developing.
 
+On a second (e.g. headless) machine, any of these fetches is fine:
+
+```bash
+# a) has the CLI tooling and auth →
+gh release download vX.Y.Z -R Chris5011/OpenCode-SBX      # binary + SHA256SUMS
+gh repo clone Chris5011/OpenCode-SBX                      # the tree
+
+# b) minimal: raw curl against the release URLs — needs a token while the
+#    repo is private (PAT with repo scope); token-free once public:
+curl -fL -H "Authorization: Bearer $TOKEN" \
+     -O https://github.com/Chris5011/OpenCode-SBX/releases/download/vX.Y.Z/sbxd-vX.Y.Z-linux-amd64
+
+# c) the two boxes reach each other → skip GitHub entirely:
+rsync -av --exclude vm/images --exclude vm/vms --exclude dist \
+      --exclude sbxd/bin SRC_TREE/ newbox:apps/OpenCode-SBX/
+```
+
+Then `sha256sum -c SHA256SUMS --ignore-missing`, place the binary at
+`sbxd/bin/sbxd`, and continue at step 3.
+
 ### 3 · Run the installer
 
 ```bash
