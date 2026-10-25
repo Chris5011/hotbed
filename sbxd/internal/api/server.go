@@ -328,6 +328,10 @@ func (s *Server) logsSSE(w http.ResponseWriter, r *http.Request, sb sandbox.Sand
 		fmt.Fprintf(w, "event: log\ndata: %s\n\n", jsonEscape(payload))
 		flusher.Flush()
 	}
+	// every stream source's bytes pass through line hygiene before they
+	// become SSE frames (ANSI/CR strip + blank collapse + line capping —
+	// a serial firehose must not be able to poison or crush the tab)
+	hyg := newLineFlusher(sendCmd)
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
@@ -350,10 +354,10 @@ func (s *Server) logsSSE(w http.ResponseWriter, r *http.Request, sb sandbox.Sand
 				sendCmd(e.TS + "  " + e.Kind + ": " + e.Detail)
 			}
 		}
-		_ = engine.LogsStream(ctx, sb.Name, 300, writerFunc(sendCmd))
+		_ = engine.LogsStream(ctx, sb.Name, 300, hyg)
 	case sandbox.KindVM:
 		if sb.Backend == sandbox.BackendDocker {
-			_ = engine.SerialStream(ctx, "sbxvmd-"+sb.Name, sb.Name, writerFunc(sendCmd))
+			_ = engine.SerialStream(ctx, "sbxvmd-"+sb.Name, sb.Name, hyg)
 			return
 		}
 		// libvirt: prefer a serial capture the daemon can actually read;
@@ -362,12 +366,12 @@ func (s *Server) logsSSE(w http.ResponseWriter, r *http.Request, sb sandbox.Sand
 		// general fallback is the guest journal over the kit's own ssh
 		// channel — retreating with backoff while the guest boots.
 		if f := libvirtSerialFile(sb.Name); f != "" && engine.LibvirtSerialCapture(sb.Name) && fileReadable(f) {
-			_ = engine.FileTailStream(ctx, f, writerFunc(sendCmd))
+			_ = engine.FileTailStream(ctx, f, hyg)
 			return
 		}
 		first := true
 		for ctx.Err() == nil {
-			_ = engine.VMJournalStream(ctx, sb.Backend, sb.Name, writerFunc(sendCmd))
+			_ = engine.VMJournalStream(ctx, sb.Backend, sb.Name, hyg)
 			if first && ctx.Err() == nil {
 				sendCmd("(guest journal via ssh — streams once the guest answers; auto-retrying every few seconds while it boots)")
 				first = false

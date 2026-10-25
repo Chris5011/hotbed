@@ -1110,6 +1110,7 @@ function openLogs(sb){
 function closeLogs(){ if(state.esLogs){ state.esLogs.close(); state.esLogs=null; } $('logbox').textContent=''; }
 function appendLog(line){
   var box=$('logbox');
+  if(typeof line==='string' && line.length>8000){ line=line.slice(0,8000)+'  …(+line truncated)'; }
   box.appendChild(document.createTextNode(line+'\n'));
   while(box.childNodes.length>4000){ box.removeChild(box.firstChild); }
   if($('log-follow').checked){ box.scrollTop=box.scrollHeight; }
