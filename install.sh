@@ -90,6 +90,38 @@ for c in bash docker tmux ssh curl jq; do
 done
 (( ${#coremiss[@]} )) && fail "missing required: ${coremiss[*]} (install them first — docker: https://docs.docker.com/engine/install/)"
 
+# ---- docker usable-check: "installed" ≠ "usable by the user who runs sbxd" ----
+# The classic on a fresh/followed-the-docs box: docker is installed, the CLI
+# answers root fine, yet the dashboard shows docker as "down" — because the
+# user running sbxd can't reach /var/run/docker.sock (socket group) or the
+# engine isn't running. Non-fatal: warn with the exact remedy.
+duser="${SUDO_USER:-$USER}"
+if timeout 10 docker info >/dev/null 2>&1; then
+    # launched via sudo? root reaches the socket even when sbxd's real user
+    # cannot — check that user's group membership despite root's success.
+    if [[ -n "${SUDO_USER:-}" ]] && ! id -nG "$duser" 2>/dev/null | tr ' ' '\n' | grep -qxi docker; then
+        say "docker reachable — but '$duser' (the user who will run sbxd) is NOT in the"
+        say "  docker socket group → the dashboard's health badge says \"down\". Remedy:"
+        say "    sudo usermod -aG docker \"$duser\"   # re-login for the group change"
+    else
+        say "docker engine reachable — container sandboxes are ready"
+    fi
+else
+    derr="$(timeout 10 docker info 2>&1 || true)"
+    if echo "$derr" | grep -qi "permission denied"; then
+        say "docker installed, but '$duser' cannot reach /var/run/docker.sock → the dashboard"
+        say "  will honestly show docker as \"down\". Remedy (socket group + re-login):"
+        say "    sudo usermod -aG docker \"$duser\""
+        say "    # then verify as your own user:  docker info  (no sudo)"
+    elif echo "$derr" | grep -qi "cannot connect"; then
+        say "docker installed, but the ENGINE is not reachable. Remedy:"
+        say "    sudo systemctl enable --now docker     # then: docker info (no sudo)"
+    else
+        say "docker installed, but 'docker info' did not answer cleanly (first line:"
+        say "  ${derr%%$'\n'*}) — check: sudo systemctl status docker"
+    fi
+fi
+
 virtmiss=()
 for c in virsh virt-install qemu-img xorriso; do
     command -v "$c" >/dev/null 2>&1 || virtmiss+=( "$c" )
