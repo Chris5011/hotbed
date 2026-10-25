@@ -34,17 +34,18 @@ nested Docker, or a full distro → `sbxvm`. Both keep your host clean.
 1. [Why](#why)
 2. [The two layers at a glance](#the-two-layers-at-a-glance)
 3. [Requirements](#requirements)
-4. [One-time setup](#one-time-setup)
-5. [sbx — container sandboxes](#sbx--container-sandboxes)
-6. [sbxvm — the VM escape hatch](#sbxvm--the-vm-escape-hatch)
-7. [The docker backend (sbxvmd)](#the-docker-backend-sbxvmd)
-8. [sbxd — SBX Desktop (daemon, dashboard, docker-style CLI)](#sbxd--sbx-desktop-daemon-dashboard-docker-style-cli)
-9. [How it works under the hood](#how-it-works-under-the-hood)
-10. [Field debugging recipes](#field-debugging-recipes)
-11. [Tests](#tests)
-12. [File map](#file-map)
-13. [Disk footprint & housekeeping](#disk-footprint--housekeeping)
-14. [Security posture (honest)](#security-posture-honest)
+4. [Install: step by step](#install-step-by-step)
+5. [One-time setup](#one-time-setup)
+6. [sbx — container sandboxes](#sbx--container-sandboxes)
+7. [sbxvm — the VM escape hatch](#sbxvm--the-vm-escape-hatch)
+8. [The docker backend (sbxvmd)](#the-docker-backend-sbxvmd)
+9. [sbxd — SBX Desktop (daemon, dashboard, docker-style CLI)](#sbxd--sbx-desktop-daemon-dashboard-docker-style-cli)
+10. [How it works under the hood](#how-it-works-under-the-hood)
+11. [Field debugging recipes](#field-debugging-recipes)
+12. [Tests](#tests)
+13. [File map](#file-map)
+14. [Disk footprint & housekeeping](#disk-footprint--housekeeping)
+15. [Security posture (honest)](#security-posture-honest)
 
 ---
 
@@ -139,7 +140,110 @@ docker engine with nested KVM working behind it.
 
 ---
 
+## Install: step by step
+
+`install.sh` does the work; the steps below tell you exactly what it does
+and what *you* need in place first. It is safe to re-run (idempotent) and
+never touches existing sandboxes.
+
+### 1 · Prerequisites
+
+Required for the container side (and the daemon):
+
+| you need | for | quick check |
+|---|---|---|
+| **bash, tmux, ssh, curl, jq** | kit CLIs, attach, tunnels, config | `command -v bash docker tmux ssh curl jq` |
+| **a running docker engine** | containers + the docker VM backend | `docker ps` |
+| ~10 GB disk | stack images, shared caches, master image | `df -h ~` |
+
+Add this only for the **VM · libvirt** backend (the docker VM backend runs
+without any of it):
+
+```bash
+sudo apt install -y libvirt-clients virtinst qemu-system-x86 qemu-utils \
+                    e2fsprogs xorriso
+```
+
+VMs of either backend need **nested KVM** (a writable `/dev/kvm`) — see
+[Hosts](#hosts) above.
+
+The daemon itself has one of two routes (installer or binary):
+
+- **Prebuilt binary** (no Go needed): take `sbxd-vX.Y.Z-linux-<arch>` +
+  `SHA256SUMS` from the
+  [Releases](https://github.com/Chris5011/OpenCode-SBX/releases) page
+  (arch map: `x86_64` → `amd64`, `aarch64` → `arm64`), then:
+  ```bash
+  sha256sum -c SHA256SUMS --ignore-missing
+  cp sbxd-vX.Y.Z-linux-amd64 sbxd/bin/sbxd && chmod +x sbxd/bin/sbxd
+  ```
+- **Go 1.26+ toolchain**: `install.sh` (next steps) builds `sbxd` itself.
+
+### 2 · Get the source
+
+```bash
+git clone https://github.com/Chris5011/OpenCode-SBX.git
+cd OpenCode-SBX
+```
+
+### 3 · Run the installer
+
+```bash
+./install.sh            # interactive; add --yes to take all defaults
+```
+
+It will:
+
+- symlink `sbx`, `sbxd` and a `sbxd-serve` wrapper (pins `SBX_ROOT` so the
+  daemon always finds this tree) into `~/.local/bin`;
+- gate-check the stack above and print exactly what's missing, split into
+  required vs. optional;
+- offer the one-time Debian master-image fetch (~330 MB download, ~950 MB
+  on disk). Skipping is fine — retry any time with `sbxvm fetch-image`;
+- with `--config-init`, import LLM providers from your host opencode
+  config (do it later instead: `sbxd config init`).
+
+### 4 · Start the daemon
+
+```bash
+sbxd-serve
+# → dashboard + API on http://127.0.0.1:7770 (loopback only)
+```
+
+`sbxd-serve` is a plain foreground process — run it in a terminal, a tmux
+pane or a systemd unit. The CLIs (`sbx`, `sbxvm`, `sbxd`) also work
+without the daemon (they fall back to direct engine calls); the dashboard
+obviously doesn't.
+
+```bash
+curl -s http://127.0.0.1:7770/api/health
+# {"docker":true,"libvirt":true, ...}
+```
+
+### 5 · Verify + first sandbox
+
+```bash
+sbx doctor                # engine, bind mounts, images, opencode bits
+sbxd ps                   # unified inventory (the dashboard shows the same, live)
+cd some/project && sbx    # shell in — the stack image builds on first use
+```
+
+Point a browser at `http://127.0.0.1:7770`: the sidebar should list your
+sandbox (and the `＋ New sandbox` wizard is right next to it).
+
+### 6 · Optional: the accounting proxy
+
+One command wires your providers into the token-accounting proxy, then
+per-sandbox keys and $-wallets as needed — full walkthrough in
+[P2](#p2--the-llm-proxy-wallets-and-one-global-opencode-config).
+
+---
+
 ## One-time setup
+
+The scripted [install above](#install-step-by-step) already does
+`install-self` and can do the image fetch. If you instead operate the kit
+manually, the three things it automates are:
 
 ```bash
 # put sbx on your PATH (symlinks ~/.local/bin/sbx → this kit's bin/sbx)
@@ -1077,10 +1181,9 @@ Source ships; the heavy Debian cloud master (~1 GB unpacked) is fetched at
 runtime with `sbxvm fetch-image` — that is why `vm/images/` is gitignored, and
 per-VM seed ISOs are generated, not committed. Concretely:
 
-- **Install on a new host** (docker required; libvirt stack optional for the
-  libvirt VM backend): clone/download the tree, then
-  `./install.sh` — installs `sbx` + `sbxd-serve` entry points, checks the
-  dependency stack, offers the one-time image fetch, wires the config.
+- **Install on a new host**: prerequisites + scripted walkthrough in
+  [Install: step by step](#install-step-by-step) — `./install.sh` gates the
+  deps, installs `sbx` + `sbxd-serve`, and offers the one-time image fetch.
 - **Release artifacts**: `make release` builds version-stamped
   `dist/sbxd-v<ver>-linux-{amd64,arm64}` + `SHA256SUMS` (Go toolchain only).
 - **Agents doing the release**: follow `docs/RELEASING.md` to the letter —
