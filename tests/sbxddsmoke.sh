@@ -132,6 +132,42 @@ sse1="$(curl -sN --max-time 3 "http://127.0.0.1:$PORT/api/events" 2>/dev/null | 
     && pass "SSE initial snapshot is a bare array" \
     || fail "SSE initial snapshot is a bare array (got: ${sse1:-empty})"
 
+hdr "create-time image ensure (fake docker)"
+# 'sbx:<stack>' is kit-built with no registry upstream: on a fresh box the
+# first dashboard create looked like "pull access denied for sbx". The shim
+# pretends the image is absent and records every docker call — the daemon
+# must build the image BEFORE the container create.
+FD2=/tmp/sbxddsmoke.imgdyn
+rm -rf "$FD2"; mkdir -p "$FD2"
+{
+    printf '#!/usr/bin/env bash\n'
+    printf 'echo "$*" >> /tmp/sbxddsmoke.imgdyn/order\n'
+    printf 'case "$*" in\n'
+    printf '  *"image inspect"*) exit 1 ;;\n'
+    printf '  *"--target"*) echo build-toolkit=ok; exit 0 ;;\n'
+    printf '  *"inspect"*) exit 1 ;;\n'
+    printf '  *) echo {\\"Id\\":\\"shim\\"}; exit 0 ;;\n'
+    printf 'esac\n'
+} > "$FD2/docker"
+chmod +x "$FD2/docker"
+env PATH="$FD2:$PATH" "$SBXD" serve --port 7799 >/tmp/sbxddsmoke.img.log 2>&1 &
+IDPID=$!
+for _ in $(seq 1 20); do
+    curl -s --max-time 1 "http://127.0.0.1:7799/api/health" >/dev/null 2>&1 && break
+    sleep 0.25
+done
+dr="$(curl -s --max-time 30 -X POST "http://127.0.0.1:7799/api/create" \
+    -H 'Content-Type: application/json' -d '{"name":"imgtest","stack":"base"}')"
+grep -q '"ok":true' <<<"$dr" \
+    && pass "missing stack image: create auto-builds through the daemon" \
+    || fail "missing stack image: create did not auto-build (${dr:0:120})"
+ord="$(awk '/--target base/{b=NR} /create --name sbx-imgtest/{c=NR} END{ if(b&&c&&b<c) print "ok"; else print "no:" b "-" c }' "$FD2/order" 2>/dev/null)"
+[[ "$ord" == "ok" ]] \
+    && pass "image build happened before the container create" \
+    || fail "image build happened before the container create (order=${ord:-empty})"
+kill "$IDPID" 2>/dev/null
+wait "$IDPID" 2>/dev/null
+
 # perm-denied shape: docker exists but the engine refuses instantly — the
 # real remote-box case. Everything must be prompt, no retry-drag.
 printf '#!/usr/bin/env bash\necho "permission denied while trying to connect to the Docker daemon socket" >&2\nexit 1\n' > "$FD/docker"
