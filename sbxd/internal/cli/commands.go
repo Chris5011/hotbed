@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -93,6 +94,16 @@ func serve(args []string) error {
 		if v := strings.TrimSpace(os.Getenv("SBXD_BIND")); v != "" {
 			bind = v
 		}
+	}
+	tlsOn := false
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--tls" {
+			tlsOn = true
+		}
+	}
+	if !tlsOn {
+		v := strings.ToLower(strings.TrimSpace(os.Getenv("SBXD_TLS")))
+		tlsOn = v == "1" || v == "on" || v == "true" || v == "yes"
 	}
 
 	if n, err := config.MigrateFromKeys(); err != nil {
@@ -213,7 +224,18 @@ func serve(args []string) error {
 	if !loopbackHost(bind) {
 		fmt.Fprintf(os.Stderr, "\033[33;1msbxd:\033[0m WARNING: dashboard/API listening on %s — UNAUTHENTICATED on the network; the CSRF guard protects browsers only, native clients pass — gate it (firewall) or use an ssh tunnel\n", addr)
 	}
+	scheme := "http"
 	httpSrv := &http.Server{Addr: addr, Handler: srv.Handler()}
+	if tlsOn {
+		crt, tlsPath, fp, err := api.SnakeoilTLS(bind)
+		if err != nil {
+			return fmt.Errorf("TLS: %w", err)
+		}
+		scheme = "https"
+		fmt.Printf("\033[33;1msbxd:\033[0m snakeoil TLS — self-signed (browser warns once); cert pinned at %s (delete to regenerate)\n", tlsPath)
+		fmt.Printf("\033[33;1msbxd:\033[0m cert sha256 fingerprint: %s\n", fp)
+		httpSrv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{crt}}
+	}
 
 	go func() {
 		sig := make(chan os.Signal, 1)
@@ -225,15 +247,21 @@ func serve(args []string) error {
 	}()
 
 	if loopbackHost(bind) {
-		fmt.Printf("\033[36;1msbxd:\033[0m dashboard http://%s  (Ctrl-C to stop)\n", addr)
+		fmt.Printf("\033[36;1msbxd:\033[0m dashboard %s://%s  (Ctrl-C to stop)\n", scheme, addr)
 	} else {
-		fmt.Printf("\033[36;1msbxd:\033[0m dashboard http://<this-host>:%s  (listening on %s; Ctrl-C to stop)\n", port, addr)
+		fmt.Printf("\033[36;1msbxd:\033[0m dashboard %s://<this-host>:%s  (listening on %s; Ctrl-C to stop)\n", scheme, port, addr)
 	}
 	if len(cfg.Opencode.Providers) > 0 {
 		fmt.Printf("\033[36;1msbxd:\033[0m LLM proxy    :%s  (%d upstream provider(s), wallets from config.json)\n",
 			cfg.Proxy.Port, len(cfg.Opencode.Providers))
 	} else {
 		fmt.Printf("\033[33;1msbxd:\033[0m LLM proxy idle — no providers yet: run `sbxd config init`\n")
+	}
+	if tlsOn {
+		if err := httpSrv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+			return err
+		}
+		return nil
 	}
 	if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return err
