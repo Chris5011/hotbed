@@ -168,6 +168,32 @@ ord="$(awk '/--target base/{b=NR} /create --name sbx-imgtest/{c=NR} END{ if(b&&c
 kill "$IDPID" 2>/dev/null
 wait "$IDPID" 2>/dev/null
 
+hdr "snakeoil TLS (clipboard needs a secure context)"
+"$SBXD" serve --port 7800 --tls >/tmp/sbxddsmoke.tls.log 2>&1 &
+TPID=$!
+for _ in $(seq 1 20); do curl -sk --max-time 1 "https://127.0.0.1:7800/api/health" >/dev/null 2>&1 && break; sleep 0.25; done
+curl -sk --max-time 5 "https://127.0.0.1:7800/api/health" | grep -q '"version"' \
+    && pass "SBXD_TLS: https listener serves the dashboard" \
+    || fail "SBXD_TLS: https listener serves the dashboard"
+curl -s --max-time 3 "http://127.0.0.1:7800/api/health" 2>/dev/null | grep -q "Client sent an HTTP request to an HTTPS server" \
+    && pass "TLS listener refuses plaintext with the honest 400" \
+    || fail "TLS listener refuses plaintext with the honest 400"
+if command -v openssl >/dev/null 2>&1; then
+    fp1="$(echo | openssl s_client -connect 127.0.0.1:7800 2>/dev/null | openssl x509 -outform DER 2>/dev/null | sha256sum | cut -d' ' -f1)"
+    kill "$TPID" 2>/dev/null; wait "$TPID" 2>/dev/null
+    "$SBXD" serve --port 7800 --tls >/tmp/sbxddsmoke.tls2.log 2>&1 &
+    TPID=$!
+    for _ in $(seq 1 20); do curl -sk --max-time 1 "https://127.0.0.1:7800/api/health" >/dev/null 2>&1 && break; sleep 0.25; done
+    fp2="$(echo | openssl s_client -connect 127.0.0.1:7800 2>/dev/null | openssl x509 -outform DER 2>/dev/null | sha256sum | cut -d' ' -f1)"
+    [[ -n "$fp1" && "$fp1" == "$fp2" ]] \
+        && pass "fingerprint stays pinned across restarts (no browser re-prompt)" \
+        || fail "fingerprint stays pinned across restarts"
+    kill "$TPID" 2>/dev/null
+else
+    fail "fingerprint stays pinned across restarts (openssl missing)"
+fi
+wait "$TPID" 2>/dev/null
+
 # perm-denied shape: docker exists but the engine refuses instantly — the
 # real remote-box case. Everything must be prompt, no retry-drag.
 printf '#!/usr/bin/env bash\necho "permission denied while trying to connect to the Docker daemon socket" >&2\nexit 1\n' > "$FD/docker"
