@@ -83,6 +83,63 @@ wait "$ANY_PID" 2>/dev/null
 kill "$BIND_PID" 2>/dev/null
 wait "$BIND_PID" 2>/dev/null
 
+hdr "engine down (fake wedged docker)"
+# a `docker` shim that wedges: info answers past the 4s probe cap, everything
+# else would hang 40s. The scan must return an empty docker section promptly
+# (no ps/stats fanout), and /api/health must report "docker":false in ~s, not
+# ~a-minute — this is what made a cold remote box look unresponsive.
+FD=/tmp/sbxddsmoke.fakedocker
+rm -rf "$FD"; mkdir -p "$FD"
+{
+    printf '#!/usr/bin/env bash\n'
+    printf 'case "$1" in\n'
+    printf '  info) sleep 7; echo v27; exit 0 ;;\n'
+    printf '  *) sleep 40; exit 0 ;;\n'
+    printf 'esac\n'
+} > "$FD/docker"
+chmod +x "$FD/docker"
+env PATH="$FD:$PATH" "$SBXD" serve --port 7798 >/tmp/sbxddsmoke.fake.log 2>&1 &
+FDPID=$!
+for _ in $(seq 1 20); do
+    curl -s --max-time 1 "http://127.0.0.1:7798/api/health" >/dev/null 2>&1 && break
+    sleep 0.25
+done
+hwall="$(curl -s -o /tmp/sbxddsmoke.health.out -w '%{time_total}' --max-time 20 \
+    "http://127.0.0.1:7798/api/health" 2>/dev/null)"
+grep -q '"docker":false' /tmp/sbxddsmoke.health.out \
+    && pass "wedged engine: health reports docker:false" \
+    || fail "wedged engine: health reports docker:false"
+awk -v w="$hwall" 'BEGIN{exit !(w < 8)}' \
+    && pass "wedged engine: health probe capped (wall ${hwall%%.*}s < 8s)" \
+    || fail "wedged engine: health probe capped (wall=${hwall}s)"
+swall="$(curl -s -o /tmp/sbxddsmoke.sbx.out -w '%{time_total}' --max-time 20 \
+    "http://127.0.0.1:7798/api/sandboxes" 2>/dev/null)"
+awk -v w="$swall" 'BEGIN{exit !(w < 8)}' \
+    && pass "wedged engine: sandboxes answer promptly (wall ${swall%%.*}s < 8s)" \
+    || fail "wedged engine: sandboxes answered slowly (wall=${swall}s)"
+kill "$FDPID" 2>/dev/null
+wait "$FDPID" 2>/dev/null
+
+# perm-denied shape: docker exists but the engine refuses instantly — the
+# real remote-box case. Everything must be prompt, no retry-drag.
+printf '#!/usr/bin/env bash\necho "permission denied while trying to connect to the Docker daemon socket" >&2\nexit 1\n' > "$FD/docker"
+env PATH="$FD:$PATH" "$SBXD" serve --port 7798 >/tmp/sbxddsmoke.fake2.log 2>&1 &
+FDPID=$!
+for _ in $(seq 1 20); do
+    curl -s --max-time 1 "http://127.0.0.1:7798/api/health" >/dev/null 2>&1 && break
+    sleep 0.25
+done
+fwall="$(curl -s -o /tmp/sbxddsmoke.health2.out -w '%{time_total}' --max-time 20 \
+    "http://127.0.0.1:7798/api/health" 2>/dev/null)"
+grep -q '"docker":false' /tmp/sbxddsmoke.health2.out \
+    && pass "perm-denied engine: health reports docker:false" \
+    || fail "perm-denied engine: health reports docker:false"
+awk -v w="$fwall" 'BEGIN{exit !(w < 3)}' \
+    && pass "perm-denied engine: health prompt (wall ${fwall%%.*}s < 3s)" \
+    || fail "perm-denied engine: health prompt (wall=${fwall}s)"
+kill "$FDPID" 2>/dev/null
+wait "$FDPID" 2>/dev/null
+
 hdr "inventory (ps)"
 list="$("$SBXD" ps 2>&1)"
 echo "$list" | grep -q 'NAME.*KIND.*STATE' && pass "ps prints unified table" || fail "ps prints unified table"
