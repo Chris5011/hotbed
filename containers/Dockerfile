@@ -70,10 +70,16 @@ RUN apt-get update \
 
 # fallback opencode binary (official release channel); if the host has its own
 # opencode binary it gets bind-mounted over /usr/local/bin/opencode at runtime.
+# The download retries a few times: a transient TLS sway (curl exit 35) used to
+# kill the whole one-time build on fresh boxes.
 RUN set -e \
- && curl -fsSL \
-      "https://github.com/sst/opencode/releases/download/v${OPENCODE_FALLBACK_VERSION}/opencode-linux-x64.tar.gz" \
-      -o /tmp/opencode.tgz \
+ && for a in 1 2 3 4 5; do \
+      curl -fsSL \
+        "https://github.com/sst/opencode/releases/download/v${OPENCODE_FALLBACK_VERSION}/opencode-linux-x64.tar.gz" \
+        -o /tmp/opencode.tgz && break \
+        || { rm -f /tmp/opencode.tgz; echo "opencode download attempt $a failed — retrying"; sleep 3; }; \
+    done \
+ && [ -s /tmp/opencode.tgz ] \
  && tar -xzf /tmp/opencode.tgz -C /usr/local/bin opencode \
  && chmod 0755 /usr/local/bin/opencode \
  && rm /tmp/opencode.tgz \
