@@ -109,10 +109,23 @@ waiting to happen. This kit gives every project a throwaway environment:
 Packages (Debian-family names):
 
 ```bash
-sudo apt install -y libvirt-clients virtinst qemu-system-x86 qemu-utils \
+sudo apt install -y libvirt-daemon-system libvirt-daemon-config-network \
+                    libvirt-clients virtinst qemu-system-x86 qemu-utils \
                     e2fsprogs xorriso
-# virsh / virt-install / qemu-img live in the first three,
-# debugfs (used by the image patcher) in e2fsprogs
+# first two: the system daemon + the default NAT network config;
+# next three: virsh / virt-install / qemu-img; debugfs (image patcher) is
+# in e2fsprogs
+```
+
+Get the daemon running and reachable as your user (without these, `virsh`
+finds no `qemu:///system` and every VM op fails):
+
+```bash
+sudo usermod -aG libvirt "$USER"   # socket access without sudo (then re-login!)
+sudo systemctl enable --now libvirtd   # classic distros
+# Debian 12+/Ubuntu 24.04+ use modular daemons instead — the network one
+# is needed for NAT/DHCP:
+sudo systemctl enable --now virtqemud.socket virtnetworkd.socket
 ```
 
 Two one-time systemd/libvirt settings (once per host):
@@ -160,8 +173,11 @@ Add this only for the **VM · libvirt** backend (the docker VM backend runs
 without any of it):
 
 ```bash
-sudo apt install -y libvirt-clients virtinst qemu-system-x86 qemu-utils \
+sudo apt install -y libvirt-daemon-system libvirt-daemon-config-network \
+                    libvirt-clients virtinst qemu-system-x86 qemu-utils \
                     e2fsprogs xorriso
+# + start the daemon (systemctl/format varies by distro) — see
+#   the VM side section under Requirements
 ```
 
 VMs of either backend need **nested KVM** (a writable `/dev/kvm`) — see
