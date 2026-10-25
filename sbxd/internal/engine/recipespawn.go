@@ -9,6 +9,7 @@ package engine
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,6 +26,42 @@ func RecipeImageName(stack string) string { return "sbx:" + stack }
 func RecipeImageExists(stack string) bool {
 	_, err := RunTO(15*time.Second, "docker", "image", "inspect", RecipeImageName(stack))
 	return err == nil
+}
+
+// RecipeImageEnsure makes sure the kit image for stack exists locally,
+// building it through the shared containers/Dockerfile when it does not —
+// same flags `bin/sbx build <stack>` uses (one-time per stack, layers
+// cached afterwards). 'sbx:<stack>' is a kit-built image with no registry
+// upstream, so a fresh box's dashboard create would otherwise dangle on
+// 'pull access denied for sbx' from the docker CLI.
+func RecipeImageEnsure(stack string) error {
+	if _, err := RunTO(15*time.Second, "docker", "image", "inspect", RecipeImageName(stack)); err == nil {
+		return nil
+	}
+	root := env.Root()
+	df := filepath.Join(root, "containers", "Dockerfile")
+	if _, err := os.Stat(df); err != nil {
+		return fmt.Errorf("image %s not found locally and no build files at %s — build it once from the kit tree: bin/sbx build %s",
+			RecipeImageName(stack), root, stack)
+	}
+	audit.Record("image.build", RecipeImageName(stack), "missing — built during create ("+stack+")")
+	out, err := RunTO(20*time.Minute, "docker", "build", "--target", stack,
+		"-t", RecipeImageName(stack), "-f", df, root)
+	if err != nil {
+		return fmt.Errorf("building %s failed (one-time per stack; manual: bin/sbx build %s): %s",
+			RecipeImageName(stack), stack, tailLines(out, 4))
+	}
+	return nil
+}
+
+// tailLines is the honest-error helper: build logs are long, the lines that
+// matter are the last ones.
+func tailLines(s string, n int) string {
+	lines := strings.Split(strings.TrimRight(strings.TrimSpace(s), "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, " • ")
 }
 
 // RecipeStacks lists the stacks the kit knows (from bin/sbx STACKS).
@@ -55,6 +92,9 @@ func SpawnRecipeContainer(s RecipeSpawn) (string, error) {
 	uid, gid, home := homeUIDGID()
 	if s.Stack == "" {
 		return cn, fmt.Errorf("stack: required to spawn (`stack: go|node|python|rust|base`)")
+	}
+	if err := RecipeImageEnsure(s.Stack); err != nil {
+		return cn, err
 	}
 	if v, ok := RecipeStacks[s.Stack]; ok {
 		if _, err := RunTO(10*time.Second, "docker", "volume", "inspect", v); err != nil {
