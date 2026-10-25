@@ -17,64 +17,75 @@ type Collector struct {
 }
 
 // Scan gathers the current inventory (containers + both VM backends).
+//
+// Docker first answers a bounded probe (DockerUp, 4 s); when the engine is
+// down — or wedged on a cold/remote host — the heavy ps/stats/port fanout
+// is skipped entirely instead of dragging every refresh tick: an empty
+// docker section comes back promptly until the engine works again.
 func (c *Collector) Scan() []Sandbox {
 	var out []Sandbox
-	stats := engine.DockerStats()
+	dockerUp := engine.DockerUp()
+	var stats map[string]engine.ContainerStat
 
 	// --- bin/sbx sandboxes (docker containers) ----------------------------
-	rows, _ := engine.ListSandboxContainers()
-	for _, r := range rows {
-		name := strings.TrimPrefix(r.Names, "/")
-		st := ContainerSandbox{
-			Sandbox: Sandbox{
-				Kind: KindContainer, Name: name, ID: shortID(r.ID), Image: r.Image,
-				State: normalizeDockerState(r.State), Status: r.Status,
-				Project: r.Labels["dev.sbx.project"], Stack: r.Labels["dev.sbx.stack"],
-				CreatedAt: r.CreatedAt, Uptime: ofAge(r.CreatedAt),
-			},
+	if dockerUp {
+		stats = engine.DockerStats()
+		rows, _ := engine.ListSandboxContainers()
+		for _, r := range rows {
+			name := strings.TrimPrefix(r.Names, "/")
+			st := ContainerSandbox{
+				Sandbox: Sandbox{
+					Kind: KindContainer, Name: name, ID: shortID(r.ID), Image: r.Image,
+					State: normalizeDockerState(r.State), Status: r.Status,
+					Project: r.Labels["dev.sbx.project"], Stack: r.Labels["dev.sbx.stack"],
+					CreatedAt: r.CreatedAt, Uptime: ofAge(r.CreatedAt),
+				},
+			}
+			if s, ok := stats[name]; ok {
+				st.CPUPct = engine.ParsePerc(s.CPUPerc)
+				st.MemPct = engine.ParsePerc(s.MemPerc)
+				st.MemUsage = s.MemUse
+				st.NetIO = s.NetIO
+				st.BlockIO = s.BlockIO
+			}
+			out = append(out, st.Sandbox)
 		}
-		if s, ok := stats[name]; ok {
-			st.CPUPct = engine.ParsePerc(s.CPUPerc)
-			st.MemPct = engine.ParsePerc(s.MemPerc)
-			st.MemUsage = s.MemUse
-			st.NetIO = s.NetIO
-			st.BlockIO = s.BlockIO
-		}
-		out = append(out, st.Sandbox)
 	}
 
 	// --- docker-backend VMs (sbxvmd containers) ---------------------------
-	vmrows, _ := engine.ListVMDockerContainers()
-	for _, r := range vmrows {
-		name := strings.TrimPrefix(r.Names, "/")
-		vm := strings.TrimPrefix(name, env.VMDockerPrefix)
-		sb := Sandbox{
-			Kind: KindVM, Backend: BackendDocker, Name: vm, ID: shortID(r.ID),
-			Image: r.Image, State: normalizeDockerState(r.State), Status: r.Status,
-			CreatedAt: r.CreatedAt, Uptime: ofAge(r.CreatedAt), Project: "sbxvmd store",
+	if dockerUp {
+		vmrows, _ := engine.ListVMDockerContainers()
+		for _, r := range vmrows {
+			name := strings.TrimPrefix(r.Names, "/")
+			vm := strings.TrimPrefix(name, env.VMDockerPrefix)
+			sb := Sandbox{
+				Kind: KindVM, Backend: BackendDocker, Name: vm, ID: shortID(r.ID),
+				Image: r.Image, State: normalizeDockerState(r.State), Status: r.Status,
+				CreatedAt: r.CreatedAt, Uptime: ofAge(r.CreatedAt), Project: "sbxvmd store",
+			}
+			if s, ok := stats[name]; ok {
+				sb.CPUPct = engine.ParsePerc(s.CPUPerc)
+				sb.MemPct = engine.ParsePerc(s.MemPerc)
+				sb.MemUsage = s.MemUse
+				sb.NetIO = s.NetIO
+				sb.BlockIO = s.BlockIO
+			}
+			if p := engine.DockerPort(name); p != "" {
+				sb.Ports = append(sb.Ports, "127.0.0.1:"+p)
+				sb.SSH = "SSH_CMD=ssh -i ~/.ssh/sbxvm_key -o StrictHostKeyChecking=accept-new -p " + p + " dev@127.0.0.1"
+				sb.LogHint = "serial (container stream)"
+			}
+			// CPU/MEM already come from `docker stats` above; the guest kernel is
+			// opaque to the host for docker-backend VMs (no virsh domain exists).
+			// The kit self-registers its boot: engine "running" ahead of an
+			// unconfirmed boot-select signal is an honest "booting" instead —
+			// containers are untouched (they boot in seconds).
+			if sb.State == "running" && IsPendingBoot(vm) {
+				sb.State = "booting"
+				sb.Status = "guest booting (self-registered, awaiting kit confirmation)"
+			}
+			out = append(out, sb)
 		}
-		if s, ok := stats[name]; ok {
-			sb.CPUPct = engine.ParsePerc(s.CPUPerc)
-			sb.MemPct = engine.ParsePerc(s.MemPerc)
-			sb.MemUsage = s.MemUse
-			sb.NetIO = s.NetIO
-			sb.BlockIO = s.BlockIO
-		}
-		if p := engine.DockerPort(name); p != "" {
-			sb.Ports = append(sb.Ports, "127.0.0.1:"+p)
-			sb.SSH = "SSH_CMD=ssh -i ~/.ssh/sbxvm_key -o StrictHostKeyChecking=accept-new -p " + p + " dev@127.0.0.1"
-			sb.LogHint = "serial (container stream)"
-		}
-		// CPU/MEM already come from `docker stats` above; the guest kernel is
-		// opaque to the host for docker-backend VMs (no virsh domain exists).
-		// The kit self-registers its boot: engine "running" ahead of an
-		// unconfirmed boot-select signal is an honest "booting" instead —
-		// containers are untouched (they boot in seconds).
-		if sb.State == "running" && IsPendingBoot(vm) {
-			sb.State = "booting"
-			sb.Status = "guest booting (self-registered, awaiting kit confirmation)"
-		}
-		out = append(out, sb)
 	}
 
 	// --- libvirt VMs ------------------------------------------------------
