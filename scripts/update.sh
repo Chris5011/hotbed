@@ -1,34 +1,46 @@
 #!/usr/bin/env bash
-# scripts/update.sh — self-update a deployed OpenCode-SBX kit tree.
+# scripts/update.sh -- self-update a deployed OpenCode-SBX kit tree.
 #
-#   scripts/update.sh            # latest release + latest tree, keep daemon running
-#   scripts/update.sh --yes      # also restart the resident daemon afterwards
-#   scripts/update.sh v0.2.5     # pin a tag
+#   scripts/update.sh              # latest release + latest tree, keep daemon running
+#   scripts/update.sh --yes        # also restart the resident daemon afterwards
+#   scripts/update.sh --yes --tls  # restart AND flip SBXD_TLS (https) in the same shot
+#   scripts/update.sh v0.2.5       # pin a tag
 #
 # Order matters: tree first (gh via git the repo is auth'd with), then the
 # release ASSET for the binary (tagged, SHA-summed, never a rebuild), then
 # wrappers/prereqs via install.sh, then optionally the daemon restart.
 #
 # Your local working tree is preserved automatically: `git pull --autostash`
-# stashes uncommitted changes (including ignored-looking tool drift, e.g.
-# sbxd/bin refreshes are .gitignored) and pops them back after the merge —
-# no manual `git stash` dance anymore.
+# stashes uncommitted edits in tracked files and pops them back after the
+# merge -- no manual `git stash` dance anymore.
+#
+# Fresh boxes: the bootstrap fetches THIS script (`gh api ... | base64 -d >
+# scripts/update.sh`) BEFORE any git pull exists, so the file lands untracked
+# and the later merge refuses to write the now-tracked file over it. That is
+# not divergence -- the script detects untracked files the incoming merge
+# wants to write, moves them aside, merges, and reconciles:
+#   identical              -> tracked version wins (drop the stale copy)
+#   scripts/update.sh      -> tracked version wins (receipt kept aside; the
+#                             fresh copy re-execs so bash never keeps reading
+#                             a replaced script mid-run)
+#   anything else          -> YOUR untracked version wins (review + commit it)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 YES=0
+TLS=0
 for a in "$@"; do
     case "$a" in
         --yes) YES=1 ;;
+        --tls) TLS=1 ;;
         v*) TAG="$a" ;;
-        *) echo "unknown arg: $a (usage: scripts/update.sh [--yes] [tag])" >&2; exit 2 ;;
+        *) echo "unknown arg: $a (usage: scripts/update.sh [--yes] [--tls] [tag])" >&2; exit 2 ;;
     esac
 done
 say()  { printf '\033[36;1mupdate:\033[0m %s\n' "$*"; }
 warn() { printf '\033[33;1mupdate:\033[0m %s\n' "$*"; }
 fail() { printf '\033[31;1mupdate:\033[0m %s\n' "$*" >&2; exit 1; }
-have() { command -v "$1" >/dev/null 2>&1; }
 
 command -v gh >/dev/null 2>&1 || fail "gh CLI required (gh auth login once)"
 command -v git >/dev/null 2>&1 || fail "git required"
@@ -45,16 +57,64 @@ TAG="${TAG:-$(gh release list --limit 1 --json tagName --jq '.[0].tagName')}"
 say "target release: $TAG"
 
 # ---- tree refresh (uncommitted changes ride via autostash) --------------------
-if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
-    warn "uncommitted local changes detected — git pull --autostash will carry them through and restore them"
+if [[ -n "$(git diff --name-only HEAD 2>/dev/null)" ]]; then
+    warn "uncommitted edits in tracked files -- git pull --autostash carries them through and restores them"
 fi
 git fetch origin --tags --quiet
 if git merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
-    git pull --ff-only --autostash --quiet origin main \
-        || fail "tree not fast-forwardable — local divergence? (git status / git diff to review)"
-    say "kit tree updated ($(git rev-parse --short HEAD))"
+    colliders="$(comm -12 \
+        <(git diff --name-only HEAD origin/main 2>/dev/null | sort) \
+        <(git ls-files --others --exclude-standard 2>/dev/null | sort))"
+    aside=""
+    if [[ -n "$colliders" ]]; then
+        aside="$(mktemp -d "${TMPDIR:-/tmp}/sbxd-update-aside.XXXXXX")"
+        warn "untracked files collide with incoming tree changes -- moving them aside for the merge:"
+        while IFS= read -r f; do
+            [[ -n "$f" ]] || continue
+            mkdir -p "$aside/$(dirname "$f")"
+            mv "$ROOT/$f" "$aside/$f"
+            say "  $f"
+        done <<<"$colliders"
+    fi
+    old_head="$(git rev-parse HEAD)"
+    if git pull --ff-only --autostash --quiet origin main; then
+        if [[ "$(git rev-parse HEAD)" != "$old_head" ]]; then
+            say "kit tree updated ($(git rev-parse --short HEAD))"
+        fi
+        rerun=0
+        if [[ -n "$aside" ]]; then
+            while IFS= read -r f; do
+                [[ -n "$f" ]] || continue
+                if cmp -s "$aside/$f" "$ROOT/$f"; then
+                    say "  $f: incoming version identical -- stale copy dropped"
+                elif [[ "$f" == scripts/update.sh ]]; then
+                    say "  $f: tracked version installed (previous bootstrap copy kept at $aside/scripts/update.sh)"
+                    rerun=1   # my own file just changed under me -- exec the fresh one
+                else
+                    mv "$aside/$f" "$ROOT/$f"
+                    warn "  $f: kept YOUR untracked version over the incoming one (review it -- autostash carries it from here on)"
+                fi
+            done <<<"$colliders"
+            if [[ $rerun -eq 0 ]]; then
+                rm -rf "$aside"
+            fi
+        fi
+        if [[ $rerun -eq 1 ]]; then
+            say "scripts/update.sh was updated mid-run -- restarting from the fresh version"
+            exec bash "$ROOT/scripts/update.sh" "$@"
+        fi
+    else
+        if [[ -n "$aside" ]]; then
+            while IFS= read -r f; do
+                [[ -n "$f" && -f "$aside/$f" ]] || continue
+                mv "$aside/$f" "$ROOT/$f"
+            done <<<"${colliders:-}"
+            rm -rf "$aside"
+        fi
+        fail "tree update failed (merge refused or autostash pop conflicted) -- check git status / git stash list"
+    fi
 else
-    say "kit tree already at origin/main (or diverged — skipping tree update; binary update continues)"
+    say "kit tree already at origin/main (or diverged -- skipping tree update; binary update continues)"
 fi
 git rev-parse -q --verify "refs/tags/$TAG" >/dev/null \
     || warn "tag $TAG not on the fetched tree yet (asset install proceeds anyway)"
@@ -62,13 +122,13 @@ git rev-parse -q --verify "refs/tags/$TAG" >/dev/null \
 # ---- release asset for the daemon binary ---------------------------------------
 mkdir -p dist
 rm -f "dist/sbxd-$TAG-linux-$KA" "dist/SHA256SUMS"
-say "downloading release asset (sbxd-$TAG-linux-$KA + SHA256SUMS)…"
+say "downloading release asset (sbxd-$TAG-linux-$KA + SHA256SUMS)..."
 gh release download "$TAG" --repo "$(gh repo view --json nameWithOwner --jq .nameWithOwner)" \
     --pattern "sbxd-$TAG-linux-$KA" --pattern SHA256SUMS --dir dist --clobber
 ( cd dist && sha256sum -c SHA256SUMS --ignore-missing ) >/dev/null 2>&1 \
-    || fail "SHA256SUMS verification failed — refusing to install the binary"
+    || fail "SHA256SUMS verification failed -- refusing to install the binary"
 install -m 755 "dist/sbxd-$TAG-linux-$KA" sbxd/bin/sbxd
-say "daemon binary installed: sbxd/bin/sbxd ← dist/sbxd-$TAG-linux-$KA"
+say "daemon binary installed: sbxd/bin/sbxd <- dist/sbxd-$TAG-linux-$KA"
 
 # ---- prereqs, wrappers, base image pre-build -----------------------------------
 ./install.sh --yes
@@ -84,11 +144,13 @@ if [[ $YES -eq 1 ]]; then
         OLD_TLS=1
     fi
     if [[ -n "$OLD_PID" ]]; then
-        say "stopping old daemon (PID $OLD_PID)…"
+        say "stopping old daemon (PID $OLD_PID)..."
         kill "$OLD_PID"; sleep 1
     fi
+    TLS_RUN="$OLD_TLS"
+    [[ $TLS -eq 1 ]] && TLS_RUN=1
     SDE_LOG="${TMPDIR:-/tmp}/sbxd-update-serve.log"
-    if [[ $OLD_TLS -eq 1 ]]; then
+    if [[ $TLS_RUN -eq 1 ]]; then
         SBXD_BIND="$BIND" SBXD_TLS=1 nohup "$ROOT/sbxd/bin/sbxd" serve >"$SDE_LOG" 2>&1 &
     else
         SBXD_BIND="$BIND" nohup "$ROOT/sbxd/bin/sbxd" serve >"$SDE_LOG" 2>&1 &
@@ -96,13 +158,16 @@ if [[ $YES -eq 1 ]]; then
     sleep 3
     NEW_PID="$(ss -ltnp 2>/dev/null | grep ':7770 ' | grep -o 'pid=[0-9]*' | cut -d= -f2 | head -1)"
     TLSNOTE=""
-    [[ $OLD_TLS -eq 1 ]] && TLSNOTE=", TLS preserved"
-    say "daemon restarted (PID ${NEW_PID:-unknown}, bind $BIND$TLSNOTE — log $SDE_LOG)"
-    curl -s --max-time 5 http://127.0.0.1:7770/api/health \
-        | grep -q '"version"' && say "daemon healthy" || warn "daemon not answering /api/health yet — check $SDE_LOG"
+    if [[ $TLS_RUN -eq 1 ]]; then TLSNOTE=", TLS on (https)"; fi
+    say "daemon restarted (PID ${NEW_PID:-unknown}, bind $BIND$TLSNOTE -- log $SDE_LOG)"
+    PROTO="http"
+    if [[ $TLS_RUN -eq 1 ]]; then PROTO="https"; fi
+    curl -sk --max-time 5 "$PROTO://127.0.0.1:7770/api/health" \
+        | grep -q '"version"' && say "daemon healthy" || warn "daemon not answering $PROTO://127.0.0.1:7770/api/health yet -- check $SDE_LOG"
 else
     say "done. restart the daemon to pick up the new binary:"
     say "  kill \$(ss -ltnp 2>/dev/null | grep :7770 | grep -o 'pid=[0-9]*' | cut -d= -f2 | head -1)"
-    say "  SBXD_BIND=0.0.0.0 sbxd-serve     # or plain: sbxd-serve (loopback)"
+    say "  SBXD_BIND=0.0.0.0 SBXD_TLS=1 sbxd-serve   # https for the clipboard (see README)"
+    say "  SBXD_BIND=0.0.0.0 sbxd-serve              # plain http (clipboard degrades honestly)"
 fi
 say "update complete ($TAG)"
