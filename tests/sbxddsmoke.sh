@@ -55,6 +55,23 @@ echo "$health" | grep -q '"version"' && pass "daemon answers /api/health" \
 echo "$health" | grep -q '"docker":true' && pass "docker probe healthy" || fail "docker probe healthy"
 echo "$health" | grep -q '"tmux":true'   && pass "tmux probe healthy"   || fail "tmux probe healthy"
 
+hdr "overview stats (GET /api/stats) — dashboard start page data"
+ost="$(curl -s --max-time 3 "http://127.0.0.1:$PORT/api/stats" 2>/dev/null)"
+echo "$ost" | grep -aq '"ok":true' && echo "$ost" | grep -aq '"cpu"' \
+    && echo "$ost" | grep -aq '"percent"' \
+    && pass "overview stats: cpu/mem sample present" \
+    || fail "overview stats: cpu/mem sample present ($(echo "$ost" | head -c 120))"
+echo "$ost" | grep -aq '"disk"' && echo "$ost" | grep -aq '"mount"' \
+    && pass "overview stats: disk mounts reported (statfs)" \
+    || fail "overview stats: disk mounts reported (statfs)"
+echo "$ost" | grep -aq '"vms_libvirt"' && echo "$ost" | grep -aq '"vms_docker"' \
+    && echo "$ost" | grep -aq '"containers"' \
+    && pass "overview stats: inventory counts grouped (containers / vms_libvirt / vms_docker)" \
+    || fail "overview stats: inventory counts grouped"
+echo "$health" | grep -aq '"version":' && echo "$ost" | grep -aq '"version":' \
+    && pass "overview stats: version field present" \
+    || fail "overview stats: version field present"
+
 hdr "SBXD_BIND (non-loopback opt-in)"
 "$SBXD" serve --port 7796 --bind 127.0.0.2 >/tmp/sbxddsmoke.bind.log 2>&1 &
 BIND_PID=$!
