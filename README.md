@@ -259,7 +259,14 @@ It will:
 - offer the one-time Debian master-image fetch (~330 MB download, ~950 MB
   on disk). Skipping is fine — retry any time with `sbxvm fetch-image`;
 - with `--config-init`, import LLM providers from your host opencode
-  config (do it later instead: `sbxd config init`).
+  config (do it later instead: `sbxd config init`). Mind: it is an
+  **import** — on a fresh box without `~/.config/opencode/opencode.json`
+  there is nothing to import and it exits with that error. Either copy
+  that file (plus `~/.opencode/bin/opencode` and `~/.local/share/opencode`
+  for the in-sandbox TUI) over from another machine, or write
+  `~/.config/sbxd/config.json` directly (`sbxd config print` shows the
+  shape). Unconfigured is fine for pure sandbox/VM testing — only the
+  accounting proxy stays idle.
 
 ### 4 · Start the daemon
 
@@ -293,7 +300,10 @@ sandbox (and the `＋ New sandbox` wizard is right next to it).
 
 One command wires your providers into the token-accounting proxy, then
 per-sandbox keys and $-wallets as needed — full walkthrough in
-[P2](#p2--the-llm-proxy-wallets-and-one-global-opencode-config).
+[P2](#p2--the-llm-proxy-wallets-and-one-global-opencode-config). On a fresh
+headless box, remember the step-3 note: `config init` is an import, so
+either bring `~/.config/opencode/` over from a machine that has it or
+write `~/.config/sbxd/config.json` by hand.
 
 ---
 
