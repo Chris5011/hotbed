@@ -31,7 +31,7 @@ vet:
 	cd sbxd && $(GO) vet ./...
 
 build: fmt
-	cd sbxd && $(GO) build -o $(BIN)/sbxd ./cmd/sbxd
+	cd sbxd && $(GO) build -o bin/sbxd ./cmd/sbxd
 
 smoke:
 	SBXD_SMOKE_PORT=7790 bash tests/sbxddsmoke.sh
