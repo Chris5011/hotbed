@@ -672,8 +672,8 @@ function renderCreator(){
         .then(function(res){
           if(res.error){ msg.innerHTML='<span class="err">'+esc('create: '+res.error)+'</span>'; toast('create: '+res.error,'err'); return; }
           var w=res.warn?' (warnings: '+res.warn+')':'';
-          msg.textContent='created VM '+res.vm+' ('+res.backend+' backend, '+res.cpu+' cpu / '+res.mem+' MB / '+res.disk+' GB)'+w+' — appears in the sidebar in ~5s · '+(res.attach||'sbxd attach');
           toast('created VM '+res.vm,'ok');
+          jumpToCreated('vm', res.vm, 'created VM '+res.vm+' ('+res.backend+' backend)'+w);
         })
         .catch(function(){ msg.textContent='create failed (network) — the VM may still be provisioning; check sbxd ps'; });
       return;
@@ -704,14 +704,14 @@ function renderCreator(){
     };
     if($('cw-usd').value!==''){ payload.budget_usd=parseFloat($('cw-usd').value)||0; }
     if($('cw-tok').value!==''){ payload.budget_tokens=parseInt($('cw-tok').value,10)||0; }
-    msg.textContent='creating…';
+    msg.textContent='creating… (the first create per stack builds its kit image — cached afterwards)';
     fetch('/api/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
       .then(function(r){return r.json();})
       .then(function(res){
         if(res.error){ msg.innerHTML='<span class="err">'+esc('create: '+res.error)+'</span>'; toast('create: '+res.error,'err'); return; }
         var w=res.warn?' (warnings: '+res.warn+')':'';
-        msg.textContent='created '+res.container+w+' — appears in the sidebar in ~5s · attach: '+(res.attach||'sbx attach');
         toast('created '+res.container,'ok');
+        jumpToCreated('container', res.container, 'created '+res.container+w);
       })
       .catch(function(){ msg.textContent='create failed (network)'; });
   });
@@ -970,13 +970,34 @@ function renderConfigGlobal(){
 }
 
 /* ---------- details ---------- */
+/* after a create succeeds, hop straight to the new machine's page instead of
+   parking on the form. The collector may lag one refresh tick (~5s), so poll
+   the REST snapshot briefly; past the budget, land honestly on the list. */
+function jumpToCreated(kind, name, warnTxt){
+  var tries=0;
+  function finish(){
+    state.view='sandbox'; $('global').hidden=true; showEmpty();
+  }
+  function attempt(){
+    fetch('/api/sandboxes').then(function(r){return r.json();}).then(function(d){
+      var sb=(d.sandboxes||[]).filter(function(x){return x.name===name&&x.kind===kind;})[0];
+      if(sb){ if(warnTxt){ toast(warnTxt,'ok'); } select(sb); return; }
+      if(++tries<20){ setTimeout(attempt,500); return; }
+      finish(); toast('created '+name+' — still surfacing in the sidebar','ok');
+    }).catch(function(){
+      if(++tries<20){ setTimeout(attempt,500); return; }
+      finish(); toast('created '+name,'ok');
+    });
+  }
+  attempt();
+}
+
 function select(sb){
   state.sel=keyOf(sb);
   state.view='sandbox';                 // leaving any global (burn/config) view
   closeLogs();
   renderList();
-  $('empty').hidden=true; $('pane').hidden=false; $('global').hidden=true;
-  var vmKind=sb.kind==='vm';
+  $('empty').hidden=true; $('pane').hidden=false; $('global').hidden=true;  var vmKind=sb.kind==='vm';
   $('d-name').textContent=sb.name;
   $('d-sub').innerHTML = (vmKind? esc('VM · ') : '')+ esc(sb.kind)+(vmKind && sb.backend? ' · '+esc(sb.backend):'')+
      (sb.project? ' · '+esc(short(sb.project)):'') + (sb.stack? ' · '+esc(sb.stack):'');
