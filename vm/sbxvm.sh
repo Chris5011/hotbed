@@ -247,6 +247,34 @@ ensure_guest_opencode() {
     fi
 }
 
+# sync_guest_models NAME: wire the sbx proxy into the guest (mint key + write
+# the opencode.json that lists the models + establish the ssh -R tunnel) by
+# asking the local controller — exactly what the dashboard's sync button
+# does for dashboard-created sandboxes. CLI-created VMs used to skip it
+# entirely: opencode came up with an EMPTY model list. Best-effort + honest:
+# no controller → say so; controller says no providers → name the cure.
+sync_guest_models() {
+    local name="$1" res
+    [[ -n "$name" ]] || return 0
+    local port="${SBXD_PORT:-7770}"
+    if [[ -z "${_SBXVM_CTL:-}" ]]; then
+        if curl -sk --max-time 2 "https://127.0.0.1:${port}/api/health" 2>/dev/null | grep -q '"version"'; then
+            _SBXVM_CTL="https"
+        else
+            _SBXVM_CTL="http"
+        fi
+    fi
+    res="$(curl -sk --max-time 90 -X POST "${_SBXVM_CTL}://127.0.0.1:${port}/api/sandboxes/vm/${name}/sync" \
+        -H 'Content-Type: application/json' -d '{}' 2>/dev/null || true)"
+    if [[ "$res" == *'"ok":true'* ]]; then
+        ok "guest models wired to the sbx proxy ($(grep -o '"via" *: *"[^"]*"' <<<"$res" | head -1 | cut -d'"' -f4))"
+    elif [[ -z "$res" ]]; then
+        warn "no controller listening on ${port} — models stay unwired; run later: sbxd config init && sbxd sync ${name}"
+    else
+        warn "guest proxy sync failed — models need: sbxd config init && sbxd sync ${name}  (${res:0:110})"
+    fi
+}
+
 # wait_ready NAME: poll cloud-init until provisioning is done; then, since the
 # first boot runs the cloud-flavor kernel and packages just installed the full
 # one, issue one reboot into it when needed; finally verify the workspace 9p
@@ -510,6 +538,7 @@ dcreate() {
     wait_ssh "$name" 900
     wait_ready "$name"
     ensure_guest_opencode "$name"
+    sync_guest_models "$name"
     notify_controller end "$name"   # guest confirmed up → controller drops the "booting" state
 }
 
@@ -614,6 +643,7 @@ create() {
     wait_ssh "$name" 900
     wait_ready "$name"
     ensure_guest_opencode "$name"
+    sync_guest_models "$name"
     notify_controller end "$name"   # guest confirmed up → controller drops the "booting" state
 }
 
