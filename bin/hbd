@@ -572,7 +572,7 @@ help() {
     cat <<EOF
 hbd $HBD_VERSION — disposable sandboxed dev containers for AI coding tools
 
-Mental model: 'hbd' makes a throwaway Docker container per project dir.
+The idea: 'hbd' makes a throwaway Docker container per project dir.
 Your project is bind-mounted at /workspace (project dir = only thing on the
 host the agent CAN touch). Everything the agent installs lives only inside
 the container and dies with 'hbd rm'.
@@ -604,6 +604,10 @@ OPTIONS
   --mount HOST:CT[:ro]   add extra bind mount (repeatable)
   --env  KEY=VAL         set extra environment var (repeatable)
   --yes                  skip confirmations
+
+LLM DISCLOSURE
+  this kit is developed with LLM coding agents under human direction;
+  see the README section "LLM disclosure" for the full shape.
 EOF
 }
 

@@ -1377,10 +1377,14 @@ function hsec(t){ return '<div class="hsec">'+t+'</div>'; }
 function renderHelp(){
   var sql=$('glob-body');
   sql.innerHTML=
-    hsec('Mental model')+
+    hsec('The idea')+
     '<div style="font-size:.82rem;color:var(--dim);line-height:1.55;max-width:70ch">'+
     '<p><b>hbd</b> makes a disposable Docker container per project dir - your project is bind-mounted at <span class="mono">/workspace</span>, the only host path the agent can touch. <b>hotbedvm</b> is the VM escape hatch (libvirt, or docker-in-docker "hotbedvmd"): snapshots, ssh, full disk. <b>hotbedd</b> is this daemon and dashboard: OpenCode config, the proxy (burn ledger), wallets, egress fences, kits.</p>'+
     '<p>Provider API keys stay on the host in hotbedd only - sandboxes get per-sandbox minted proxy keys, the UI shows them masked everywhere.</p>'+
+    '</div>'+
+    hsec('LLM disclosure')+
+    '<div style="font-size:.82rem;color:var(--dim);line-height:1.55;max-width:70ch">'+
+    '<p>This project is developed with LLM coding agents (via OpenCode) under human direction: much of the code, tests and docs was authored or reworked by an assistant, then reviewed and gate-verified before landing. The README\'s <b>LLM disclosure</b> section has the full statement.</p>'+
     '</div>'+
     hsec('Quick start')+
     '<table class="tbl"><tbody>'+

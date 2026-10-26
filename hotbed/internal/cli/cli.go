@@ -113,6 +113,11 @@ CONFIG & BURN (P2)
                             outbound fence via iptables inside the sandbox (show: omit preset)
   hotbedd audit [N]            last N control-plane actions (start/stop, keys, wallets, mounts, egress)
   hotbedd version|help
+
+LLM DISCLOSURE
+  developed with LLM coding agents under human direction - gates
+  (static checks, smoke suite, live-compat) verify every change;
+  README section "LLM disclosure" has the full statement.
 `, env.Version)
 }
 

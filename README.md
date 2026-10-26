@@ -362,7 +362,7 @@ as you; every VM is per-user data).
 
 ## hbd — container sandboxes
 
-### Mental model
+### The idea
 
 `hbd` makes **one persistent, throwaway Docker container per project
 directory**. The container name is derived from the project's absolute path
@@ -1345,6 +1345,18 @@ per-VM seed ISOs are generated, not committed. Concretely:
 - PRs get the repo's `.github/PULL_REQUEST_TEMPLATE.md` (what / how-verified /
   evidence checklists) — titles must be valid conventional commit subjects,
   because squashing turns them into history.
+
+## LLM disclosure
+
+This kit is developed in open partnership with LLM coding agents: most of
+the code, tests, docs and release steps in this repository were authored
+or reworked by an assistant (OpenCode driving an LLM) under close human
+direction. Nothing lands without the maintainer reading it and the gate
+passing (`scripts/static-check.sh`, `tests/hotbedd-smoke.sh`, and
+live-compatibility checks on the real box - including the rename-release
+verification that caught a hermetic-sweeper bug before it could ship).
+The dashboard help page carries the same note. If you find where the
+machine ran ahead of its operator, an issue or PR is the full disclosure.
 
 ## License
 
