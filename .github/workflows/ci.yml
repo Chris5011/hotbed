@@ -1,0 +1,19 @@
+# CI-lite: everything that needs no docker and no libvirt. The hermetic
+# gate (tests/sbxddsmoke.sh) needs engines — it runs on the release host,
+# not here (see docs/RELEASING.md §5).
+name: ci
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: sbxd/go.mod
+      - run: make check
+      - run: bash scripts/static-check.sh

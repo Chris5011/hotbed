@@ -11,16 +11,19 @@
 # VERSION stamps the binary via -ldflags "-X sbxd/internal/env.Version=…"
 # (the source default remains archival). Bump this default alongside the tag.
 
-VERSION ?= 0.3.0
+VERSION ?= 0.4.0
 
 GO     ?= go
 GOFMT  ?= gofmt
 BIN    := sbxd/bin
 DIST   := dist
 
-.PHONY: check fmt vet build smoke release clean
+.PHONY: check fmt vet build static smoke release clean
 
-check: fmt vet build
+check: fmt vet build static
+
+static:
+	@bash scripts/static-check.sh
 
 fmt:
 	@out="$$($(GOFMT) -l sbxd/internal sbxd/cmd)"; \

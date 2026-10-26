@@ -32,6 +32,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
+hdr "static: appJS ghost scan (no daemon needed)"
+if bash scripts/static-check.sh; then
+    pass "static checks: bash kit + node --check + undefined-helper scan"
+else
+    fail "static checks: bash kit + node --check + undefined-helper scan"
+fi
+
 hdr "runtime"
 if [[ -x "$SBXD" ]]; then pass "sbxd binary present"; else
     fail "sbxd binary present (build: cd sbxd && go build -o bin/sbxd ./cmd/sbxd)"
