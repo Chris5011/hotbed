@@ -1,3 +1,55 @@
+# Hotbed v0.5.0 — the rename release
+
+The project (formerly **OpenCode-SBX**, daemon **sbxd**, CLI **sbx**) is now
+**Hotbed**. Same contract, new name, zero live disruption — all running
+sandboxes from pre-rename daemons keep working, untouched, on this build.
+
+## Why rename
+
+`sbx` is taken: Docker Inc. ships proprietary "Docker Sandboxes" with the CLI
+`sbx` (repo `docker/sbx-releases`) for the exact same use case — AI coding
+agents in isolated environments. Once public, every search for "sbx" would
+land there, not here. "Hotbed" is fresh everywhere that matters: npm, PyPI,
+crates.io, Homebrew and Docker Hub all had the name free, and `hotbed.dev`
+is unclaimed.
+
+## The new names
+
+| before | after |
+|---|---|
+| OpenCode-SBX (repo/project) | **Hotbed** |
+| `sbx` CLI | **`hbd`** |
+| `sbxd` daemon | **`hotbedd`** |
+| `sbx:<stack>` images | `hotbed:<stack>` |
+| `dev.sbx.*` labels | `dev.hotbed.*` |
+| `bin/sbx`, `sbxd-serve`, `sbxvm`, `sbxvmd` | `bin/hbd`, `hotbedd-serve`, `hotbedvm`, `hotbedvmd` |
+| `sbxk-…` keys | `hbk-…` (`sbxk-…` tokens remain valid) |
+| `~/.config/sbxd`, `~/.local/{share,state}/sbxd`, `~/.local/state/sbx` | `~/.config/hotbedd`, `~/.local/{share,state}/hotbedd` (copied once, legacy dirs untouched — a downgrade still boots) |
+| container user `sbx` (`/home/sbx`) | `hbd` (`/home/hbd`) in v0.5 images |
+
+## Live compatibility (the point of v0.5.0)
+
+- **Legacy sandboxes stay visible and manageable** — collectors list BOTH
+  label generations (`dev.hotbed` + `dev.sbx`), deduped by container name;
+  the kit queries both too.
+- **Owner stamps survive** — the owner label is now seeded from a stable
+  `owner-id` file (first run seeds from the legacy config-dir hash), so the
+  rename never re-stamps existing sandboxes as foreign and idle sweepers
+  keep respecting them.
+- **The relay keeps its name** — relay names derive from the owner stamp,
+  which is preserved byte-for-byte across the rename.
+- **Tmux sessions re-parent** — pre-rename `sbx-*` sessions are renamed to
+  `hotbed-*` on daemon boot; attached clients stay attached.
+- **In-container home probing** — runtime code probes `/home/sbx` vs
+  `/home/hbd` per container, so synced proxy configs and attach-time XDG
+  overrides work on both image generations.
+- **Old keys keep working** — keys match by stored token string; `sbxk-…`
+  tokens minted by v0.4 remain valid, new mints use `hbk-…`.
+
+Deliberately unchanged: the relay container's `sbx-relay-<owner>` prefix
+(its in-flight identity derives from the preserved owner stamp), and the
+in-container config path `opencode-sbx` (legacy containers depend on it).
+
 # SBX Desktop v0.4.1
 
 A setup-ergonomics patch: the two things a fresh box touches first (the
