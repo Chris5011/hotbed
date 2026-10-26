@@ -787,6 +787,24 @@ func (s *Server) usagePurge(w http.ResponseWriter, r *http.Request) {
 		httpError(w, 500, "purge failed: "+err.Error())
 		return
 	}
+	// The burn table also synthesizes rows from config: wallets
+	// (EachWallet) and stored sync targets (cfgsync.SyncedNames). A ledger
+	// purge alone can never remove such a row - the deleted sandbox would
+	// resurrect on the next /api/usage. For names that no longer exist,
+	// drop those leftovers as well (this mirrors the rm lifecycle; the
+	// confirm dialog covers it. Live sandboxes are untouched.)
+	var notes []string
+	for n := range target {
+		if live[n] {
+			continue
+		}
+		if _, err := s.Cfg.RemoveWallets(n); err != nil {
+			notes = append(notes, "wallets of "+n+" not removed: "+err.Error())
+		}
+		if err := cfgsync.RemoveTarget(n); err != nil {
+			notes = append(notes, "sync target of "+n+" not removed: "+err.Error())
+		}
+	}
 	names := make([]string, 0, len(target))
 	for n := range target {
 		names = append(names, n)
@@ -795,7 +813,7 @@ func (s *Server) usagePurge(w http.ResponseWriter, r *http.Request) {
 	if len(names) > 0 {
 		audit.Record("ledger.purge", strings.Join(names, ","), fmt.Sprintf("%d journal rows dropped", dropped))
 	}
-	okJSON(w, map[string]any{"ok": true, "purged": names, "rows": dropped})
+	okJSON(w, map[string]any{"ok": true, "purged": names, "rows": dropped, "notes": notes})
 }
 
 // usagePin: POST /api/usage/pin — pin/unpin a sandbox's burn history.

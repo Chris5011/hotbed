@@ -903,7 +903,7 @@ function paintBurn(rows, body){
         body:'Delete the burn records of <span class="mono">'+esc(name)+'</span>?',
         confirmLabel:'Delete records',
         danger:true,
-        attrs:['Its sandbox no longer exists - the history lives only in <span class="mono">usage.jsonl</span>.']
+        attrs:['Its sandbox no longer exists. Removes the journal rows <b>and</b> its leftover wallet + sync target, so the row cannot come back.']
       },function(ok){
         if(!ok){ return; }
         fetch('/api/usage/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sandboxes:[name]})})
