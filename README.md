@@ -866,6 +866,18 @@ pinned ★ rows are always exempt, and a pin protects a live sandbox's
 history too). Purge and pin changes are audit-logged (`ledger.purge`,
 `ledger.pin`/`unpin`), pins persist in `config.json:pinned_sandboxes`.
 
+**Counted vs uncounted.** The proxy and ledger always count what reaches
+them; a sandbox shows zero rows only when its opencode bypasses the proxy.
+Every request must carry both (a) the synced proxy config (`sbxd sync
+NAME` writes a `sbx-proxy` provider with the sandbox's own key) and (b)
+the attach-time `XDG_CONFIG_HOME` override that makes opencode read it.
+Attach, the one-shot connection variants, Windows Terminal and the kit's
+own `sbx shell|opencode|exec` all inject the override for containers; VM
+guests get the config written directly and a persistent ssh tunnel. If a
+session predates a later sync, its next attach respawns the (bare) shell
+pane automatically so the env lands - a running opencode TUI is never
+respawned; close it and re-attach once to switch to counted mode.
+
 ### P3 — recipes, config-file budgets, mounts, egress, sweeper, audit, create wizard
 
 P3 turns sbxd from observer into **operator**: everything the kit used to
@@ -976,6 +988,24 @@ loopback-only dashboard, traversal outside home is rejected).
 - A synced sandbox config is written into a *shared-write* path the kit
   already mounts for VMs, or a container-only XDG shim path — never over a
   location the kit mounts writable for other purposes.
+
+#### Not on the roadmap by design
+
+Two "obvious" desktop-type features are deliberately not part of SBX
+Desktop, recorded here so the positioning is explicit:
+
+- **Shared-host user/permission concept** — deliberately not by default.
+  If ever built, it is an opt-in *shared host* mode that needs: API token
+  auth (loopback-trust alone no longer suffices), a per-user sandbox name
+  namespace with list filtering, per-user proxy wallets and burn ledgers,
+  and host folder mounts disabled outright (a shared folder is the first
+  cross-user leak). Anything less is a false sense of multi-user safety.
+- **Hosted server-mode** (SBX Desktop as SaaS for teams) is rejected as
+  native multi-tenancy — that is Gitpod/Codespaces territory, not a
+  desktop tool's. The sensible middle path if remote use is wanted:
+  *remote-daemon mode* — keep the single-tenant daemon, point a local UI/CLI
+  at your own server over the API, and have project-dir push at create
+  time replace the folder binding.
 
 ### Sequel phases
 
