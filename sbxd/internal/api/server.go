@@ -518,6 +518,7 @@ func (s *Server) actionDelete(w http.ResponseWriter, r *http.Request) {
 	if err := cfgsync.RemoveTarget(sb.Name); err != nil {
 		notes = append(notes, "sync target removal failed: "+err.Error())
 	}
+	attach.KillTunnel(sb.Name)
 
 	var err error
 	switch sb.Kind {

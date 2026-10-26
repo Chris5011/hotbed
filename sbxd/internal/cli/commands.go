@@ -150,6 +150,10 @@ func serve(args []string) error {
 		}
 	}()
 
+	// state-dir hygiene: tunnel pid/log files whose process is gone are
+	// dead weight from rm'd sandboxes, suites or crashes - drop them.
+	attach.SweepStaleTunnels()
+
 	// idle sweeper: auto-stop kit containers whose CPU stays near zero for
 	// `sweeper.idle_stop_minutes` (0 = disabled). Re-reads config each cycle
 	// so `sbxd config set` from another process applies live. Container-only

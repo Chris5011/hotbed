@@ -8,6 +8,7 @@ const indexHTML = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>SBX Desktop - OpenCode Sandboxes</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230d1220'/%3E%3Crect x='9' y='13' width='46' height='38' rx='5' fill='none' stroke='%234cc38a' stroke-width='4'/%3E%3Cpath d='M20 33h24M20 40h16' stroke='%238d99ab' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/style.css">
 <script>document.documentElement.setAttribute('data-theme',localStorage.getItem('sbx-theme')||'dark');</script>
 </head>

@@ -393,6 +393,50 @@ func TunnelAlive(sandbox string) bool {
 	return e == nil && pid > 0 && procAlive(pid)
 }
 
+// KillTunnel stops a sandbox's persisted ssh tunnel (if it belongs to us
+// and is still running) and drops its pid/log leftovers. The kill is
+// sanity-checked against the process cmdline (must be an ssh holding the
+// -R forward); a recycled pid is never signalled.
+func KillTunnel(sandbox string) {
+	b, _ := os.ReadFile(TunnelPIDFile(sandbox))
+	if b != nil {
+		if pid, e := strconv.Atoi(strings.TrimSpace(string(b))); e == nil && pid > 0 && procAlive(pid) {
+			if cl, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid)); err == nil &&
+				strings.Contains(string(cl), "ssh") && strings.Contains(string(cl), "-R") {
+				_ = exec.Command("kill", strconv.Itoa(pid)).Run()
+			}
+		}
+	}
+	name := sandboxName(sandbox)
+	_ = os.Remove(filepath.Join(env.StateDir(), "tunnel-"+name+".pid"))
+	_ = os.Remove(filepath.Join(env.StateDir(), "tunnel-"+name+".log"))
+}
+
+// SweepStaleTunnels removes tunnel pid/log files whose process is gone
+// (rm'd sandboxes, suite daemons, crash leftovers). A live pid is left
+// alone - a still-running tunnel keeps working after its file would go.
+func SweepStaleTunnels() {
+	entries, err := os.ReadDir(env.StateDir())
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), "tunnel-") || !strings.HasSuffix(e.Name(), ".pid") {
+			continue
+		}
+		name := strings.TrimSuffix(strings.TrimPrefix(e.Name(), "tunnel-"), ".pid")
+		b, err := os.ReadFile(TunnelPIDFile(name))
+		if err != nil {
+			continue
+		}
+		pid, e2 := strconv.Atoi(strings.TrimSpace(string(b)))
+		if e2 != nil || pid <= 0 || !procAlive(pid) {
+			_ = os.Remove(TunnelPIDFile(name))
+			_ = os.Remove(filepath.Join(env.StateDir(), "tunnel-"+name+".log"))
+		}
+	}
+}
+
 // ProbeReach checks whether the sandbox itself can open a TCP connection to
 // host:port — used to pick a reachable base URL for containers (and to
 // verify VM tunnels). Docker Desktop's WSL setup blocks normal host routes,
