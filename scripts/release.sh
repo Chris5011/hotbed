@@ -15,7 +15,7 @@ export GOOS=linux
 export CGO_ENABLED=0
 
 for arch in amd64 arm64; do
-    ( cd "$repo/hotbedd" && GOARCH="$arch" go build -trimpath \
+    ( cd "$repo/hotbed" && GOARCH="$arch" go build -trimpath \
         -ldflags "-s -w -X hotbed/internal/env.Version=v$VER" \
         -o "$out/hotbedd-v$VER-linux-$arch" ./cmd/hotbedd )
 done
