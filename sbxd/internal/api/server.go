@@ -692,6 +692,28 @@ func (s *Server) usageRoute(w http.ResponseWriter, r *http.Request) {
 			seen[name] = true
 		}
 	}
+	// Fixed ordering, so the 5 s auto-refresh never reshuffles the table:
+	// live sandboxes first (alphabetical), pasted/wallet-only extras after
+	// (alphabetical), stale history rows last (alphabetical). Within a
+	// group the key set changes only when a sandbox appears/vanishes.
+	sort.SliceStable(rows, func(i, j int) bool {
+		ai, aj := rows[i], rows[j]
+		gi, gj := 2, 2 // 0 live, 1 wallet-only/synced-extra, 2 stale
+		if aj.Exists {
+			gj = 0
+		} else if aj.Row.Calls == 0 {
+			gj = 1
+		}
+		if ai.Exists {
+			gi = 0
+		} else if ai.Row.Calls == 0 {
+			gi = 1
+		}
+		if gi != gj {
+			return gi < gj
+		}
+		return ai.Sandbox < aj.Sandbox
+	})
 	resp["rows"] = rows
 	okJSON(w, resp)
 }
