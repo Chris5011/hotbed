@@ -42,6 +42,7 @@ RUN apt-get update \
       git \
       jq \
       ripgrep \
+      tmux \
       file \
       openssh-client \
       sudo \
