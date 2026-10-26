@@ -11,7 +11,14 @@
 #
 set -euo pipefail
 
-HOTBED_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Self-locate the kit root even when invoked via a ~/.local/bin symlink:
+# dereference first, then walk up (install.sh's hbd check expects exactly
+# this: readlink -f of the PATH entry equals <root>/bin/hbd).
+_self="${BASH_SOURCE[0]}"
+if _real="$(readlink -f "$_self" 2>/dev/null)" && [[ -n "$_real" ]]; then
+    _self="$_real"
+fi
+HOTBED_ROOT="$(cd "$(dirname "$_self")/.." && pwd)"
 HBD_VERSION="0.5.0"
 HBD_IMAGE_PREFIX="hotbed"
 HOTBED_LABEL="dev.hotbed"
