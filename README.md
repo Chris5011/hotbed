@@ -772,21 +772,26 @@ sandboxes *cannot* reach the WSL distro's proxy listener on any route
 (distro IP, bridge gateway or `host.docker.internal`); sbxd fixes this
 instead of failing loudly:
 
-- the **first container sync** spawns `sbx-proxy-relay`, a `--network host`
-  container running this same binary in a dedicated **`sbxd proxy`**
-  (standalone, dashboard-less) mode, with the daemon's config/keys/state
-  dirs bind-mounted (sbx:base image or any local glibc base; `--restart
-  unless-stopped`; host-uid — it is **not** labeled `dev.sbx`, so it never
-  shows in the inventory);
+- the **first container sync** (or daemon boot) spawns the relay, a
+  `--network host` container running this same binary in a dedicated
+  **`sbxd proxy`** (standalone, dashboard-less) mode, with the daemon's
+  config/keys/state dirs bind-mounted (sbx:base image or any local glibc
+  base; `--restart unless-stopped`; host-uid — it is **not** labeled
+  `dev.sbx`, so it never shows in the inventory);
+- the relay name is **per state set** (`sbx-relay-<confighash>`,
+  overridable with `SBXD_RELAY_NAME`) — two sbxd processes (a real daemon
+  and a hermetic test suite) can run side by side without adopting or
+  destroying each other's relay; a pre-name-spacing `sbx-proxy-relay` is
+  migrated on first spawn (`relay.migrate` in the audit trail);
 - the sandbox then dials `http://<bridge-gateway>:<proxy-port>/v1`
   (typically `172.17.0.1:7775`) — reachable by construction;
 - the relay re-reads config/keys per request: later `key mint`, wallet
   edits and `budget` changes apply live; usage receipts append to the same
   `usage.jsonl` the dashboard reads (shared `/state` mount);
 - the relay is **owned by its daemon** (mount sources = its state dirs): a
-  foreign relay left by a hermetic test daemon is replaced automatically
-  (`relay.replace` in the audit trail); suite cleanup removes suite-owned
-  relays and the real daemon re-adopts on the next sync;
+  foreign relay under this daemon's own name is replaced automatically
+  (`relay.replace` in the audit trail); a lost relay (engine restart, etc.)
+  is restored on daemon boot;
 - `doctor` shows the relay line on Docker Desktop engines ("proxy relay: …
   (running at gw …)"), every declined/failed relay attempt is audited
   (`relay.skip` with the reason), and `SBXD_RELAY_DISABLE=1` turns the

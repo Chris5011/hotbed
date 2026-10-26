@@ -454,9 +454,9 @@ P2CLEAN() {
     done
     rm -rf "$P2" 2>/dev/null || true
 }
-p2env=(env "SBXD_CONFIG_DIR=$P2/config" "SBXD_DATA_DIR=$P2/data" "SBXD_STATE_DIR=$P2/state")
+p2env=(env "SBXD_CONFIG_DIR=$P2/config" "SBXD_DATA_DIR=$P2/data" "SBXD_STATE_DIR=$P2/state" "SBXD_RELAY_DISABLE=1")
 MOCK_PORT=$MPORT /usr/bin/python3 "$P2/mock.py" >/dev/null 2>&1 & P2MOCK_PID=$!
-"${p2env[@]}" "$SBXD" serve --port "$DBUS" >/dev/null 2>&1 & P2DAEMON_PID=$!
+"${p2env[@]}" "$SBXD" serve --port "$DBUS" >"$P2/daemon.log" 2>&1 & P2DAEMON_PID=$!
 # readiness: the mock can take 1-2s to bind in scripted contexts — wait for
 # BOTH the dashboard/proxy AND the mock (403-without-auth = mock ready).
 mock_ready=""
@@ -515,7 +515,7 @@ echo "$cm" | grep -q 'mock-fast' && pass "config set/get round-trip" || fail "co
 curl -s --max-time 3 "http://127.0.0.1:$DBUS/api/config" | grep -q 'masked' \
     && pass "API config masks secrets" || fail "API config masks secrets"
 curl -s --max-time 3 "http://127.0.0.1:$DBUS/api/usage" | grep -q 'tester' \
-    && pass "API /api/usage lists the sandbox" || fail "API /api/usage lists the sandbox"
+    && pass "API /api/usage lists the sandbox" || fail "API /api/usage lists the sandbox (got: $(curl -s --max-time 3 "http://127.0.0.1:$DBUS/api/usage" | head -c 160))"
 # 8. P3: token wallets, config migration, pricing (wallets live in config.json)
 "${p2env[@]}" "$SBXD" budget tester --tokens 5000 >/dev/null 2>&1
 ck=$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 -XPOST "http://127.0.0.1:$DPROTO/v1/chat/completions" \
@@ -661,7 +661,7 @@ R="$(mktemp -d /tmp/opencode/sbxdrec.XXXXXX)"
 # hermetic recipe env: recipe up writes wallet/egress state through config.Open()
 # and audit — without these every suite run litters the REAL config.json
 mkdir -p "$R/config" "$R/data" "$R/state"
-renv=(env "SBXD_CONFIG_DIR=$R/config" "SBXD_DATA_DIR=$R/data" "SBXD_STATE_DIR=$R/state")
+renv=(env "SBXD_CONFIG_DIR=$R/config" "SBXD_DATA_DIR=$R/data" "SBXD_STATE_DIR=$R/state" "SBXD_RELAY_DISABLE=1")
 cat > "$R/sbx.yaml" <<'RYEOF'
 # suite recipe
 name: recipe-suite
@@ -716,7 +716,11 @@ cat > "$S3/config/config.json" <<'SWEPOF'
 {"opencode":{"default_provider":"mock","providers":{"mock":{"base_url":"http://127.0.0.1:59999/v1","api_key":"mock-uk","models":["mock-fast"]}}},"proxy":{"port":"7795","bind":"0.0.0.0"},"sweeper":{"idle_stop_minutes":1}}
 SWEPOF
 senv=()
-senv+=(env "SBXD_CONFIG_DIR=$S3/config" "SBXD_DATA_DIR=$S3/data" "SBXD_STATE_DIR=$S3/state")
+# SBXD_RELAY_NAME: the hermetic daemon gets its OWN relay container name —
+# EnsureRelay with a shared name adopt-and-destroyed the REAL daemon's
+# relay on collision (the visible regression: sandbox opencode got
+# ECONNREFUSED after suite teardown until the next manual sync).
+senv+=(env "SBXD_CONFIG_DIR=$S3/config" "SBXD_DATA_DIR=$S3/data" "SBXD_STATE_DIR=$S3/state" "SBXD_RELAY_NAME=sbx-relay-suite-s")
 hdr "P3: idle sweeper"
 "${senv[@]}" "$SBXD" config get sweeper.idle_stop_minutes 2>/dev/null | grep -q '1' \
     && pass "sweeper: config knob round-trips (1)" || fail "sweeper: config knob round-trips"
@@ -770,9 +774,9 @@ if docker info >/dev/null 2>&1; then
         else
             fail "create: sync failed ($(head -c 160 <<<"$RS"))"
         fi
-        DOC="$("$SBXD" doctor 2>&1 || true)"
+        DOC="$("${senv[@]}" "$SBXD" doctor 2>&1 || true)"
         if grep -q 'proxy relay' <<<"$DOC"; then
-            grep -q 'sbx-proxy-relay (running' <<<"$DOC" \
+            grep -q 'sbx-relay-suite-s (running' <<<"$DOC" \
                 && pass "relay: in-engine proxy relay is up" \
                 || fail "relay: doctor reports relay not running post-sync"
         else
@@ -911,7 +915,12 @@ PYJ
     cleanup01() { docker rm -f "$SWCON" >/dev/null 2>&1 || true; [[ -n "$SWPID" ]] && kill "$SWPID" 2>/dev/null; }
     cleanup01
     # relay hygiene: drop a relay built for this suite's hermetic dirs —
-    # the real daemon respawns it from its own state set on the next sync
+    # namespaced (SBXD_RELAY_NAME), so the real daemon's relay was never
+    # touched; the reverse is also gone: suite teardown cannot strand the
+    # real relay anymore. Belt-and-braces: legacy fixed-name junk cleanup.
+    if docker inspect sbx-relay-suite-s --format '{{range .Mounts}}{{println .Source}}{{end}}' 2>/dev/null | grep -q "^$S3/config$"; then
+        docker rm -f sbx-relay-suite-s >/dev/null 2>&1 || true
+    fi
     if docker inspect sbx-proxy-relay --format '{{range .Mounts}}{{println .Source}}{{end}}' 2>/dev/null | grep -q "^$S3/config$"; then
         docker rm -f sbx-proxy-relay >/dev/null 2>&1 || true
     fi

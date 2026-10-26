@@ -137,6 +137,19 @@ func serve(args []string) error {
 		}
 	}()
 
+	// relay restore: EnsureRelay only ran on the first sync path, so a lost
+	// relay (Docker Desktop VM restart, historical name collisions) left
+	// sandboxed opencode clients retrying against a dead endpoint until a
+	// re-sync. On boot, best-effort bring this state set's relay back.
+	go func() {
+		if env.RelayDisabled() || !engine.IsDockerDesktop() {
+			return
+		}
+		if _, err := engine.EnsureRelay(cfg.Proxy.Port); err != nil {
+			fmt.Fprintf(os.Stderr, "\033[33;1msbxd:\033[0m proxy relay not restored at boot: %v\n", err)
+		}
+	}()
+
 	// idle sweeper: auto-stop kit containers whose CPU stays near zero for
 	// `sweeper.idle_stop_minutes` (0 = disabled). Re-reads config each cycle
 	// so `sbxd config set` from another process applies live. Container-only

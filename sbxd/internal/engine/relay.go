@@ -18,6 +18,8 @@ package engine
 // minted later by the main daemon are picked up live.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strings"
@@ -28,8 +30,25 @@ import (
 	"sbxd/internal/env"
 )
 
-// RelayContainer is the name of the engine-side proxy relay container.
-const RelayContainer = "sbx-proxy-relay"
+// LegacyRelayName was the pre-name-spacing relay container name — kept only
+// so a daemon upgrade can silently migrate (destroy-and-rename) its own
+// old relay instead of leaving a stale one bound to the engine netns.
+const LegacyRelayName = "sbx-proxy-relay"
+
+// RelayContainer returns the engine-side proxy relay container name for
+// this daemon's state set. The historical fixed name was a collision
+// magnet: two sbxd processes with different config/keys dirs (a real
+// daemon and a hermetic test suite) saw each other's relay as "foreign"
+// and adopt-and-destroyed it mid-run, leaving sandboxed opencode clients
+// with ECONNREFUSED. Deriving the name from the config dir gives each
+// state set its own relay; port separation comes from proxy.port.
+func RelayContainer() string {
+	if n := strings.TrimSpace(os.Getenv("SBXD_RELAY_NAME")); n != "" {
+		return n
+	}
+	sum := sha256.Sum256([]byte(env.ConfigDir()))
+	return "sbx-relay-" + hex.EncodeToString(sum[:])[:6]
+}
 
 var (
 	desktopMu    sync.Mutex
@@ -79,9 +98,9 @@ func pickRelayImage() (string, error) {
 	return "", fmt.Errorf("no usable base image for the proxy relay (have: docker images — needs sbx:base or a debian-like glibc image)")
 }
 
-// relayRunning reports whether the relay container exists and is running.
-func relayRunning() (exists, running bool) {
-	out, err := RunTO(8*time.Second, "docker", "inspect", "--format", "{{.State.Running}}", RelayContainer)
+// relayRunning reports whether a relay container exists and is running.
+func relayRunning(name string) (exists, running bool) {
+	out, err := RunTO(8*time.Second, "docker", "inspect", "--format", "{{.State.Running}}", name)
 	if err != nil {
 		return false, false // absent container exits nonzero
 	}
@@ -93,9 +112,9 @@ func relayRunning() (exists, running bool) {
 // host cannot route into the engine VM. A container state of "Running" is
 // not enough: e.g. a relay whose config has no providers exits instantly
 // and flaps under the restart policy.
-func waitRelay(port string) bool {
+func waitRelay(name, port string) bool {
 	for i := 0; i < 10; i++ {
-		out, err := RunTO(3*time.Second, "docker", "exec", RelayContainer,
+		out, err := RunTO(3*time.Second, "docker", "exec", name,
 			"bash", "-c", "</dev/tcp/127.0.0.1/"+port+" && echo UP")
 		if err == nil && strings.Contains(out, "UP") {
 			return true
@@ -105,13 +124,18 @@ func waitRelay(port string) bool {
 	return false
 }
 
-// relayOwns reports whether the existing relay container was spawned by
-// THIS daemon (same config/state dirs). A foreign relay (e.g. left behind
-// by a suite/hermetic daemon) is replaced so the key set always matches
-// the daemon minting sandbox keys.
-func relayOwns() bool {
-	out, err := RunTO(8*time.Second, "docker", "inspect", "--format",
-		"{{range .Mounts}}{{println .Source}}{{end}}", RelayContainer)
+// relayMounts lists a container's host-side mount sources.
+func relayMounts(name string) (string, error) {
+	return RunTO(8*time.Second, "docker", "inspect", "--format",
+		"{{range .Mounts}}{{println .Source}}{{end}}", name)
+}
+
+// relayOwns reports whether the relay container was spawned by THIS daemon
+// (same config/data dirs). Foreign relays are never adopted; with per-state
+// names the case is nearly impossible, but a hand-spawned or migrated one
+// is replaced so the key set always matches the daemon minting keys.
+func relayOwns(name string) bool {
+	out, err := relayMounts(name)
 	if err != nil {
 		return false
 	}
@@ -121,36 +145,61 @@ func relayOwns() bool {
 		strings.Contains(out, env.DataDir()+"\n")
 }
 
-// EnsureRelay makes sure sbx-proxy-relay exists and is running; returns the
-// gateway IP the sandboxes should dial. Idempotent: an already-running
-// relay of ours is reused, a foreign or stopped one is replaced/started.
+// legacyRelayCleanup removes the pre-name-spacing sbx-proxy-relay when it
+// belongs to this daemon's state set (or is stopped junk) — otherwise it
+// would keep holding proxy.port inside the engine's host netns and our
+// namespaced relay could never serve.
+func legacyRelayCleanup() {
+	exists, running := relayRunning(LegacyRelayName)
+	if !exists {
+		return
+	}
+	if !running && !relayOwns(LegacyRelayName) {
+		// stopped foreign junk under the old fixed name: free the name
+		_, _ = RunTO(30*time.Second, "docker", "rm", "-f", LegacyRelayName)
+		return
+	}
+	if relayOwns(LegacyRelayName) {
+		_, _ = RunTO(30*time.Second, "docker", "rm", "-f", LegacyRelayName)
+		audit.Record("relay.migrate", LegacyRelayName, "pre-name-spacing relay replaced by "+RelayContainer())
+		fmt.Printf("\033[36;1msbxd:\033[0m relay migrated to per-state name %s\n", RelayContainer())
+	}
+	// foreign && still running: leave it; a port clash surfaces as an
+	// honest waitRelay error below
+}
+
+// EnsureRelay makes sure this state set's relay container exists and is
+// running; returns the gateway IP the sandboxes should dial. Idempotent:
+// an already-running relay of ours is reused, a stopped one is started.
 func EnsureRelay(proxyPort string) (string, error) {
 	gw := BridgeGateway()
 	if gw == "" {
 		return "", fmt.Errorf("no default docker bridge gateway — cannot wire the proxy relay")
 	}
-	exists, running := relayRunning()
-	if exists && running && relayOwns() {
+	legacyRelayCleanup()
+	name := RelayContainer()
+	exists, running := relayRunning(name)
+	if exists && running && relayOwns(name) {
 		return gw, nil
 	}
 	if exists && running { // foreign relay: our dirs take the relay over
-		_, _ = RunTO(30*time.Second, "docker", "rm", "-f", RelayContainer)
-		audit.Record("relay.replace", RelayContainer,
+		_, _ = RunTO(30*time.Second, "docker", "rm", "-f", name)
+		audit.Record("relay.replace", name,
 			"relay served other state dirs — respawned for this daemon")
-		fmt.Printf("\033[36;1msbxd:\033[0m relay adopted for this state set (removed foreign %s)\n", RelayContainer)
+		fmt.Printf("\033[36;1msbxd:\033[0m relay adopted for this state set (removed foreign %s)\n", name)
 		exists = false
-	} else if exists && !running && relayOwns() {
-		if _, err := RunTO(30*time.Second, "docker", "start", RelayContainer); err != nil {
+	} else if exists && !running && relayOwns(name) {
+		if _, err := RunTO(30*time.Second, "docker", "start", name); err != nil {
 			return "", fmt.Errorf("relay start: %w", err)
 		}
-		if !waitRelay(proxyPort) {
-			return "", fmt.Errorf("relay container %s is up but not serving port %s (logs: docker logs %s)", RelayContainer, proxyPort, RelayContainer)
+		if !waitRelay(name, proxyPort) {
+			return "", fmt.Errorf("relay container %s is up but not serving port %s (logs: docker logs %s)", name, proxyPort, name)
 		}
 		return gw, nil
 	}
 	// foreign-stopped or absent: make sure the name is free, then spawn
 	if exists {
-		_, _ = RunTO(30*time.Second, "docker", "rm", "-f", RelayContainer)
+		_, _ = RunTO(30*time.Second, "docker", "rm", "-f", name)
 	}
 
 	bin, err := os.Executable()
@@ -162,7 +211,7 @@ func EnsureRelay(proxyPort string) (string, error) {
 		return "", err
 	}
 	args := []string{
-		"run", "-d", "--name", RelayContainer,
+		"run", "-d", "--name", name,
 		"--network", "host", // binds inside the engine VM's own netns
 		"--restart", "unless-stopped",
 		"--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
@@ -179,24 +228,25 @@ func EnsureRelay(proxyPort string) (string, error) {
 	if _, err := RunTO(90*time.Second, "docker", args...); err != nil {
 		return "", fmt.Errorf("relay spawn: %w", err)
 	}
-	if !waitRelay(proxyPort) {
-		return "", fmt.Errorf("relay container %s is up but not serving port %s (logs: docker logs %s)", RelayContainer, proxyPort, RelayContainer)
+	if !waitRelay(name, proxyPort) {
+		return "", fmt.Errorf("relay container %s is up but not serving port %s (logs: docker logs %s)", name, proxyPort, name)
 	}
-	audit.Record("relay.spawn", RelayContainer,
+	audit.Record("relay.spawn", name,
 		fmt.Sprintf("image=%s gw=%s port=%s via=engine host netns", image, gw, proxyPort))
 	fmt.Printf("\033[36;1msbxd:\033[0m proxy relay spawned in the docker engine (%s → http://%s:%s/v1)\n",
-		RelayContainer, gw, proxyPort)
+		name, gw, proxyPort)
 	return gw, nil
 }
 
 // RelayStatus summarizes the relay for doctor/CLI output.
 func RelayStatus() string {
-	exists, running := relayRunning()
+	name := RelayContainer()
+	exists, running := relayRunning(name)
 	switch {
 	case exists && running:
-		return fmt.Sprintf("%s (running at gw %s)", RelayContainer, BridgeGatewayOrDash())
+		return fmt.Sprintf("%s (running at gw %s)", name, BridgeGatewayOrDash())
 	case exists:
-		return RelayContainer + " (stopped)"
+		return name + " (stopped)"
 	default:
 		return "not spawned — spawns automatically on the first container sync (Docker Desktop only)"
 	}
