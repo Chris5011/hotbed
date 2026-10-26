@@ -12,7 +12,7 @@ import (
 // Version of the sbxd daemon/CLI. A var on purpose: release builds inject
 // the tagged version here via -ldflags "-X sbxd/internal/env.Version=v…"
 // (Makefile / scripts/release.sh; see docs/RELEASING.md).
-var Version = "0.4.0"
+var Version = "0.4.1"
 
 const (
 	// DefaultPort the daemon (dashboard/API) listens on (localhost only).

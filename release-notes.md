@@ -1,3 +1,46 @@
+# SBX Desktop v0.4.1
+
+A setup-ergonomics patch: the two things a fresh box touches first (the
+sandbox image and the installer) get the gaps closed.
+
+## What's new
+
+- **One-line install with dependencies** — `./install.sh --with-deps`
+  apt-installs every actually-missing host prerequisite (docker.io,
+  tmux, ripgrep, jq, ssh, build tools, python3/pip), enables the docker
+  engine, adds your user to its socket group and pulls the Go toolchain
+  from the official tarball when no daemon binary exists. The libvirt
+  VM stack stays opt-in; non-Debian systems get an honest tool list
+  instead of pretending. A real `--help` replaces the flag error that
+  used to advertise one. Fresh box, whole kit:
+
+  ```bash
+  git clone https://github.com/Chris5011/OpenCode-SBX.git \
+    && cd OpenCode-SBX && ./install.sh --with-deps --yes
+  ```
+
+- **tmux ships in every sandbox image** — the common image layer now
+  includes tmux (a few MB). The attach desk never needed container-side
+  tmux (that session lives on the host), but agents working inside a
+  sandbox legitimately want a terminal multiplexer. All five stack
+  images (`base`, `node`, `python`, `go`, `rust`) rebuild-verified:
+  go 1.27.3, cargo/rustc 1.99.1, node v22.23.4, uv 0.13.5 now carry the
+  full common toolset including tmux.
+
+- **Security sweep fixes carried from the v0.4.0 dashboard work**
+  (same-day): sandbox-name flag-injection guard (`--privileged` etc.
+  rejected at create), upstream proxy header timeout (wedged upstream
+  no longer parks request goroutines), ReadHeader/Idle timeouts on all
+  listeners, single `env.SafeName` name sanitizer, observable dashboard
+  error paths. Full history secrets scan: clean.
+
+## Upgrade from v0.4.0
+
+```bash
+cd ~/OpenCode-SBX
+scripts/update.sh --yes
+```
+
 # SBX Desktop v0.4.0
 
 The burn-reliability release of **OpenCode-SBX** + **sbxd**: the token
