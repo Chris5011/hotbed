@@ -749,6 +749,22 @@ if docker info >/dev/null 2>&1; then
     else fail "sweeper: idle container was NOT stopped"; fi
     grep -q 'sweeper.stop' "$S3/state/audit.jsonl" 2>/dev/null \
         && pass "sweeper: audit row sweeper.stop written" || fail "sweeper: audit row sweeper.stop written"
+    # -- foreign-owner isolation: a sandbox stamped by ANOTHER daemon must
+    # -- never be sweeper prey. Regression for the v0.5 rename era: hermetic
+    # -- daemons once inherited this box's legacy owner stamp and stopped the
+    # -- live moon-sweepers sandbox mid-suite.
+    FWCON="hotbed-sweepforeign$((RANDOM % 9000 + 1000))"
+    docker run -d --name "$FWCON" \
+        -l dev.hotbed=1 -l dev.sbx.owner=definitely-a-foreign-stamp \
+        alpine sleep 600 >/dev/null
+    sleep 70 # sweeper samples every 30s; let it sweep the new toy twice
+    if [[ "$(docker inspect -f '{{.State.Running}}' "$FWCON" 2>/dev/null)" == "true" ]]; then
+        pass "sweeper: foreign-owner sandbox left running (isolation)"
+    else
+        fail "sweeper: foreign-owner sandbox was STOPPED (owner isolation broken)"
+    fi
+    docker rm -f "$FWCON" >/dev/null 2>&1 || true
+    # cleanup01() { docker rm -f "$SWCON" ... } registered below removes the toy
     # -- create wizard via API (uses the same hermetic daemon; docker-gated) --
     if command -v curl >/dev/null && curl -s --max-time 2 http://127.0.0.1:7794/api/health >/dev/null; then
         CW="cw$((RANDOM % 900 + 100))"

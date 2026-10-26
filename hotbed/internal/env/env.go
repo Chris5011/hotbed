@@ -121,6 +121,7 @@ func homeDefault(rel string) string {
 var migrateOnce sync.Once
 
 func migrateLegacyDirs() {
+	ownerSeeded := false // config migration doubles as owner-stamp seeding
 	for _, p := range [][3]string{
 		{"HOTBEDD_CONFIG_DIR", ".config/hotbedd", ".config/sbxd"},
 		{"HOTBEDD_DATA_DIR", ".local/share/hotbedd", ".local/share/sbxd"},
@@ -137,7 +138,20 @@ func migrateLegacyDirs() {
 		if _, err := os.Stat(legacy); err != nil {
 			continue // no v0.4 state on this box
 		}
-		_ = copyTree(legacy, dir) // best effort; failure means a fresh dir
+		if copyTree(legacy, dir) == nil { // best effort; failure means a fresh dir
+			if p[0] == "HOTBEDD_CONFIG_DIR" && !ownerSeeded {
+				// seed the owner stamp WHILE migrating, from the legacy
+				// dir hash. Runs only for the default (non-overridden)
+				// config dir — hermetic suite dirs are minted fresh per
+				// run and must stay anonymous, otherwise every suite
+				// daemon inherits this box's legacy stamp and its
+				// sweeper could stop the user's legacy sandboxes.
+				sum := sha256.Sum256([]byte(legacy))
+				_ = os.WriteFile(filepath.Join(dir, "owner-id"),
+					[]byte(hex.EncodeToString(sum[:6])), 0o600)
+				ownerSeeded = true
+			}
+		}
 	}
 }
 
@@ -201,6 +215,24 @@ func RelayDisabled() bool { return getenv("HOTBEDD_RELAY_DISABLE", "") == "1" }
 // empty) keep legacy behavior.
 const OwnerLabelKey = "dev.hotbed.owner"
 
+// LegacyOwnerLabelKey is the pre-v0.5 owner stamp. Legacy sandboxes carry
+// their owner under dev.sbx.owner — an owner check that only reads the new
+// key sees "" there and would treat a foreign legacy sandbox as its own
+// (the regression that let a hermetic suite's idle sweeper stop the live
+// moon-sweepers container during v0.5 verification).
+const LegacyOwnerLabelKey = "dev.sbx.owner"
+
+// ForeignOwner reports whether a container's owner stamp (current or legacy
+// label) belongs to a DIFFERENT daemon — i.e. this daemon must leave it
+// alone. Empty stamp = pre-stamp legacy era: "ours" (matches v0.4).
+func ForeignOwner(labels map[string]string) bool {
+	o := labels[OwnerLabelKey]
+	if o == "" {
+		o = labels[LegacyOwnerLabelKey]
+	}
+	return o != "" && o != OwnerLabel()
+}
+
 // OwnerLabel returns the owner stamp value for THIS daemon. v0.4 derived it
 // directly from sha256(ConfigDir)[:6] — the rename would have re-stamped
 // every existing sandbox as foreign (they compare labels verbatim). So the
@@ -216,21 +248,13 @@ func OwnerLabel() string {
 			return s
 		}
 	}
-	var stamp string
-	legacyDir := os.Getenv("HOTBEDD_LEGACY_CONFIG_DIR")
-	if legacyDir == "" {
-		legacyDir = homeDefault(".config/sbxd")
-	}
-	if legacyDir != "" {
-		if _, err := os.Stat(legacyDir); err == nil {
-			sum := sha256.Sum256([]byte(legacyDir))
-			stamp = hex.EncodeToString(sum[:6])
-		}
-	}
-	if stamp == "" {
-		sum := sha256.Sum256([]byte(dir))
-		stamp = hex.EncodeToString(sum[:6])
-	}
+	// No owner-id yet: stamp is the hash of THIS daemon's config dir. The
+	// legacy-hash fallback deliberately lives in migrateLegacyDirs (it fires
+	// only when the DEFAULT config dir is freshly copied from the legacy
+	// one) — a fallback here would hand every fresh/hermetic config dir
+	// this box's legacy stamp.
+	sum := sha256.Sum256([]byte(dir))
+	stamp := hex.EncodeToString(sum[:6])
 	_ = os.MkdirAll(dir, 0o755)
 	_ = os.WriteFile(idFile, []byte(stamp), 0o600)
 	return stamp

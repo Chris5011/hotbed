@@ -414,8 +414,23 @@ prune() {
         ok "no sandbox containers to prune"
         return
     fi
+    # hermetic safety: containers stamped by a DIFFERENT daemon (hermetic
+    # suites, a second install) are never prune targets. Read the daemon's
+    # owner-id stamp; absent stamp = pre-stamp era (prune everything).
+    local my_owner owned_file
+    owned_file="$HOME/.config/hotbedd/owner-id"
+    [[ -r "$owned_file" ]] && my_owner="$(tr -d '[:space:]' < "$owned_file")"
     for id in "${ids[@]}"; do
         name="$("$DOCKER" inspect -f '{{.Name}}' "$id" | sed 's|^/||')"
+        if [[ -n "${my_owner:-}" ]]; then
+            o=$("$DOCKER" inspect -f '{{index .Config.Labels "dev.hotbed.owner"}}' "$id")
+            [[ -z "$o" || "$o" == "<no value>" ]] && o=$("$DOCKER" inspect -f '{{index .Config.Labels "dev.sbx.owner"}}' "$id" 2>/dev/null)
+            [[ "$o" == "<no value>" ]] && o=""
+            if [[ -n "$o" && "$o" != "$my_owner" ]]; then
+                info "kept $name (owned by another hotbedd: $o)"
+                continue
+            fi
+        fi
         remove_one="y"
         if [[ "$OPT_YES" != "1" ]]; then
             if [[ ! -t 0 ]]; then die "non-interactive session: confirm with 'hbd prune --yes'"; fi

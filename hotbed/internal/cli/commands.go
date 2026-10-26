@@ -189,7 +189,7 @@ func serve(args []string) error {
 				if r.State != "running" || strings.HasPrefix(r.Names, env.VMDockerPrefix) {
 					continue
 				}
-				if o := r.Labels[env.OwnerLabelKey]; o != "" && o != env.OwnerLabel() {
+				if env.ForeignOwner(r.Labels) {
 					continue // sandbox owned by another daemon (hermetic suites)
 				}
 				seen[r.Names] = true
