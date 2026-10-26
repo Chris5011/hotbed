@@ -726,6 +726,17 @@ if docker info >/dev/null 2>&1; then
                 && pass "create: ro mount respected" || fail "create: ro mount respected"
             grep -q 'sandbox.spawn' "$S3/state/audit.jsonl" 2>/dev/null \
                 && pass "create: audit sandbox.spawn written" || fail "create: audit sandbox.spawn written"
+            # stack whitelist sync: the API error text must list exactly the
+            # stacks the engine registry knows — this pins text to RecipeStacks
+            # so a Future stack can't ship with a stale dashboard/error list.
+            WLBAD="$(curl -s --max-time 10 -X POST http://127.0.0.1:7794/api/create -H 'Content-Type: application/json' \
+                -d '{"name":"wlbad","stack":"nosuchstack"}')"
+            WLOK=1
+            for s in go node python rust i2cpp base; do
+                grep -q "\b$s\b" <<<"$WLBAD" || { WLOK=0; break; }
+            done
+            [[ "$WLOK" -eq 1 ]] && pass "create: stack whitelist text stays in sync (rejects nosuchstack, lists all 6)" \
+                || fail "create: stack whitelist error text drifted ($WLBAD)"
         else
             fail "create: container exists"
         fi

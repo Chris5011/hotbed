@@ -17,7 +17,7 @@ machine.
         │               for what containers can't do: systemd,        │
         │               nested docker, kernel-level work              │
         │                                                             │
-        │  containers/  image definitions (1 Dockerfile, 5 stacks)    │
+        │  containers/  image definitions (1 Dockerfile, 6 stacks)    │
         │  vm/          master image, per-VM disks, seeds             │
         │  tests/       container · VM · SBX Desktop test suites      │
         └─────────────────────────────────────────────────────────────┘
@@ -387,6 +387,7 @@ compile, run servers — none of it lands on the host.
 | `python` | `sbx:python` | python3-dev, pipx, uv                           |
 | `go`     | `sbx:go`     | latest stable Go + module cache volume          |
 | `rust`   | `sbx:rust`   | rustup stable, minimal profile                  |
+| `i2cpp`  | `sbx:i2cpp`  | mingw-w64 win-x64 cross-GCC, cmake/ninja, ccache|
 | `base`   | `sbx:base`   | fallback: git, build tools, python3             |
 
 All stacks also get: git, curl/wget, jq, ripgrep, openssh-client, build
@@ -403,7 +404,39 @@ Auto detection (`sbx stack` to print; override with `--stack NAME`):
 - otherwise → base
 
 Images build on first use and are cached afterwards. Rebuild explicitly:
-`sbx build [stacks...]`, fully fresh: `sbx --no-cache build`.
+`sbx build [stacks...]`, fully fresh: `sbx --no-cache build`. Bare
+`sbx build` covers the five core stacks — `i2cpp` is opt-in
+(`sbx build i2cpp`): the mingw-w64 cross toolchain is a ~500 MB layer.
+
+The `i2cpp` stack cross-compiles **native Windows binaries** (win-x64
+`.dll`/`.exe`) from a disposable Linux sandbox — the i2cpp/il2cpp modding
+loop without a Windows toolchain install: edit C++ in the sandbox, build
+against mingw-w64, and the artifact lands in the mounted `/workspace`,
+which is on your real filesystem (in WSL, bind a `/mnt/c/...` game
+directory and the DLL is Windows-visible the moment the build writes it).
+The compiler is host-arch-independent — an arm64 host still emits win-x64
+binaries. ccache (volume `sbx-ccache`) keeps rebuilds fast across
+disposable sandboxes. This stack only *builds*; injection/run belongs to
+the host — see [Security posture](#security-posture-honest).
+`sbx cachePath` note: one-shot compile+link runs bypass ccache by design —
+the cache pays off on per-object compile steps (`-c`; what CMake/Ninja do).
+
+### Windows bridge (WSL hosts, opt-in)
+
+On **WSL2** hosts the kit adds host-side helpers that close the
+build→run loop against the real Windows environment (`sbx wintest` to
+verify, `sbx winsh POWERSHELL-COMMAND` to run e.g. a launcher,
+`sbx windrop FILE...` to place artifacts in `C:\Users\Public\sbx-drop`).
+They run on the *host* (your WSL distro), never inside a sandbox — Docker
+containers live in Docker Desktop's own utility VM whose kernel deliberately
+has no `AF_VSOCK`, so the WSL interop interpreter (`/init`) cannot bridge to
+Windows from inside a container; the helpers therefore live where interop
+actually works. On a non-WSL Linux box every verb fails loudly with the
+reason ("no powershell.exe on PATH", "WSL interop disabled") — nothing is
+called, nothing installed, and the sandbox surface is untouched: these verbs
+manage *nothing* the sandboxes mount, they only move files and run commands
+*you asked for*, from the host you administer. No injector ships — the verbs
+are transport; what you launch is your own tooling.
 
 ### What's mounted in
 
@@ -1023,7 +1056,7 @@ loopback-only dashboard, traversal outside home is rejected).
 - One Dockerfile (`containers/Dockerfile`), one shared `common` stage
   (Debian `trixie-slim`: git, curl, jq, ripgrep, build-essential, python3,
   pip-csafety override, `git safe.directory '*'`, opencode fallback) and one
-  minimal per-stack target (`node`, `python`, `go`, `rust`, `base`).
+  minimal per-stack target (`node`, `python`, `go`, `rust`, `i2cpp`, `base`).
 - The image bakes user `sbx` (uid 1000); at **runtime** the entrypoint
   (`containers/entrypoint.sh`) creates/adjusts a user matching your *actual*
   host uid (`SBX_UID`/`SBX_GID`), grants passwordless sudo, fixes ownership

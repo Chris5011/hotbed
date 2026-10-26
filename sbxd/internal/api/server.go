@@ -891,7 +891,7 @@ func (s *Server) createRoute(w http.ResponseWriter, r *http.Request) {
 		in.Stack = "go"
 	}
 	if _, isStack := engine.RecipeStacks[in.Stack]; !isStack && in.Stack != "base" {
-		httpError(w, 400, "unknown stack "+in.Stack+" (go|node|python|rust|base)")
+		httpError(w, 400, "unknown stack "+in.Stack+" (go|node|python|rust|i2cpp|base)")
 		return
 	}
 	if in.Egress != "" && !engine.KnownEgressPreset(in.Egress) {

@@ -706,7 +706,7 @@ var icoFile='<svg class="fi" viewBox="0 0 16 16" width="14" height="14" aria-hid
 
 function renderCreator(){
   var body=$('glob-body');
-  var stackOpts=['go','node','python','rust','base'].map(function(s){return '<option'+(s==='go'?' selected':'')+'>'+s+'</option>';}).join('');
+  var stackOpts=['go','node','python','rust','i2cpp','base'].map(function(s){return '<option'+(s==='go'?' selected':'')+'>'+s+'</option>';}).join('');
   body.innerHTML=
     '<div class="hint">Creates a sandbox through the daemon. <b>Containers</b> are kit-faithful (dev.sbx labels, opencode auth mounts, per-stack cache volume). <b>VMs</b> boot a full Debian guest with docker + opencode preinstalled (libvirt &quot;sbxvm&quot; or docker-backend &quot;sbxvmd&quot;) — creation returns the moment the machine is spawned; the guest finishes booting in the background and its models wire up automatically at boot-end (the cloud master image must be fetched once via <code>sbxvm fetch-image</code>).</div>'+
     '<div class="cw">'+

@@ -168,5 +168,32 @@ RUN curl -fsSL https://sh.rustup.rs \
 
 ENV PATH="/usr/local/cargo/bin:${PATH}"
 
+###### stack: i2cpp (Windows cross-compile) ####################################
+# mingw-w64 GCC targeting win-x64 — native Windows .dll/.exe builds (i2cpp/il2cpp
+# modding, game tooling) from the Linux sandbox. Cross-compilation is
+# host-arch-independent: mingw on arm64 hosts still emits win-x64 binaries.
+# ccache sits behind the toolchain; its home doubles as the recipe cache
+# volume (sbx-ccache) so rebuilds stay fast across disposable sandboxes.
+FROM common AS i2cpp
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      gcc-mingw-w64-x86-64-posix \
+      g++-mingw-w64-x86-64-posix \
+      binutils-mingw-w64-x86-64 \
+      gdb-multiarch \
+      cmake \
+      ninja-build \
+      ccache \
+ && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p /home/sbx/.cache/ccache \
+ && chown -R sbx:sbx /home/sbx/.cache/ccache \
+ && x86_64-w64-mingw32-gcc --version | head -1 \
+ && cmake --version | head -1
+
+# cross toolchain + wrapper shims so simple `cc`-style env config also hits
+# the cache: prefer ccache-wrapper builds (CC="ccache x86_64-w64-mingw32-gcc").
+ENV CCACHE_DIR=/home/sbx/.cache/ccache
+
 ###### default target (plain `docker build .`) #################################
 FROM common AS base

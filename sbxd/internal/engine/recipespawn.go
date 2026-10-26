@@ -103,6 +103,7 @@ var RecipeStacks = map[string]string{ // stack -> named cache volume
 	"python": "sbx-pip",
 	"go":     "sbx-go",
 	"rust":   "sbx-cargo",
+	"i2cpp":  "sbx-ccache",
 }
 
 // RecipeSpawn is the resolved content of an sbx.yaml for `recipe up`.
@@ -127,7 +128,7 @@ func SpawnRecipeContainer(s RecipeSpawn) (string, string, error) {
 	}
 	uid, gid, home := homeUIDGID()
 	if s.Stack == "" {
-		return cn, "", fmt.Errorf("stack: required to spawn (`stack: go|node|python|rust|base`)")
+		return cn, "", fmt.Errorf("stack: required to spawn (`stack: go|node|python|rust|i2cpp|base`)")
 	}
 	existed := RecipeImageExists(s.Stack)
 	if err := RecipeImageEnsure(s.Stack); err != nil {
@@ -248,6 +249,8 @@ func cachePath(stack string) string {
 		return "home/sbx/go"
 	case "rust":
 		return "usr/local/cargo"
+	case "i2cpp":
+		return "home/sbx/.cache/ccache"
 	}
 	return "tmp/cache-" + stack
 }

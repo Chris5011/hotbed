@@ -17,7 +17,10 @@ SBX_IMAGE_PREFIX="sbx"
 SBX_LABEL="dev.sbx"
 SBX_KEY_FALLBACK_VERSIONS=("go:1.24.0")
 
-STACKS="base node python go rust"
+STACKS="base node python go rust i2cpp"
+# bare `sbx build` (no args) — i2cpp stays opt-in there: the mingw-w64
+# cross toolchain is a ~500 MB layer most projects never need.
+CORE_STACKS="base node python go rust"
 DEFAULT_STACK="base"
 
 # --- options -----------------------------------------------------------------
@@ -125,7 +128,62 @@ build_help() {
     ok "built sbx:$1 in $(( SECONDS - t0 ))s"
 }
 
-# --- mount/option assembly ---------------------------------------------------
+# --- Windows bridge (WSL-only, opt-in) ---------------------------------------
+# The i2cpp build loop ends on Windows: the built .dll/.exe has to land
+# somewhere Windows can see it, get the target launched, logs read back.
+# On WSL2 hosts this works through the distro's interop channel. Deliberate
+# host-side (not inside sandboxes): containers run in Docker Desktop's own
+# utility VM whose kernel intentionally lacks AF_VSOCK — the WSL /init
+# interop interpreter cannot reach Windows from there, so no bridge helper
+# ships inside stack images. Nothing here touches sandbox boundaries; a
+# plain Linux host just gets a loud "not on WSL" instead of a working verb.
+WS_DROP_DIR="/mnt/c/Users/Public/sbx-drop"
+
+wsl_interop_ok() {
+    grep -aq enabled /proc/sys/fs/binfmt_misc/WSLInterop 2>/dev/null
+}
+
+wsl_require() {
+    command -v powershell.exe >/dev/null 2>&1 \
+        || die "no powershell.exe on PATH — Windows bridge needs a WSL2 distro (PATH includes /mnt/c/Windows/System32 on WSL)."
+    wsl_interop_ok \
+        || die "WSL interop is disabled (/proc/sys/fs/binfmt_misc/WSLInterop). Fix: set [interop] enabled=true in /etc/wsl.conf as root, then 'wsl --shutdown'."
+}
+
+wintest() {
+    printf -- '== Windows bridge health ==\n'
+    wsl_require \
+        && ok "WSL interop reachable (binfmt_misc/WSLInterop enabled)"
+    local psout
+    psout="$(powershell.exe -NoProfile -Command \
+        "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Write-Output ('powershell ' + \$PSVersionTable.PSVersion.ToString() + ' on ' + [Environment]::OSVersion.VersionString)" 2>&1 | tr -d '\r\n')"
+    ok "windows answered: $psout"
+}
+
+winsh() {
+    wsl_require
+    local pscmd="$*"
+    [[ -n "$pscmd" ]] || usage "winsh needs a powershell command, e.g.: sbx winsh \$PSVersionTable"
+    powershell.exe -NoProfile -Command \
+        "[Console]::OutputEncoding=[Text.Encoding]::UTF8; $pscmd"
+}
+
+windrop() {
+    wsl_require
+    [[ $# -gt 0 ]] || usage "windrop needs files to copy, e.g.: sbx windrop /workspace/hello.dll"
+    mkdir -p "$WS_DROP_DIR" 2>/dev/null \
+        || die "cannot create $WS_DROP_DIR — mount C: into this distro first (/etc/wsl.conf [automount] enabled=true)."
+    local src dest
+    for src in "$@"; do
+        [[ -f "$src" ]] || die "windrop: not a regular file: $src"
+        cp -f "$src" "$WS_DROP_DIR/" \
+            || die "windrop: cannot copy $src into $WS_DROP_DIR"
+        dest="$WS_DROP_DIR/$(basename "$src")"
+    done
+    ok "dropped $# file(s) into $WS_DROP_DIR (visible from Windows at C:\\Users\\Public\\sbx-drop)"
+}
+
+
 # emits one `--flag value` pair per line; caller maps into an array
 mounts_and_flags() {
     local st="$cn_stack"
@@ -547,11 +605,14 @@ COMMANDS
   caches [ls|nuke]       list or wipe the shared package caches
   build [stacks...]      (re)build sbx images
   stack                  print the auto-detected stack for this project
+  wintest                Windows bridge: can WSL answer powershell? (diagnose)
+  winsh <cmd...>         run a powershell command on the Windows host (WSL only)
+  windrop <file...>      copy artifact(s) to C:\\Users\\Public\\sbx-drop (WSL only)
   doctor                 diagnose environment
   version | help         meta
 
 OPTIONS
-  --stack NAME           node|python|go|rust|base (default: auto-detect)
+  --stack NAME           node|python|go|rust|i2cpp|base (default: auto-detect)
   --fresh                ephemeral mode — container is --rm, nondurable
   --net MODE             pass --network MODE to the container (e.g. 'none')
   --no-auth              don't mount host opencode state & binary
@@ -603,11 +664,14 @@ case "$CMD" in
     rm)            rm_current "$@" ;;
     ls|ps)         list_containers ;;
     prune)         prune "$@" ;;
+    caches)        caches "$@" ;;
+    wintest)       wintest ;;
+    winsh)         winsh "$@" ;;
+    windrop)       windrop "$@" ;;
     build)         require_engine
-                   if [[ $# -eq 0 ]]; then set -- $STACKS; fi
+                   if [[ $# -eq 0 ]]; then set -- $CORE_STACKS; fi
                    for s in "$@"; do is_stack "$s" || usage "unknown stack '$s'"; done
                    for s in "$@"; do build_help "$s"; done ;;
-    caches)        caches "$@" ;;
     doctor)        doctor ;;
     install-self)  selfinstall ;;
     version|v)     version ;;
