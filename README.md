@@ -46,6 +46,7 @@ nested Docker, or a full distro → `sbxvm`. Both keep your host clean.
 13. [File map](#file-map)
 14. [Disk footprint & housekeeping](#disk-footprint--housekeeping)
 15. [Security posture (honest)](#security-posture-honest)
+16. [License](#license)
 
 ---
 
@@ -1298,3 +1299,9 @@ per-VM seed ISOs are generated, not committed. Concretely:
 - PRs get the repo's `.github/PULL_REQUEST_TEMPLATE.md` (what / how-verified /
   evidence checklists) — titles must be valid conventional commit subjects,
   because squashing turns them into history.
+
+## License
+
+[MIT](LICENSE) — use it, break it, ship it. The upstream opencode binary
+and the Debian/other base images referenced by this kit keep their own
+licenses; nothing here republishes them.
