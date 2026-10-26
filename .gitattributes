@@ -1,0 +1,12 @@
+# Line-ending policy: everything text is LF.
+# Rationale: the tree is mostly shell + Go. core.autocrlf=true clients used
+# to hand back CRLF working copies on checkout — bash then errors on every
+# function definition ("unexpected token `$'{\r'"). Pin LF everywhere.
+* text=auto eol=lf
+
+# Byte-exact artifacts (should they ever exist): keep as-is.
+*.png binary
+*.jpg binary
+*.ico binary
+*.qcow2 binary
+*.gz binary
