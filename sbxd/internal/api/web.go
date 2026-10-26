@@ -86,7 +86,10 @@ const indexHTML = `<!doctype html>
       </div>
 
       <div id="tab-burn" class="tabpane">
-        <div class="hint">Per-sandbox token ledger from the proxy. Upstream-reported usage where the provider gives it; chars/4 estimate where it doesn't (marked).</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--s2)">
+          <div class="hint" style="flex:1">Per-sandbox token ledger from the proxy. Upstream-reported usage where the provider gives it; a bytes/4 estimate (marked est) where it doesn't. Auto-updates every 5 s.</div>
+          <button class="tool" id="burn-reload" title="re-read the burn ledger now">&#8635; reload</button>
+        </div>
         <div id="burn-sbx"></div>
       </div>
     </section>
@@ -1165,6 +1168,18 @@ function drillToggle(name){
 function renderBurnTab(sb){
   var host=$('burn-sbx');
   if(!sb){ host.innerHTML='<div class="hint">no sandbox selected</div>'; return; }
+  // the detail burn tab polls on the shared lease too: while THIS sandbox's
+  // detail view is open the cards/table stay live; ticks skip while the user
+  // works an input. The reload button (tab-burn pane) forces a fresh read.
+  if(burnTimer){ clearInterval(burnTimer); burnTimer=null; }
+  var finish=function(){
+    burnTimer=setInterval(function(){
+      var ae=document.activeElement;
+      if(state.view!=='sandbox'||!state.sel||state.sel.indexOf('/'+sb.name)<0){ clearInterval(burnTimer); burnTimer=null; return; }
+      if(ae&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT')) return;
+      renderBurnTab(sb);
+    },5000);
+  };
   host.innerHTML='<div class="hint">loading…</div>';
   fetch('/api/usage?name='+encodeURIComponent(sb.name)).then(function(r){return r.json();}).then(function(s){
     var cards='<div class="burnbar">'+
@@ -1190,9 +1205,10 @@ function renderBurnTab(sb){
       s.recent.forEach(function(e){
         html+='<tr><td>'+esc((e.ts||'').replace('T',' ').slice(0,19))+'</td><td>'+esc(e.model)+'</td><td>'+fmtTok(e.in)+'</td><td>'+fmtTok(e.out)+'</td><td>'+((e.cost||0).toFixed(4))+'</td><td>'+(e.status||'')+((e.est)?'<span class="chipmuted">est</span>':'')+'</td></tr>';
       });
-      html+='</tbody></table><div class="hint">est = usage chars/4-estimated (upstream did not report)</div>';
+      html+='</tbody></table><div class="hint">est = token estimate (bytes/4 - used when the provider reports no usage)</div>';
     }
     host.innerHTML=html;
+    finish();
   }).catch(function(){ burnRetry(host, function(){ renderBurnTab(sb); }); });
 }
 
@@ -1515,6 +1531,7 @@ function init(){
   $('lnk-help').addEventListener('click', function(ev){ ev.preventDefault(); toast('CLI: sbxd ps | sbxd attach NAME | sbxd logs NAME | sbxd start/stop NAME | sbxd usage [NAME] | sbxd key mint NAME | sbxd sync NAME','ok'); });
   // the brand does the old bottom-entry job: click it for the Overview
   $('brand').addEventListener('click', function(){ showGlobal('overview'); });
+  $('burn-reload').addEventListener('click', function(){ var sb=currentSB(); if(sb) renderBurnTab(sb); });
   $('lnk-burn').addEventListener('click', function(ev){ ev.preventDefault(); showGlobal('burn'); });
   var lc=$('lnk-create');
   if(lc){ lc.addEventListener('click', function(ev){ ev.preventDefault(); showGlobal('create'); }); }
