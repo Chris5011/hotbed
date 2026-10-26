@@ -31,13 +31,13 @@ fmt:
 	@echo "fmt: clean"
 
 vet:
-	cd hotbedd && $(GO) vet ./...
+	cd hotbed && $(GO) vet ./...
 
 build: fmt
-	cd hotbedd && $(GO) build -o bin/hotbedd ./cmd/hotbedd
+	cd hotbed && $(GO) build -o bin/hotbedd ./cmd/hotbedd
 
 smoke:
-	HOTBEDD_SMOKE_PORT=7790 bash tests/hotbedddsmoke.sh
+	HOTBEDD_SMOKE_PORT=7790 bash tests/hotbedd-smoke.sh
 
 release:
 	bash scripts/release.sh $(VERSION)

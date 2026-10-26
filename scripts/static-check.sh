@@ -17,7 +17,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 FAIL=0
 
-for f in vm/hotbedvm.sh tests/hotbedddsmoke.sh tests/vmsmoke.sh tests/vmdsmoke.sh tests/smoke.sh bin/hbd; do
+for f in vm/hotbedvm.sh tests/hotbedd-smoke.sh tests/vmsmoke.sh tests/vmdsmoke.sh tests/smoke.sh bin/hbd; do
     [ -f "$f" ] || continue
     if bash -n "$f" 2>/dev/null; then
         echo "bash  $f  ok"

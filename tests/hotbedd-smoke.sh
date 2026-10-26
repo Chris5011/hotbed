@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hotbedddsmoke.sh — verification of the hotbedd daemon surface (Hotbed):
+# hotbedd-smoke.sh — verification of the hotbedd daemon surface (Hotbed):
 # P1: serve/health, unified ps, connect variants, persistent tmux attach,
 # instant SSE snapshot, dashboard assets, doctor. Needs at least ONE running
 # sandbox (container or vm) in the inventory; does NOT mutate any of it
@@ -8,11 +8,11 @@
 # P2 (hermetic, no real provider): per-sandbox keys, token/cost ledger
 # (upstream-counted + estimated), budgets with 429 trip, config/get/set,
 # key revoke — all against a python3 mock upstream on a scratch daemon.
-# Run:  tests/hotbedddsmoke.sh
+# Run:  tests/hotbedd-smoke.sh
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SBXD="$ROOT/hotbed/bin/hotbedd"
+HOTBEDD="$ROOT/hotbed/bin/hotbedd"
 PORT="${HOTBEDD_SMOKE_PORT:-7790}"
 export HOTBEDD_PORT="$PORT"
 if ss -ltn 2>/dev/null | grep -q ":$PORT "; then
@@ -40,25 +40,25 @@ else
 fi
 
 hdr "runtime"
-if [[ -x "$SBXD" ]]; then pass "hotbedd binary present"; else
+if [[ -x "$HOTBEDD" ]]; then pass "hotbedd binary present"; else
     fail "hotbedd binary present (build: cd hotbedd && go build -o bin/hotbedd ./cmd/hotbedd)"
     printf '\e[31;1mSMOKE: aborted\e[0m\n'; exit 1
 fi
-"$SBXD" version 2>&1 | grep -q '^hotbedd 0\.' \
+"$HOTBEDD" version 2>&1 | grep -q '^hotbedd 0\.' \
     && pass "hotbedd version sane" || fail "hotbedd version sane"
 tmux -V >/dev/null 2>&1 && pass "tmux present (attach desk)" || fail "tmux present"
 curl -s --max-time 2 "https://dummy" >/dev/null 2>&1 || true # curl availability probe
 command -v curl >/dev/null && pass "curl present (API checks)" || fail "curl present"
 
 hdr "daemon"
-"$SBXD" serve --port "$PORT" >/tmp/hotbedddsmoke.serve.log 2>&1 &
+"$HOTBEDD" serve --port "$PORT" >/tmp/hotbedd-smoke.serve.log 2>&1 &
 DAEMON_PID=$!
 for _ in $(seq 1 20); do
     health="$(curl -s --max-time 1 "http://127.0.0.1:$PORT/api/health" 2>/dev/null)" && [[ -n "$health" ]] && break
     sleep 0.25
 done
 echo "$health" | grep -q '"version"' && pass "daemon answers /api/health" \
-    || { fail "daemon answers /api/health — see /tmp/hotbedddsmoke.serve.log"; printf '\e[31;1mSMOKE: aborted\e[0m\n'; exit 1; }
+    || { fail "daemon answers /api/health — see /tmp/hotbedd-smoke.serve.log"; printf '\e[31;1mSMOKE: aborted\e[0m\n'; exit 1; }
 echo "$health" | grep -q '"docker":true' && pass "docker probe healthy" || fail "docker probe healthy"
 echo "$health" | grep -q '"tmux":true'   && pass "tmux probe healthy"   || fail "tmux probe healthy"
 
@@ -80,7 +80,7 @@ echo "$health" | grep -aq '"version":' && echo "$ost" | grep -aq '"version":' \
     || fail "overview stats: version field present"
 
 hdr "HOTBEDD_BIND (non-loopback opt-in)"
-"$SBXD" serve --port 7796 --bind 127.0.0.2 >/tmp/hotbedddsmoke.bind.log 2>&1 &
+"$HOTBEDD" serve --port 7796 --bind 127.0.0.2 >/tmp/hotbedd-smoke.bind.log 2>&1 &
 BIND_PID=$!
 bhealth=""
 for _ in $(seq 1 12); do
@@ -89,18 +89,18 @@ for _ in $(seq 1 12); do
 done
 echo "$bhealth" | grep -q '"version"' \
     && pass "HOTBEDD_BIND=127.0.0.2: daemon answers on the bound address" \
-    || fail "HOTBEDD_BIND not honored (see /tmp/hotbedddsmoke.bind.log)"
+    || fail "HOTBEDD_BIND not honored (see /tmp/hotbedd-smoke.bind.log)"
 curl -s --max-time 1 "http://127.0.0.1:7796/api/health" >/dev/null 2>&1 \
     && fail "exact bind broken: daemon answered instead on 127.0.0.1:7796" \
     || pass "bind is exact: no listener on other addresses"
-grep -aq "non-loopback" /tmp/hotbedddsmoke.bind.log \
+grep -aq "non-loopback" /tmp/hotbedd-smoke.bind.log \
     && fail "loopback bind must stay quiet (no warning)" \
     || pass "loopback bind stays quiet (no warning)"
-"$SBXD" serve --port 7797 --bind 0.0.0.0 >/tmp/hotbedddsmoke.anybind.log 2>&1 &
+"$HOTBEDD" serve --port 7797 --bind 0.0.0.0 >/tmp/hotbedd-smoke.anybind.log 2>&1 &
 ANY_PID=$!
 warn=""
 for _ in $(seq 1 16); do
-    grep -aq "UNAUTHENTICATED" /tmp/hotbedddsmoke.anybind.log && warn=1 && break
+    grep -aq "UNAUTHENTICATED" /tmp/hotbedd-smoke.anybind.log && warn=1 && break
     sleep 0.25
 done
 [[ -n "$warn" ]] \
@@ -116,7 +116,7 @@ hdr "engine down (fake wedged docker)"
 # else would hang 40s. The scan must return an empty docker section promptly
 # (no ps/stats fanout), and /api/health must report "docker":false in ~s, not
 # ~a-minute — this is what made a cold remote box look unresponsive.
-FD=/tmp/hotbedddsmoke.fakedocker
+FD=/tmp/hotbedd-smoke.fakedocker
 rm -rf "$FD"; mkdir -p "$FD"
 {
     printf '#!/usr/bin/env bash\n'
@@ -126,26 +126,26 @@ rm -rf "$FD"; mkdir -p "$FD"
     printf 'esac\n'
 } > "$FD/docker"
 chmod +x "$FD/docker"
-env PATH="$FD:$PATH" "$SBXD" serve --port 7798 >/tmp/hotbedddsmoke.fake.log 2>&1 &
+env PATH="$FD:$PATH" "$HOTBEDD" serve --port 7798 >/tmp/hotbedd-smoke.fake.log 2>&1 &
 FDPID=$!
 for _ in $(seq 1 20); do
     curl -s --max-time 1 "http://127.0.0.1:7798/api/health" >/dev/null 2>&1 && break
     sleep 0.25
 done
-hwall="$(curl -s -o /tmp/hotbedddsmoke.health.out -w '%{time_total}' --max-time 20 \
+hwall="$(curl -s -o /tmp/hotbedd-smoke.health.out -w '%{time_total}' --max-time 20 \
     "http://127.0.0.1:7798/api/health" 2>/dev/null)"
-grep -q '"docker":false' /tmp/hotbedddsmoke.health.out \
+grep -q '"docker":false' /tmp/hotbedd-smoke.health.out \
     && pass "wedged engine: health reports docker:false" \
     || fail "wedged engine: health reports docker:false"
 awk -v w="$hwall" 'BEGIN{exit !(w < 8)}' \
     && pass "wedged engine: health probe capped (wall ${hwall%%.*}s < 8s)" \
     || fail "wedged engine: health probe capped (wall=${hwall}s)"
-swall="$(curl -s -o /tmp/hotbedddsmoke.hbd.out -w '%{time_total}' --max-time 20 \
+swall="$(curl -s -o /tmp/hotbedd-smoke.hbd.out -w '%{time_total}' --max-time 20 \
     "http://127.0.0.1:7798/api/sandboxes" 2>/dev/null)"
 awk -v w="$swall" 'BEGIN{exit !(w < 8)}' \
     && pass "wedged engine: sandboxes answer promptly (wall ${swall%%.*}s < 8s)" \
     || fail "wedged engine: sandboxes answered slowly (wall=${swall}s)"
-grep -aqF '"sandboxes":[]' /tmp/hotbedddsmoke.hbd.out \
+grep -aqF '"sandboxes":[]' /tmp/hotbedd-smoke.hbd.out \
     && pass "empty engine: sandboxes payload is an array, not null (renderList contract)" \
     || fail "empty engine: sandboxes payload must be an array, not null"
 kill "$FDPID" 2>/dev/null
@@ -165,11 +165,11 @@ hdr "create-time image ensure (fake docker)"
 # first dashboard create looked like "pull access denied for hbd". The shim
 # pretends the image is absent and records every docker call — the daemon
 # must build the image BEFORE the container create.
-FD2=/tmp/hotbedddsmoke.imgdyn
+FD2=/tmp/hotbedd-smoke.imgdyn
 rm -rf "$FD2"; mkdir -p "$FD2"
 {
     printf '#!/usr/bin/env bash\n'
-    printf 'echo "$*" >> /tmp/hotbedddsmoke.imgdyn/order\n'
+    printf 'echo "$*" >> /tmp/hotbedd-smoke.imgdyn/order\n'
     printf 'case "$*" in\n'
     printf '  *"image inspect"*) exit 1 ;;\n'
     printf '  *"--target"*) echo build-toolkit=ok; exit 0 ;;\n'
@@ -178,7 +178,7 @@ rm -rf "$FD2"; mkdir -p "$FD2"
     printf 'esac\n'
 } > "$FD2/docker"
 chmod +x "$FD2/docker"
-env PATH="$FD2:$PATH" "$SBXD" serve --port 7799 >/tmp/hotbedddsmoke.img.log 2>&1 &
+env PATH="$FD2:$PATH" "$HOTBEDD" serve --port 7799 >/tmp/hotbedd-smoke.img.log 2>&1 &
 IDPID=$!
 for _ in $(seq 1 20); do
     curl -s --max-time 1 "http://127.0.0.1:7799/api/health" >/dev/null 2>&1 && break
@@ -201,7 +201,7 @@ kill "$IDPID" 2>/dev/null
 wait "$IDPID" 2>/dev/null
 
 hdr "snakeoil TLS (clipboard needs a secure context)"
-"$SBXD" serve --port 7800 --tls >/tmp/hotbedddsmoke.tls.log 2>&1 &
+"$HOTBEDD" serve --port 7800 --tls >/tmp/hotbedd-smoke.tls.log 2>&1 &
 TPID=$!
 for _ in $(seq 1 20); do curl -sk --max-time 1 "https://127.0.0.1:7800/api/health" >/dev/null 2>&1 && break; sleep 0.25; done
 curl -sk --max-time 5 "https://127.0.0.1:7800/api/health" | grep -q '"version"' \
@@ -213,7 +213,7 @@ curl -s --max-time 3 "http://127.0.0.1:7800/api/health" 2>/dev/null | grep -q "C
 if command -v openssl >/dev/null 2>&1; then
     fp1="$(echo | openssl s_client -connect 127.0.0.1:7800 2>/dev/null | openssl x509 -outform DER 2>/dev/null | sha256sum | cut -d' ' -f1)"
     kill "$TPID" 2>/dev/null; wait "$TPID" 2>/dev/null
-    "$SBXD" serve --port 7800 --tls >/tmp/hotbedddsmoke.tls2.log 2>&1 &
+    "$HOTBEDD" serve --port 7800 --tls >/tmp/hotbedd-smoke.tls2.log 2>&1 &
     TPID=$!
     for _ in $(seq 1 20); do curl -sk --max-time 1 "https://127.0.0.1:7800/api/health" >/dev/null 2>&1 && break; sleep 0.25; done
     fp2="$(echo | openssl s_client -connect 127.0.0.1:7800 2>/dev/null | openssl x509 -outform DER 2>/dev/null | sha256sum | cut -d' ' -f1)"
@@ -229,15 +229,15 @@ wait "$TPID" 2>/dev/null
 # perm-denied shape: docker exists but the engine refuses instantly — the
 # real remote-box case. Everything must be prompt, no retry-drag.
 printf '#!/usr/bin/env bash\necho "permission denied while trying to connect to the Docker daemon socket" >&2\nexit 1\n' > "$FD/docker"
-env PATH="$FD:$PATH" "$SBXD" serve --port 7798 >/tmp/hotbedddsmoke.fake2.log 2>&1 &
+env PATH="$FD:$PATH" "$HOTBEDD" serve --port 7798 >/tmp/hotbedd-smoke.fake2.log 2>&1 &
 FDPID=$!
 for _ in $(seq 1 20); do
     curl -s --max-time 1 "http://127.0.0.1:7798/api/health" >/dev/null 2>&1 && break
     sleep 0.25
 done
-fwall="$(curl -s -o /tmp/hotbedddsmoke.health2.out -w '%{time_total}' --max-time 20 \
+fwall="$(curl -s -o /tmp/hotbedd-smoke.health2.out -w '%{time_total}' --max-time 20 \
     "http://127.0.0.1:7798/api/health" 2>/dev/null)"
-grep -q '"docker":false' /tmp/hotbedddsmoke.health2.out \
+grep -q '"docker":false' /tmp/hotbedd-smoke.health2.out \
     && pass "perm-denied engine: health reports docker:false" \
     || fail "perm-denied engine: health reports docker:false"
 awk -v w="$fwall" 'BEGIN{exit !(w < 3)}' \
@@ -247,7 +247,7 @@ kill "$FDPID" 2>/dev/null
 wait "$FDPID" 2>/dev/null
 
 hdr "inventory (ps)"
-list="$("$SBXD" ps 2>&1)"
+list="$("$HOTBEDD" ps 2>&1)"
 echo "$list" | grep -q 'NAME.*KIND.*STATE' && pass "ps prints unified table" || fail "ps prints unified table"
 n_sb="$(echo "$list" | tail -n +2 | grep -c .)"
 [[ "$n_sb" -ge 1 ]] && pass "inventory not empty ($n_sb sandboxes)" \
@@ -267,14 +267,14 @@ curl -s --max-time 3 "http://127.0.0.1:$PORT/api/sandboxes" | grep -q "\"name\":
 
 hdr "stats"
 sleep 2 # let two scan ticks pass so CPU% has a delta (libvirt)
-stats="$("$SBXD" stats 2>&1)"
+stats="$("$HOTBEDD" stats 2>&1)"
 echo "$stats" | grep -q "$NAME" \
     && pass "stats lists $NAME" || fail "stats lists $NAME"
 echo "$stats" | awk -v n="$NAME" '$1==n && $4!=""' | grep -q . \
     && pass "stats shows CPU/MEM values" || fail "stats shows CPU/MEM values"
 
 hdr "connection (connect)"
-conn="$("$SBXD" connect "$NAME" 2>&1)"
+conn="$("$HOTBEDD" connect "$NAME" 2>&1)"
 echo "$conn" | grep -q 'attach-tmux:' && pass "connect: tmux variant" || fail "connect: tmux variant"
 echo "$conn" | grep -q 'windows:'      && pass "connect: Windows Terminal variant" || fail "connect: windows variant"
 if [[ "$KIND" == "container" ]]; then
@@ -307,7 +307,7 @@ pane="$(tmux capture-pane -p -t "hotbed-$NAME" 2>/dev/null | grep -v '^$' | tail
 tmux kill-session -t "hotbed-$NAME" 2>/dev/null && pass "test session cleaned up" || fail "test session cleaned up"
 
 hdr "SSE + dashboard"
-scratch="$(mktemp -d /tmp/opencode/hotbedddsmoke.XXXXXX)"
+scratch="$(mktemp -d /tmp/opencode/hotbedd-smoke.XXXXXX)"
 ev_ok=0
 for _ in 1 2; do
     curl -sN --max-time 6 "http://127.0.0.1:$PORT/api/events" >"$scratch/events" 2>/dev/null
@@ -369,7 +369,7 @@ rm -rf "$scratch" 2>/dev/null || true
 hdr "vm boot registration (kit scheme probe)"
 if bash -n "$ROOT/vm/hotbedvm.sh" 2>/dev/null; then
     pass "vm/hotbedvm.sh syntax"
-    scratch="$(mktemp -d /tmp/opencode/hotbedddsmoke.XXXXXX)"
+    scratch="$(mktemp -d /tmp/opencode/hotbedd-smoke.XXXXXX)"
     # resolve the controller scheme once (TLS listener -> https), then land
     # begin+end on the daemon; HOTBEDD_TLS=1 box previously ATE these silently.
     sed -n '/^_SBXVM_CTL=/,/^}/p' "$ROOT/vm/hotbedvm.sh" >"$scratch/vmboot.sh"
@@ -385,10 +385,10 @@ else
 fi
 
 hdr "doctor"
-"$SBXD" doctor 2>&1 | grep -q 'hotbedd daemon' \
+"$HOTBEDD" doctor 2>&1 | grep -q 'hotbedd daemon' \
     && pass "doctor detects the daemon" || fail "doctor detects the daemon"
-"$SBXD" doctor >/dev/null 2>&1 && pass "doctor exits clean" \
-    || { "$SBXD" doctor >/dev/null 2>&1; fail "doctor exits clean (rc=$?)"; }
+"$HOTBEDD" doctor >/dev/null 2>&1 && pass "doctor exits clean" \
+    || { "$HOTBEDD" doctor >/dev/null 2>&1; fail "doctor exits clean (rc=$?)"; }
 
 # ---------------------------------------------------------------- P2 ----
 # Hermetic token-accounting proxy exercise: separate data dirs, a python
@@ -463,7 +463,7 @@ P2CLEAN() {
 }
 p2env=(env "HOTBEDD_CONFIG_DIR=$P2/config" "HOTBEDD_DATA_DIR=$P2/data" "HOTBEDD_STATE_DIR=$P2/state" "HOTBEDD_RELAY_DISABLE=1")
 MOCK_PORT=$MPORT /usr/bin/python3 "$P2/mock.py" >/dev/null 2>&1 & P2MOCK_PID=$!
-"${p2env[@]}" "$SBXD" serve --port "$DBUS" >"$P2/daemon.log" 2>&1 & P2DAEMON_PID=$!
+"${p2env[@]}" "$HOTBEDD" serve --port "$DBUS" >"$P2/daemon.log" 2>&1 & P2DAEMON_PID=$!
 # readiness: the mock can take 1-2s to bind in scripted contexts — wait for
 # BOTH the dashboard/proxy AND the mock (403-without-auth = mock ready).
 mock_ready=""
@@ -482,7 +482,7 @@ done
 c1=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -XPOST "http://127.0.0.1:$DPROTO/v1/chat/completions" -H 'Content-Type: application/json' -d '{}')
 [[ "$c1" == 401 ]] && pass "proxy: 401 without a key" || fail "proxy: 401 without a key (got $c1)"
 # 2. mint via the stateless CLI store (instantly visible to the running daemon)
-keyout="$("${p2env[@]}" "$SBXD" key mint tester 2>&1)"
+keyout="$("${p2env[@]}" "$HOTBEDD" key mint tester 2>&1)"
 TOK="$(echo "$keyout" | awk '/hbk-/{print $1; exit}')"
 echo "$TOK" | grep -q '^hbk-' && pass "key mint (CLI, instant) — $TOK" || fail "key mint (CLI, instant)"
 # 3. non-stream passthrough with upstream usage counted
@@ -502,37 +502,37 @@ curl -s -o /dev/null --max-time 8 -XPOST "http://127.0.0.1:$DPROTO/v1/chat/compl
 uj="$P2/state/usage.jsonl"
 grep -q '"in":42' "$uj" && grep -q '"out":7' "$uj" && grep -q '"est":true' "$uj" \
     && pass "ledger: upstream usage + est rows recorded" || fail "ledger: upstream usage + est rows recorded"
-us="$("${p2env[@]}" "$SBXD" usage tester 2>&1)"
+us="$("${p2env[@]}" "$HOTBEDD" usage tester 2>&1)"
 echo "$us" | grep -q 'tokens in/out 66/24' && pass "usage CLI sums counted + est tokens (66/24)" || fail "usage CLI sums counted + est tokens (got: $(echo "$us" | head -2 | tail -1))"
 # 6. budgets trip BEFORE forwarding
-"${p2env[@]}" "$SBXD" budget tester 0.000001 >/dev/null 2>&1
+"${p2env[@]}" "$HOTBEDD" budget tester 0.000001 >/dev/null 2>&1
 c3=$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 -XPOST "http://127.0.0.1:$DPROTO/v1/chat/completions" \
         -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d '{"model":"mock-fast","stream":false}')
 [[ "$c3" == 429 ]] && pass "wallet: tiny budget trips 429" || fail "wallet: tiny budget trips 429 (got $c3)"
-"${p2env[@]}" "$SBXD" budget tester 100 >/dev/null 2>&1
+"${p2env[@]}" "$HOTBEDD" budget tester 100 >/dev/null 2>&1
 c4=$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 -XPOST "http://127.0.0.1:$DPROTO/v1/chat/completions" \
         -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d '{"model":"mock-fast","stream":false}')
 [[ "$c4" == 200 ]] && pass "wallet: raising the budget unblocks" || fail "wallet: raising the budget unblocks (got $c4)"
 # 7. config round-trips through the stateless stores
-"${p2env[@]}" "$SBXD" config set opencode.default_model mock-fast >/dev/null 2>&1
-cm="$("${p2env[@]}" "$SBXD" config get opencode.default_model 2>&1)"
+"${p2env[@]}" "$HOTBEDD" config set opencode.default_model mock-fast >/dev/null 2>&1
+cm="$("${p2env[@]}" "$HOTBEDD" config get opencode.default_model 2>&1)"
 echo "$cm" | grep -q 'mock-fast' && pass "config set/get round-trip" || fail "config set/get round-trip (got $cm)"
-"${p2env[@]}" "$SBXD" config print --raw 2>/dev/null | grep -q 'mock-uk' \
+"${p2env[@]}" "$HOTBEDD" config print --raw 2>/dev/null | grep -q 'mock-uk' \
     && pass "config print --raw shows secrets locally" || fail "config print --raw shows secrets locally"
 curl -s --max-time 3 "http://127.0.0.1:$DBUS/api/config" | grep -q 'masked' \
     && pass "API config masks secrets" || fail "API config masks secrets"
 curl -s --max-time 3 "http://127.0.0.1:$DBUS/api/usage" | grep -q 'tester' \
     && pass "API /api/usage lists the sandbox" || fail "API /api/usage lists the sandbox (got: $(curl -s --max-time 3 "http://127.0.0.1:$DBUS/api/usage" | head -c 160))"
 # 8. P3: token wallets, config migration, pricing (wallets live in config.json)
-"${p2env[@]}" "$SBXD" budget tester --tokens 5000 >/dev/null 2>&1
+"${p2env[@]}" "$HOTBEDD" budget tester --tokens 5000 >/dev/null 2>&1
 ck=$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 -XPOST "http://127.0.0.1:$DPROTO/v1/chat/completions" \
         -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d '{"model":"mock-fast","stream":false}')
 [[ "$ck" == 200 ]] && pass "token wallet above burn passes through" || fail "token wallet above burn passes through (got $ck)"
-"${p2env[@]}" "$SBXD" budget tester --tokens 1 >/dev/null 2>&1
+"${p2env[@]}" "$HOTBEDD" budget tester --tokens 1 >/dev/null 2>&1
 ct=$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 -XPOST "http://127.0.0.1:$DPROTO/v1/chat/completions" \
         -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d '{"model":"mock-fast","stream":false}')
 [[ "$ct" == 429 ]] && pass "token wallet trips 429" || fail "token wallet trips 429 (got $ct)"
-"${p2env[@]}" "$SBXD" budget tester --tokens 0 >/dev/null 2>&1
+"${p2env[@]}" "$HOTBEDD" budget tester --tokens 0 >/dev/null 2>&1
 curl -s -o /dev/null --max-time 8 -XPOST "http://127.0.0.1:$DPROTO/v1/chat/completions" \
         -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d '{"model":"mock-fast","stream":false}'
 grep -q '"budget_tokens"' "$P2/config/config.json" \
@@ -541,38 +541,38 @@ grep -q '"budget_tokens"' "$P2/config/config.json" \
 cat > "$P2/data/keys.json" <<'LEGACYEOF'
 {"keys":[{"token":"hbk-legacy-000000000000","sandbox":"ghost","provider":"mock","created":"2026-01-01T00:00:00Z"}],"budgets":{"ghost":2}}
 LEGACYEOF
-"${p2env[@]}" "$SBXD" budget >/dev/null 2>&1
+"${p2env[@]}" "$HOTBEDD" budget >/dev/null 2>&1
 grep -q '"ghost": 2' "$P2/config/config.json" && pass "legacy budgets migrate keys.json -> config.json" \
     || fail "legacy budgets migrate keys.json -> config.json"
 grep -q '"budgets"' "$P2/data/keys.json" && fail "keys.json keeps no budgets after migration" \
     || pass "keys.json keeps no budgets after migration"
 # (the legacy file replace wiped the minted key — mint a fresh one)
-TOK2="$("${p2env[@]}" "$SBXD" key mint tester 2>&1 | awk '/hbk-/{print $1; exit}')"
+TOK2="$("${p2env[@]}" "$HOTBEDD" key mint tester 2>&1 | awk '/hbk-/{print $1; exit}')"
 HEXP="${TOK2##*-}"
 (( ${#HEXP} >= 32 )) \
     && pass "security: minted token carries ≥128-bit randomness (${#HEXP} hex)" \
     || fail "security: minted token carries ≥128-bit randomness (got ${#HEXP}: $TOK2)"
 # pricing: an override re-prices new rows immediately
-"${p2env[@]}" "$SBXD" price set mock-fast 50 50 >/dev/null 2>&1
+"${p2env[@]}" "$HOTBEDD" price set mock-fast 50 50 >/dev/null 2>&1
 cp=$(curl -s --max-time 8 -XPOST "http://127.0.0.1:$DPROTO/v1/chat/completions" \
         -H "Authorization: Bearer $TOK2" -H 'Content-Type: application/json' -d '{"model":"mock-fast","stream":false}')
 echo "$cp" | grep -q 'hi there' || true
 grep -q '"cost":0.00295' "$P2/state/usage.jsonl" && pass "price set re-prices new ledger rows" \
     || fail "price set re-prices new ledger rows"
-"${p2env[@]}" "$SBXD" price rm mock-fast >/dev/null 2>&1
+"${p2env[@]}" "$HOTBEDD" price rm mock-fast >/dev/null 2>&1
 cq=$(curl -s -o /dev/null --max-time 8 -XPOST "http://127.0.0.1:$DPROTO/v1/chat/completions" \
         -H "Authorization: Bearer $TOK2" -H 'Content-Type: application/json' -d '{"model":"mock-fast","stream":false}')
 [[ "$(tail -1 "$P2/state/usage.jsonl" 2>/dev/null | grep -c '"cost":0,')" == 1 ]] \
     && pass "price rm falls back (unknown model cost 0)" || fail "price rm falls back (unknown model cost 0)"
 # audit trail records control-plane actions
-"${p2env[@]}" "$SBXD" budget tester 1 >/dev/null 2>&1
-"${p2env[@]}" "$SBXD" audit 5 2>&1 | grep -q 'wallet.set' \
+"${p2env[@]}" "$HOTBEDD" budget tester 1 >/dev/null 2>&1
+"${p2env[@]}" "$HOTBEDD" audit 5 2>&1 | grep -q 'wallet.set' \
     && pass "audit: wallet change landed in the trail" || fail "audit: wallet change landed in the trail"
 [[ -f "$P2/state/audit.jsonl" ]] && pass "audit: JSONL exists in the state dir" \
     || fail "audit: JSONL exists in the state dir"
 
 # 9. revoke kills access
-"${p2env[@]}" "$SBXD" key revoke tester >/dev/null 2>&1
+"${p2env[@]}" "$HOTBEDD" key revoke tester >/dev/null 2>&1
 c5=$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 -XPOST "http://127.0.0.1:$DPROTO/v1/chat/completions" \
         -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d '{"model":"mock-fast","stream":false}')
 [[ "$c5" == 401 ]] && pass "key revoke cuts access instantly" || fail "key revoke cuts access instantly (got $c5)"
@@ -588,8 +588,8 @@ if docker info >/dev/null 2>&1; then
         docker rm -f "$MNAME" >/dev/null 2>&1
         docker volume rm "${MNAME}-v" >/dev/null 2>&1
     }
-    "${p2env[@]}" "$SBXD" mount add "$MNAME" /tmp:/mtest --yes >/dev/null 2>&1
-    ls1="$("${p2env[@]}" "$SBXD" mount ls "$MNAME" 2>&1)"
+    "${p2env[@]}" "$HOTBEDD" mount add "$MNAME" /tmp:/mtest --yes >/dev/null 2>&1
+    ls1="$("${p2env[@]}" "$HOTBEDD" mount ls "$MNAME" 2>&1)"
     echo "$ls1" | grep -q '/mtest' && pass "mount add persists a bind through recreation" \
         || fail "mount add persists a bind through recreation (got: $(echo "$ls1" | head -2 | tail -1))"
     grep -q "${MNAME}-v" <<<"$ls1" && pass "named volumes carried over on recreation" \
@@ -599,12 +599,12 @@ if docker info >/dev/null 2>&1; then
     else
         fail "bound host dir visible inside the container"
     fi
-    "${p2env[@]}" "$SBXD" mount rm "$MNAME" /mtest --yes >/dev/null 2>&1
-    ls2="$("${p2env[@]}" "$SBXD" mount ls "$MNAME" 2>&1)"
+    "${p2env[@]}" "$HOTBEDD" mount rm "$MNAME" /mtest --yes >/dev/null 2>&1
+    ls2="$("${p2env[@]}" "$HOTBEDD" mount ls "$MNAME" 2>&1)"
     echo "$ls2" | grep -q '/mtest' && fail "mount rm drops the bind" || pass "mount rm drops the bind"
     VMC="$(docker ps -a --filter name=hotbedvmd- --format '{{.Names}}' | head -1)"
     if [[ -n "$VMC" ]]; then
-        out="$("${p2env[@]}" "$SBXD" mount add "$VMC" /tmp:/mx --yes 2>&1)"
+        out="$("${p2env[@]}" "$HOTBEDD" mount add "$VMC" /tmp:/mx --yes 2>&1)"
         grep -q 'refusing to recreate' <<<"$out" && pass "VM-backed containers refuse live recreation" \
             || fail "VM-backed containers refuse live recreation (got: $out)"
         FAKEVM=""
@@ -617,7 +617,7 @@ if docker info >/dev/null 2>&1; then
         # and keeps the count deterministic: one check either way.
         FAKEVM="hotbedvmd-fake$((RANDOM % 9000 + 1000))"
         if docker run -d --name "$FAKEVM" busybox sleep 300 >/dev/null 2>&1; then
-            out="$("${p2env[@]}" "$SBXD" mount add "$FAKEVM" /tmp:/mx --yes 2>&1)"
+            out="$("${p2env[@]}" "$HOTBEDD" mount add "$FAKEVM" /tmp:/mx --yes 2>&1)"
             grep -q 'refusing to recreate' <<<"$out" && pass "VM-backed containers refuse live recreation" \
                 || fail "VM-backed containers refuse live recreation (got: $out)"
         else
@@ -639,8 +639,8 @@ if docker info >/dev/null 2>&1 && docker image inspect hotbedd-egress-helper:1 >
     # control run: outbound must work unfenced, else the network env is
     # broken and egress assertions would be meaningless — skip them.
     if docker exec "$ECON" wget -T 5 -q -O /dev/null http://1.1.1.1/ 2>/dev/null; then
-        "${p2env[@]}" "$SBXD" egress "$ECON" proxy-only >/dev/null 2>&1
-        show="$("${p2env[@]}" "$SBXD" egress "$ECON" 2>&1)"
+        "${p2env[@]}" "$HOTBEDD" egress "$ECON" proxy-only >/dev/null 2>&1
+        show="$("${p2env[@]}" "$HOTBEDD" egress "$ECON" 2>&1)"
         echo "$show" | grep -q 'HBD_EGRESS' && pass "egress proxy-only installs the chain" \
             || fail "egress proxy-only installs the chain (got: $show)"
         if docker exec "$ECON" wget -T 4 -q -O /dev/null http://1.1.1.1/ 2>/dev/null; then
@@ -648,8 +648,8 @@ if docker info >/dev/null 2>&1 && docker image inspect hotbedd-egress-helper:1 >
         else
             pass "egress proxy-only blocks public outbound"
         fi
-        "${p2env[@]}" "$SBXD" egress "$ECON" allow >/dev/null 2>&1
-        show="$("${p2env[@]}" "$SBXD" egress "$ECON" 2>&1)"
+        "${p2env[@]}" "$HOTBEDD" egress "$ECON" allow >/dev/null 2>&1
+        show="$("${p2env[@]}" "$HOTBEDD" egress "$ECON" 2>&1)"
         echo "$show" | grep -q 'HBD_EGRESS' && fail "egress allow removes the chain" \
             || pass "egress allow removes the chain"
         docker exec "$ECON" wget -T 5 -q -O /dev/null http://1.1.1.1/ 2>/dev/null \
@@ -683,26 +683,26 @@ attach: --oc
 env:
   FOO: bar
 RYEOF
-"${renv[@]}" "$SBXD" recipe validate "$R/hbd.yaml" >/dev/null 2>&1 && pass "recipe: validate accepts a good recipe" \
+"${renv[@]}" "$HOTBEDD" recipe validate "$R/hbd.yaml" >/dev/null 2>&1 && pass "recipe: validate accepts a good recipe" \
     || fail "recipe: validate accepts a good recipe"
-plan="$("${renv[@]}" "$SBXD" recipe print "$R/hbd.yaml" 2>&1)"
+plan="$("${renv[@]}" "$HOTBEDD" recipe print "$R/hbd.yaml" 2>&1)"
 echo "$plan" | grep -q 'hotbed-recipe-suite' >/dev/null \
     && echo "$plan" | grep -q -- '--mount ~/projects/core:/workspace/core' \
     && pass "recipe: print renders the spawn plan (name + kit flags)" \
     || fail "recipe: print renders the spawn plan"
 sed -i 's/^egress: proxy-only/egress: banana/' "$R/hbd.yaml"
-"$SBXD" recipe validate "$R/hbd.yaml" >/dev/null 2>&1 \
+"$HOTBEDD" recipe validate "$R/hbd.yaml" >/dev/null 2>&1 \
     && fail "recipe: bad egress rejected" || pass "recipe: bad egress rejected"
 # up without --yes on a non-TTY must abort WITHOUT spawning
 sed -i 's/^egress: banana/egress: proxy-only/' "$R/hbd.yaml"
-out="$(echo n | "${renv[@]}" "$SBXD" recipe up "$R/hbd.yaml" 2>&1)"
+out="$(echo n | "${renv[@]}" "$HOTBEDD" recipe up "$R/hbd.yaml" 2>&1)"
 if docker inspect hotbed-recipe-suite >/dev/null 2>&1; then
     fail "recipe: up aborts without --yes (container was created!)"; docker rm -f hotbed-recipe-suite >/dev/null
 else
     pass "recipe: up aborts without --yes (no container touched)"
 fi
 # missing kit image hint
-out="$(sed 's/^stack: go/stack: base/' "$R/hbd.yaml" > "$R/sbx2.yaml"; "${renv[@]}" "$SBXD" recipe up "$R/sbx2.yaml" --yes 2>&1)"
+out="$(sed 's/^stack: go/stack: base/' "$R/hbd.yaml" > "$R/sbx2.yaml"; "${renv[@]}" "$HOTBEDD" recipe up "$R/sbx2.yaml" --yes 2>&1)"
 if docker image inspect hotbed:base >/dev/null 2>&1; then
     pass "recipe: up with base image builds"
     docker rm -f hotbed-recipe-suite >/dev/null 2>&1
@@ -729,16 +729,16 @@ senv=()
 # ECONNREFUSED after suite teardown until the next manual sync).
 senv+=(env "HOTBEDD_CONFIG_DIR=$S3/config" "HOTBEDD_DATA_DIR=$S3/data" "HOTBEDD_STATE_DIR=$S3/state" "HOTBEDD_RELAY_NAME=sbx-relay-suite-s")
 hdr "P3: idle sweeper"
-"${senv[@]}" "$SBXD" config get sweeper.idle_stop_minutes 2>/dev/null | grep -q '1' \
+"${senv[@]}" "$HOTBEDD" config get sweeper.idle_stop_minutes 2>/dev/null | grep -q '1' \
     && pass "sweeper: config knob round-trips (1)" || fail "sweeper: config knob round-trips"
 if docker info >/dev/null 2>&1; then
     SWCON="hotbed-sweepsuite$((RANDOM % 9000 + 1000))"
     docker run -d --name "$SWCON" -l dev.hotbed=1 alpine sleep 600 >/dev/null
-    ( "${senv[@]}" "$SBXD" serve --port 7794 > "$S3/daemon.log" 2>&1 & echo $! > "$S3/dpid" ) >/dev/null 2>&1
+    ( "${senv[@]}" "$HOTBEDD" serve --port 7794 > "$S3/daemon.log" 2>&1 & echo $! > "$S3/dpid" ) >/dev/null 2>&1
     sleep 1
     SWPID="$(cat "$S3/dpid" 2>/dev/null || true)"
-    "${senv[@]}" "$SBXD" config set sweeper.idle_stop_minutes 1 >/dev/null 2>&1
-    "${senv[@]}" "$SBXD" config get sweeper.idle_stop_minutes 2>/dev/null | grep -q '1' \
+    "${senv[@]}" "$HOTBEDD" config set sweeper.idle_stop_minutes 1 >/dev/null 2>&1
+    "${senv[@]}" "$HOTBEDD" config get sweeper.idle_stop_minutes 2>/dev/null | grep -q '1' \
         && pass "sweeper: config set applies live" || fail "sweeper: config set applies live"
     STOPPED=no
     for i in $(seq 1 24); do
@@ -781,7 +781,7 @@ if docker info >/dev/null 2>&1; then
         else
             fail "create: sync failed ($(head -c 160 <<<"$RS"))"
         fi
-        DOC="$("${senv[@]}" "$SBXD" doctor 2>&1 || true)"
+        DOC="$("${senv[@]}" "$HOTBEDD" doctor 2>&1 || true)"
         if grep -q 'proxy relay' <<<"$DOC"; then
             grep -q 'sbx-relay-suite-s (running' <<<"$DOC" \
                 && pass "relay: in-engine proxy relay is up" \
@@ -938,7 +938,7 @@ fi
 hdr "log hygiene (fake hotbedvmd serial firehose)"
 if docker image inspect busybox >/dev/null 2>&1 && docker ps >/dev/null 2>&1; then
     HN="hyg$((RANDOM % 9000 + 1000))"
-    scratch="$(mktemp -d /tmp/opencode/hotbedddsmoke.XXXXXX)"
+    scratch="$(mktemp -d /tmp/opencode/hotbedd-smoke.XXXXXX)"
     docker rm -f "hotbedvmd-$HN" >/dev/null 2>&1 || true
     docker run -d --name "hotbedvmd-$HN" busybox sh -c \
         "mkdir -p /store/vms/$HN; { printf '\033]0;t\007\033[31mRED\033[0m\015\012'; head -c 300000 /dev/urandom | tr -d '\012'; printf '\015\012'; echo tail-marker-line; sleep 600; } > /store/vms/$HN/serial.log" >/dev/null
@@ -961,11 +961,11 @@ if docker image inspect busybox >/dev/null 2>&1 && docker ps >/dev/null 2>&1; th
         if grep -aq 'line truncated' "$scratch/hyg" && [[ "$esc" -eq 0 && "$cr" -eq 0 ]]; then
             pass "serial firehose sanitized: ANSI/CR stripped, 300 kB line capped, marker intact"
         else
-            cp "$scratch/hyg" /tmp/opencode/hotbedddsmoke.hyg-fail.txt 2>/dev/null || true
+            cp "$scratch/hyg" /tmp/opencode/hotbedd-smoke.hyg-fail.txt 2>/dev/null || true
             fail "serial firehose sanitized (esc=$esc cr=$cr)"
         fi
     else
-        cp "$scratch/hyg" /tmp/opencode/hotbedddsmoke.hyg-fail.txt 2>/dev/null || true
+        cp "$scratch/hyg" /tmp/opencode/hotbedd-smoke.hyg-fail.txt 2>/dev/null || true
         fail "fake hotbedvmd serial streamed (inventory/resolve)"
     fi
     docker rm -f "hotbedvmd-$HN" >/dev/null 2>&1 || true
