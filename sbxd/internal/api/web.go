@@ -655,6 +655,16 @@ function openFromOverview(kind, name){
   }).catch(function(){ toast('could not open '+name,'err'); });
 }
 
+/* Burn fetches fail transiently when the daemon restarts behind an open
+   dashboard - do not dead-end the tab: keep the message honest and offer
+   one retry button that simply re-renders. */
+function burnRetry(host, rerender){
+  host.innerHTML='<div class="hint">burn data unavailable (daemon unreachable or restarting?) '+
+    '<button class="tool" id="burn-retry">retry</button></div>';
+  var b=$('burn-retry');
+  if(b){ b.addEventListener('click', rerender); }
+}
+
 function addTool(bar,label,fn){
   var b=h('button',{class:'tool'},esc(label));
   b.addEventListener('click',fn); bar.appendChild(b); return b;
@@ -773,7 +783,7 @@ function renderBurnGlobal(){
           .then(function(res){ if(res.error){ toast('sync: '+res.error,'err'); } else { toast(name+' synced to proxy ('+(res.target.key_masked||'')+')','ok'); } });
       });
     });
-  }).catch(function(){ body.innerHTML='<div class="hint">burn data unavailable</div>'; });
+  }).catch(function(){ burnRetry(body, renderBurnGlobal); });
 }
 
 /* ---------- create wizard (POST /api/create) ---------- */
@@ -1155,7 +1165,7 @@ function renderBurnTab(sb){
       html+='</tbody></table><div class="hint">est = usage chars/4-estimated (upstream did not report)</div>';
     }
     host.innerHTML=html;
-  }).catch(function(){ host.innerHTML='<div class="hint">burn data unavailable</div>'; });
+  }).catch(function(){ burnRetry(host, function(){ renderBurnTab(sb); }); });
 }
 
 function renderConfigGlobal(){
