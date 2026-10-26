@@ -372,6 +372,24 @@ button.browse{padding:.3rem .6rem;font-size:.72rem;color:var(--acc2);background:
 /* ---------- folder browser modal ---------- */
 #fs-modal{position:fixed;inset:0;background:rgba(4,7,12,.65);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;z-index:100}
 #fs-modal.open{display:flex}
+/* ---------- generic ask/confirm modal (replaces abrupt window.confirm) ---------- */
+#ask-modal{position:fixed;inset:0;background:rgba(4,7,12,.65);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;z-index:110}
+#ask-modal.open{display:flex}
+.ask-card{width:420px;max-width:92vw;background:var(--bg2);border:1px solid var(--line2);border-radius:var(--r3);box-shadow:var(--shadow);overflow:hidden}
+.ask-head{display:flex;justify-content:space-between;align-items:center;padding:var(--s3) var(--s4);border-bottom:1px solid var(--line)}
+.ask-title{font-weight:600;font-size:.85rem}
+.ask-body{padding:var(--s4);font-size:.82rem;color:var(--dim);line-height:1.5;max-height:50vh;overflow-y:auto}
+.ask-body b,.ask-body strong{color:var(--fg)}
+.ask-body .mono{font-family:var(--mono);font-size:.78rem;color:var(--fg);background:var(--bg3);border-radius:var(--r1);padding:.1rem .35rem}
+.ask-foot{display:flex;justify-content:flex-end;gap:var(--s2);padding:var(--s3) var(--s4);border-top:1px solid var(--line)}
+.ask-foot button{min-width:6.5rem}
+.ask-danger{color:#fff;background:rgba(224,90,90,.85);border-color:transparent}
+.ask-danger:hover{background:rgba(224,90,90,1)}
+.ask-att{display:flex;gap:var(--s2);align-items:flex-start;margin-top:var(--s3);padding:.5rem .7rem;border-radius:var(--r2);font-size:.74rem;background:rgba(231,164,59,.08);color:var(--dim)}
+/* help page: CLI command cells + section headings */
+.mono{font-family:var(--mono);font-size:.8em}
+.tbl code{font-family:var(--mono);font-size:.74rem;color:var(--acc2);background:var(--bg3);padding:.08rem .35rem;border-radius:var(--r1);white-space:nowrap}
+.hsec{font-size:.72rem;color:var(--faint);text-transform:uppercase;letter-spacing:.08em;margin:20px 0 6px}
 .fs-dialog{width:580px;max-width:92vw;height:460px;max-height:78vh;display:flex;flex-direction:column;background:var(--bg2);border:1px solid var(--line2);border-radius:var(--r3);box-shadow:var(--shadow);overflow:hidden}
 .fs-head{display:flex;justify-content:space-between;align-items:center;padding:var(--s3) var(--s4);border-bottom:1px solid var(--line)}
 .fs-title{font-weight:600;font-size:.85rem}
@@ -522,12 +540,13 @@ function showGlobal(kind){
   state.view=kind; state.sel=null; closeLogs();
   renderList();
   $('pane').hidden=true; $('empty').hidden=true; $('global').hidden=false;
-  var titles={overview:'Overview - host & sandboxes', burn:'Burn - token & dollar ledger', create:'Create sandbox', config:'Config - global OpenCode settings'};
+  var titles={overview:'Overview - host & sandboxes', burn:'Burn - token & dollar ledger', create:'Create sandbox', config:'Config - global OpenCode settings', help:'Help - quick start & CLI reference'};
   var subs={
     overview:'Machine stats and every sandbox on this host. Updates every 5 seconds.',
     burn:'Proxy traffic per sandbox and in total. Provider keys stay on the host.',
     create:'Runs through the daemon. Mounts and ports are fixed at creation.',
-    config:'Providers, proxy and prices. Stored in ~/.config/sbxd/config.json'
+    config:'Providers, proxy and prices. Stored in ~/.config/sbxd/config.json',
+    help:'The three CLIs (sbx, sbxvm, sbxd), the burn ledger mechanics and troubleshooting tips.'
   };
   $('glob-title').textContent = titles[kind] || 'Config - global OpenCode settings';
   $('glob-sub').textContent = subs[kind] || subs.config;
@@ -536,6 +555,7 @@ function showGlobal(kind){
   if(kind==='burn'){ renderBurnGlobal(); }
   else if(kind==='create'){ renderCreator(); }
   else if(kind==='overview'){ renderHostOverview(); }
+  else if(kind==='help'){ renderHelp(); }
   else { renderConfigGlobal(); }
 }
 function kindFor(name){
@@ -675,6 +695,47 @@ function openFromOverview(kind, name){
 /* Burn fetches fail transiently when the daemon restarts behind an open
    dashboard - do not dead-end the tab: keep the message honest and offer
    one retry button that simply re-renders. */
+/* ---------- in-site modal: confirm-style dialogs instead of window.confirm ---------- */
+/* askConfirm({title, body(html, esc-able), confirmLabel, danger, attrs[](html)}
+   → calls cb(ok). Cancel/✕/Esc = false; only the confirm button = true. */
+function askConfirm(opts, cb){
+  ensureAsk();
+  $('ask-title').textContent=opts.title||'Are you sure?';
+  $('ask-body-body').innerHTML=opts.body||'';
+  $('ask-attr').innerHTML=(opts.attrs||[]).map(function(a){ return '<div class="ask-att">'+a+'</div>'; }).join('');
+  var btn=$('ask-ok');
+  btn.textContent=opts.confirmLabel||'Confirm';
+  btn.classList.toggle('ask-danger', !!opts.danger);
+  btn.classList.add((!opts.danger)?'primary':'');
+  var modal=$('ask-modal');
+  var close=function(ok){
+    modal.classList.remove('open');
+    modal.onclick=null;
+    document.removeEventListener('keydown', askEsc);
+    function noop(){}
+    (opts.clean||noop)();
+    if(typeof cb==='function'){ cb(!!ok); }
+  };
+  function askEsc(ev){ if(ev.key==='Escape'){ close(false); } }
+  $('ask-cancel').onclick=function(){ close(false); };
+  $('ask-x').onclick=function(){ close(false); };
+  btn.onclick=function(){ close(true); };
+  modal.onclick=function(ev){ if(ev.target===modal){ close(false); } };
+  document.addEventListener('keydown', askEsc);
+  modal.classList.add('open');
+  btn.focus();
+}
+function ensureAsk(){
+  if($('ask-modal')){ return; }
+  var m=h('div',{id:'ask-modal'},
+    '<div class="ask-card">'+
+    '<div class="ask-head"><div class="ask-title" id="ask-title"></div><button type="button" class="iconbtn" id="ask-x" title="close">✕</button></div>'+
+    '<div class="ask-body"><div id="ask-body-body"></div><div id="ask-attr"></div></div>'+
+    '<div class="ask-foot"><button type="button" id="ask-cancel">Cancel</button><button type="button" id="ask-ok">Confirm</button></div>'+
+    '</div>');
+  document.body.appendChild(m);
+}
+
 function burnRetry(host, rerender){
   host.innerHTML='<div class="hint">burn data unavailable (daemon unreachable or restarting?) '+
     '<button class="tool" id="burn-retry">retry</button></div>';
@@ -687,6 +748,10 @@ function addTool(bar,label,fn){
   b.addEventListener('click',fn); bar.appendChild(b); return b;
 }
 
+var lastBurnSig=''; // skip re-renders whose data did not change (no churn, no scroll jumps)
+function burnSig(rows){
+  return rows.map(function(r){ return [r.sandbox,r.calls,r.today_usd,r.total_usd,r.tokens_today,r.tokens_in,r.tokens_out,r.exists,r.pinned,r.budget_usd,r.budget_tokens].join('/'); }).join('|');
+}
 function renderBurnGlobal(){
   var body=$('glob-body');
   // burn rows change as sandboxes dial the proxy - poll while the tab is
@@ -705,8 +770,12 @@ function renderBurnGlobal(){
   body.innerHTML='<div class="hint">loading…</div>';
   fetch('/api/usage').then(function(r){return r.json();}).then(function(j){
     if(state.view!=='burn') return; // a view switch happened mid-flight
+    if(state.view!=='burn') return; // a view switch happened mid-flight
     var rows=j.rows||[];
-    if(!rows.length){ body.innerHTML='<div class="hint">No usage yet. Flow: sbxd config init → sbxd sync NAME → sandbox calls go through the proxy → rows appear here.</div>'; finish(); return; }
+    if(!rows.length){ lastBurnSig=''; body.innerHTML='<div class="hint">No usage yet. Flow: sbxd config init → sbxd sync NAME → sandbox calls go through the proxy → rows appear here.</div>'; finish(); return; }
+    var sig=burnSig(rows);
+    if(sig===lastBurnSig && body.querySelector('#burntbl') && body.querySelector('.burnbar')){ finish(); return; }
+    lastBurnSig=sig;
     var todaySum=0,allSum=0,live=0,staleUnseen=0,staleTotal=0;
     rows.forEach(function(r){
       todaySum+=r.today_usd||0; allSum+=r.total_usd||0;
@@ -759,13 +828,28 @@ function renderBurnGlobal(){
       pp.disabled=staleUnseen===0;
       if(staleUnseen>0){
         pp.addEventListener('click',function(){
-          if(!confirm('Delete the burn history of '+staleUnseen+' stale (unpinned) sandbox row(s)? Pinned ★ histories are kept.')) return;
-          if(!confirm('Second confirm: this permanently removes their journal rows from usage.jsonl. Continue?')) return;
-          fetch('/api/usage/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stale_only:true})})
-            .then(function(r){return r.json();}).then(function(res){
-              if(res.error){ toast('purge: '+res.error,'err'); }
-              else { toast('purged '+(res.purged||[]).length+' stale record set(s), '+(res.rows||0)+' rows dropped','ok'); renderBurnGlobal(); }
+          askConfirm({
+            title:'Purge stale burn history?',
+            body:'Delete the burn history of <b>'+staleUnseen+'</b> stale (unpinned) sandbox row(s)? Pinned <b>★</b> histories are kept.',
+            confirmLabel:'Purge '+staleUnseen,
+            danger:true,
+            attrs:['Permanently removes their journal rows from <span class="mono">usage.jsonl</span>. This cannot be undone.']
+          },function(ok){
+            if(!ok){ return; }
+            askConfirm({
+              title:'Second confirm',
+              body:'This <b>permanently</b> deletes the stale history. Proceed?',
+              confirmLabel:'Delete forever',
+              danger:true
+            },function(ok2){
+              if(!ok2){ return; }
+              fetch('/api/usage/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stale_only:true})})
+                .then(function(r){return r.json();}).then(function(res){
+                  if(res.error){ toast('purge: '+res.error,'err'); }
+                  else { toast('purged '+(res.purged||[]).length+' stale record set(s), '+(res.rows||0)+' rows dropped','ok'); renderBurnGlobal(); }
+                });
             });
+          });
         });
       }
     }
@@ -782,12 +866,20 @@ function renderBurnGlobal(){
     Array.prototype.forEach.call(body.querySelectorAll('.trowdel'),function(b){
       b.addEventListener('click',function(){
         var name=b.getAttribute('data-sbx');
-        if(!confirm("Delete the burn records of "+name+"? Its sandbox no longer exists; the history lives only in usage.jsonl.")) return;
-        fetch('/api/usage/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sandboxes:[name]})})
-          .then(function(r){return r.json();}).then(function(res){
-            if(res.error){ toast('purge: '+res.error,'err'); }
-            else { toast('deleted records for '+name+' ('+(res.rows||0)+' rows)','ok'); renderBurnGlobal(); }
-          });
+        askConfirm({
+          title:'Delete burn records?',
+          body:'Delete the burn records of <span class="mono">'+esc(name)+'</span>?',
+          confirmLabel:'Delete records',
+          danger:true,
+          attrs:['Its sandbox no longer exists - the history lives only in <span class="mono">usage.jsonl</span>.']
+        },function(ok){
+          if(!ok){ return; }
+          fetch('/api/usage/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sandboxes:[name]})})
+            .then(function(r){return r.json();}).then(function(res){
+              if(res.error){ toast('purge: '+res.error,'err'); }
+              else { toast('deleted records for '+name+' ('+(res.rows||0)+' rows)','ok'); renderBurnGlobal(); }
+            });
+        });
       });
     });
     Array.prototype.forEach.call(body.querySelectorAll('.tbud'),function(b){
@@ -1213,6 +1305,88 @@ function renderBurnTab(sb){
   }).catch(function(){ burnRetry(host, function(){ renderBurnTab(sb); }); });
 }
 
+/* ---------- help & CLI reference ---------- */
+function cliTable(rows){
+  return '<table class="tbl"><tbody>'+rows.map(function(r){
+    return '<tr><td><code>'+esc(r[0])+'</code></td><td style="color:var(--dim);font-size:.76rem">'+r[1]+'</td></tr>';
+  }).join('')+'</tbody></table>';
+}
+function hsec(t){ return '<div class="hsec">'+t+'</div>'; }
+function renderHelp(){
+  var sql=$('glob-body');
+  sql.innerHTML=
+    hsec('Mental model')+
+    '<div style="font-size:.82rem;color:var(--dim);line-height:1.55;max-width:70ch">'+
+    '<p><b>sbx</b> makes a disposable Docker container per project dir - your project is bind-mounted at <span class="mono">/workspace</span>, the only host path the agent can touch. <b>sbxvm</b> is the VM escape hatch (libvirt, or docker-in-docker "sbxvmd"): snapshots, ssh, full disk. <b>sbxd</b> is this daemon and dashboard: OpenCode config, the proxy (burn ledger), wallets, egress fences, kits.</p>'+
+    '<p>Provider API keys stay on the host in sbxd only - sandboxes get per-sandbox minted proxy keys, the UI shows them masked everywhere.</p>'+
+    '</div>'+
+    hsec('Quick start')+
+    '<table class="tbl"><tbody>'+
+    '<tr><td style="text-align:right;color:var(--faint);font-size:.72rem;width:2rem">1.</td><td style="color:var(--dim);font-size:.76rem">Start the daemon: <code>sbxd serve --root &lt;repo&gt;</code> - dashboard at http://127.0.0.1:7770</td></tr>'+
+    '<tr><td style="text-align:right;color:var(--faint)">2.</td><td style="color:var(--dim);font-size:.76rem">Import your providers once: <code>sbxd config init</code> (copies from host OpenCode config; keys stay in sbxd)</td></tr>'+
+    '<tr><td style="text-align:right;color:var(--faint)">3.</td><td style="color:var(--dim);font-size:.76rem">Day-to-day: <code>sbx shell</code> / <code>sbx opencode</code> in a project dir, or <b>+ New sandbox</b> in the sidebar (VMs via sbxvm)</td></tr>'+
+    '<tr><td style="text-align:right;color:var(--faint)">4.</td><td style="color:var(--dim);font-size:.76rem">Route a sandbox through the proxy: <code>sbxd sync NAME</code> - burn rows appear on the Burn tab as it calls</td></tr>'+
+    '<tr><td style="text-align:right;color:var(--faint)">5.</td><td style="color:var(--dim);font-size:.76rem">Sanity check any time: <code>sbxd doctor</code></td></tr>'+
+    '</tbody></table>'+
+    hsec('sbx - project containers')+
+    cliTable([
+      ['sbx|sbx shell','shell inside this project\'s sandbox'],
+      ['sbx opencode [args]','run the OpenCode TUI inside the sandbox'],
+      ['sbx exec [--] cmd / sbx root [--] cmd','run one command as user / as root'],
+      ['sbx status|stop|rm','manage THIS project\'s sandbox; rm deletes it fully'],
+      ['sbx ls / sbx prune','list all sbx sandboxes / remove all'],
+      ['sbx --stack NAME --fresh --net none','options at spawn: stack, ephemeral, network fence'],
+      ['sbx caches ls|nuke / sbx build','shared package caches / (re)build images'],
+      ['sbx doctor','diagnose the sbx environment']
+    ])+
+    hsec('sbxvm - KVM VMs')+
+    cliTable([
+      ['sbxvm fetch-image','download the Debian cloud image (once)'],
+      ['sbxvm create NAME --share DIR','create + boot a VM (also --cpu/--mem/--disk)'],
+      ['sbxvm ssh NAME|shell NAME','ssh in (dev@); <code>sbxvm opencode NAME</code> for the TUI'],
+      ['sbxvm snapshot NAME save|revert|list','snapshot - roll back everything the agent did'],
+      ['sbxvm ip NAME / sbxvm start|stop NAME','power control / address'],
+      ['sbxvm console NAME','serial console (boot debugging)'],
+      ['sbxvm destroy NAME --yes','delete the VM and its disks irrevocably'],
+      ['SBXVM_BACKEND=libvirt|docker','backend choice; docker = sbxvmd containers running qemu']
+    ])+
+    hsec('sbxd - daemon, config, burn')+
+    cliTable([
+      ['sbxd serve --port N','start the resident daemon (dashboard)'],
+      ['sbxd ps|stats|events','unified sandbox table; stats adds live cpu/mem'],
+      ['sbxd logs NAME [-f]','container logs / VM serial'],
+      ['sbxd attach NAME [--oc]','attach a persistent tmux session (with the OpenCode TUI)'],
+      ['sbxd start|stop|rm NAME','engine control; rm also revokes keys, wallets, sync target'],
+      ['sbxd config init|print|set','providers import / masked print / set proxy.port etc.'],
+      ['sbxd usage [NAME]','the burn ledger from the CLI'],
+      ['sbxd key mint|ls|revoke','per-sandbox proxy keys'],
+      ['sbxd budget [NAME] [USD] [--tokens N]','wallets (Burn tab "set" button does the same)'],
+      ['sbxd price ls|set','$/Mtok pricing used for the $ columns'],
+      ['sbxd sync NAME|all','push proxy-backed OpenCode config into sandbox(es)'],
+      ['sbxd mount ls|add|rm','host bind mounts of a container (add/rm recreates it)'],
+      ['sbxd recipe print|up|validate / sbxd egress','declarative sbx.yaml sandboxes / outbound fence'],
+      ['sbxd audit [N]','control-plane audit trail']
+    ])+
+    hsec('How burn is counted')+
+    '<div style="font-size:.8rem;color:var(--dim);line-height:1.55;max-width:70ch">'+
+    '<ul style="margin:.2rem 0 .2rem 1.1rem;padding:0">'+
+    '<li>Every request a synced sandbox routes through the daemon proxy is journaled per sandbox in <span class="mono">~/.local/state/sbxd/usage.jsonl</span> (tokens in/out, model, cost if priced).</li>'+
+    '<li><b>$ columns</b> come from the price table in <span class="mono">config.json</span> ($/Mtok, longest-prefix match per model). Models priced at 0 show $0.0000 - the token counts still walk.</li>'+
+    '<li><b>est rows</b>: the provider did not report usage - tokens are estimated from response size (bytes/4) and marked est.</li>'+
+    '<li><b>Wallets</b> (budget USD / budget tokens per sandbox) are tracking budgets shown in the Burn table - they do not block the proxy by themselves.</li>'+
+    '<li>Stale rows = the sandbox was deleted (its history stays until you purge or pin it). Live rows update every 5 s while the tab is open.</li>'+
+    '</ul></div>'+
+    hsec('Troubleshooting')+
+    '<div style="font-size:.8rem;color:var(--dim);line-height:1.55;max-width:70ch">'+
+    '<ul style="margin:.2rem 0 .2rem 1.1rem;padding:0">'+
+    '<li><b>Sandbox gets ECONNREFUSED on the proxy</b>: that is the daemon-side relay container (<span class="mono">sbx-relay-*</span>). The daemon re-establishes its relay automatically at boot; check <code>docker ps</code> for it and run <code>sbxd doctor</code>.</li>'+
+    '<li><b>Changed config/providers but sandbox sees nothing</b>: sandboxes only see proxy settings after a sync - run <code>sbxd sync NAME</code> (or the sync button on the Burn tab).</li>'+
+    '<li><b>Attaching again</b>: <code>sbxd attach NAME</code> re-uses the sandbox\'s tmux session; after a <code>sbxd sync</code> re-attach once so the session environment picks up the synced env.</li>'+
+    '<li><b>Boot debugging</b> on a VM: <code>sbxvm console NAME</code> (serial), <code>sbxvm ip NAME</code>, and <code>sbxd logs NAME -f</code>.</li>'+
+    '<li><b>Burn tab blank</b> while <code>curl 127.0.0.1:7770/api/usage</code> works: reload once - the page is served no-store, and the retry button re-reads the ledger.</li>'+
+    '</ul></div>';
+}
+
 function renderConfigGlobal(){
   var body=$('glob-body');
   body.innerHTML='<div class="hint">Providers hold the upstream endpoints and keys. They stay in sbxd; sandboxes receive only their minted proxy key. Values shown as <code>&lt;masked&gt;</code> are preserved on save. After editing providers run <code>sbxd sync</code> (or the sync button on the burn view).</div>'+
@@ -1410,13 +1584,30 @@ function act(kind,name,what){
 }
 function delSB(sb){
   if(!sb) return;
-  if(!confirm('Delete sandbox '+sb.name+'? Its container/VM, proxy keys, wallets and sync target are removed.')) return;
   var isVM = sb.kind === 'vm';
-  if(isVM && !confirm('Fully delete the VM '+sb.name+'? This wipes the VM disk AND snapshots - irrevocable.')) return;
-  return fetch('/api/actions/delete',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({kind:sb.kind,name:sb.name,confirm:isVM})}).then(function(r){return r.json();}).then(function(j){
-      if(j.error) toast('delete: '+j.error,'err'); else toast('deleted '+sb.name,'ok');
-    });
+  var doDel=function(){
+    fetch('/api/actions/delete',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({kind:sb.kind,name:sb.name,confirm:isVM})}).then(function(r){return r.json();}).then(function(j){
+        if(j.error) toast('delete: '+j.error,'err'); else toast('deleted '+sb.name,'ok');
+      });
+  };
+  askConfirm({
+    title:'Delete sandbox?',
+    body:'Delete sandbox <span class="mono">'+esc(sb.name)+'</span>?',
+    confirmLabel:'Delete '+sb.kind,
+    danger:true,
+    attrs:['Its container/VM, minted proxy keys, wallets and sync target are removed.']
+  },function(ok){
+    if(!ok){ return; }
+    if(!isVM){ doDel(); return; }
+    askConfirm({
+      title:'Fully wipe the VM?',
+      body:'Delete the VM <span class="mono">'+esc(sb.name)+'</span> for good?',
+      confirmLabel:'Wipe VM forever',
+      danger:true,
+      attrs:['This wipes the VM disk <b>and snapshots</b> - irrevocable.']
+    },function(ok2){ if(ok2){ doDel(); } });
+  });
 }
 function attachGo(sb, mode, spawn){
   if((sb.state||'').toLowerCase()==='booting'){
@@ -1532,7 +1723,7 @@ function init(){
   $('btn-start').addEventListener('click', function(){ var sb=currentSB(); if(sb) act(sb.kind,sb.name,'start'); });
   $('btn-stop').addEventListener('click', function(){ var sb=currentSB(); if(sb) act(sb.kind,sb.name,'stop'); });
   $('btn-del').addEventListener('click', function(){ var sb=currentSB(); if(sb) delSB(sb); });
-  $('lnk-help').addEventListener('click', function(ev){ ev.preventDefault(); toast('CLI: sbxd ps | sbxd attach NAME | sbxd logs NAME | sbxd start/stop NAME | sbxd usage [NAME] | sbxd key mint NAME | sbxd sync NAME','ok'); });
+  $('lnk-help').addEventListener('click', function(ev){ ev.preventDefault(); showGlobal('help'); });
   // the brand does the old bottom-entry job: click it for the Overview
   $('brand').addEventListener('click', function(){ showGlobal('overview'); });
   $('burn-reload').addEventListener('click', function(){ var sb=currentSB(); if(sb) renderBurnTab(sb); });
