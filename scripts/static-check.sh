@@ -17,7 +17,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 FAIL=0
 
-for f in vm/sbxvm.sh tests/sbxddsmoke.sh tests/vmsmoke.sh tests/vmdsmoke.sh tests/smoke.sh bin/sbx; do
+for f in vm/hotbedvm.sh tests/hotbedddsmoke.sh tests/vmsmoke.sh tests/vmdsmoke.sh tests/smoke.sh bin/hbd; do
     [ -f "$f" ] || continue
     if bash -n "$f" 2>/dev/null; then
         echo "bash  $f  ok"
@@ -31,10 +31,10 @@ if ! command -v python3 >/dev/null 2>&1; then
     echo "python3 not found - appJS checks skipped (CI must have python3)"
     exit "$FAIL"
 fi
-TMP="${TMPDIR:-/tmp}/sbx-appjs-check.js"
+TMP="${TMPDIR:-/tmp}/hotbed-appjs-check.js"
 if ! python3 - "$TMP" <<'PY'
 import sys
-src = open('sbxd/internal/api/web.go').read()
+src = open('hotbed/internal/api/web.go').read()
 marker = 'const appJS = `'
 i = src.index(marker)
 j = src.index('`' + chr(10), i + len(marker))

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# install.sh — one-command setup for SBX Desktop on a Linux host.
+# install.sh — one-command setup for Hotbed on a Linux host.
 #
-# Run this from the OpenCode-SBX repo root (or a downloaded release tree).
+# Run this from the hotbed repo root (or a downloaded release tree).
 # It is idempotent and never starts, stops or touches running sandboxes.
 #
 #   ./install.sh                     interactive defaults (asks about the image)
@@ -11,12 +11,12 @@
 #   ./install.sh --config-init       import LLM providers once, non-interactively
 #
 # One line on a fresh Debian/Ubuntu box (installs deps + everything else):
-#   git clone https://github.com/Chris5011/OpenCode-SBX.git \
-#     && cd OpenCode-SBX && ./install.sh --with-deps --yes
+#   git clone https://github.com/Chris5011/hotbed.git \
+#     && cd hotbed && ./install.sh --with-deps --yes
 #
 # After installing:
-#   sbxd-serve            start the daemon (dashboard/API at 127.0.0.1:7770)
-#   sbx  …                classic container CLI (self-locates the kit)
+#   hotbedd-serve            start the daemon (dashboard/API at 127.0.0.1:7770)
+#   hbd  …                classic container CLI (self-locates the kit)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,8 +45,8 @@ ask()  { # ask QUESTION [default]
 }
 
 # ---- sanity: run from a real kit tree ---------------------------------------
-[[ -f "$ROOT/vm/sbxvm.sh" && -f "$ROOT/bin/sbx" && -d "$ROOT/sbxd" ]] \
-    || fail "run install.sh from the OpenCode-SBX repo root (or a release tree)"
+[[ -f "$ROOT/vm/hotbedvm.sh" && -f "$ROOT/bin/hbd" && -d "$ROOT/hotbedd" ]] \
+    || fail "run install.sh from the hotbed repo root (or a release tree)"
 
 mkdir -p "$BIN_DIR"
 say "install root: $ROOT"
@@ -144,9 +144,9 @@ file build-essential pkg-config python3 (docker: docs.docker.com/engine/install/
 fi
 
 # ---- daemon binary: adopt a release asset, else build from source ------------
-SBXD="$ROOT/sbxd/bin/sbxd"
+SBXD="$ROOT/hotbed/bin/hotbedd"
 if [[ ! -x "$SBXD" ]]; then
-    # No binary yet? A downloaded release asset (sbxd-v…-linux-<arch>) is
+    # No binary yet? A downloaded release asset (hotbedd-v…-linux-<arch>) is
     # perfectly usable — look for the one matching this host's arch in the
     # places people drop it: dist/ and the kit root.
     case "$(uname -m)" in
@@ -156,13 +156,13 @@ if [[ ! -x "$SBXD" ]]; then
     esac
     if [[ -n "$KA" ]]; then
         shopt -s nullglob
-        local_globs=( "$ROOT"/dist/sbxd-v*-linux-"$KA" "$ROOT"/sbxd-v*-linux-"$KA" )
+        local_globs=( "$ROOT"/dist/hotbedd-v*-linux-"$KA" "$ROOT"/hotbedd-v*-linux-"$KA" )
         shopt -u nullglob
         if (( ${#local_globs[@]} > 0 )); then
             pick="$(printf '%s\n' "${local_globs[@]}" | sort -V | tail -1)"
-            mkdir -p "$ROOT/sbxd/bin"
+            mkdir -p "$ROOT/hotbed/bin"
             install -m 755 "$pick" "$SBXD"
-            say "adopted release binary: ${pick#"$ROOT"/} → sbxd/bin/sbxd"
+            say "adopted release binary: ${pick#"$ROOT"/} → hotbed/bin/hotbedd"
         fi
     fi
 fi
@@ -170,18 +170,18 @@ if [[ ! -x "$SBXD" ]]; then
     command -v go >/dev/null 2>&1 || fail "no daemon binary and no Go toolchain — download a release asset into dist/ or the kit root, or run 'make build'"
 fi
 if [[ ! -x "$SBXD" ]]; then
-    ( cd "$ROOT/sbxd" && go build -o bin/sbxd ./cmd/sbxd ) && say "built sbxd from source"
+    ( cd "$ROOT/hotbedd" && go build -o bin/hotbedd ./cmd/hotbedd ) && say "built hotbedd from source"
 fi
 
 # ---- install entry points ----------------------------------------------------
-ln -sf "$ROOT/bin/sbx" "$BIN_DIR/sbx"        # kit CLI self-locates its root
-ln -sf "$SBXD" "$BIN_DIR/sbxd"               # CLI (needs SBX_ROOT, see wrapper)
-cat > "$BIN_DIR/sbxd-serve" <<EOF
+ln -sf "$ROOT/bin/hbd" "$BIN_DIR/hbd"        # kit CLI self-locates its root
+ln -sf "$SBXD" "$BIN_DIR/hotbedd"               # CLI (needs HOTBED_ROOT, see wrapper)
+cat > "$BIN_DIR/hotbedd-serve" <<EOF
 #!/usr/bin/env bash
-# daemon entry point: pins SBX_ROOT to this checkout and runs sbxd serve
-exec env SBX_ROOT="$ROOT" "$SBXD" serve "\$@"
+# daemon entry point: pins HOTBED_ROOT to this checkout and runs hotbedd serve
+exec env HOTBED_ROOT="$ROOT" "$SBXD" serve "\$@"
 EOF
-chmod +x "$BIN_DIR/sbxd-serve"
+chmod +x "$BIN_DIR/hotbedd-serve"
 case ":$PATH:" in *":$BIN_DIR:"*) ;; *) say "note: $BIN_DIR is not on your PATH — add it to shell profile" ;; esac
 
 # ---- dependency gate ----------------------------------------------------------
@@ -191,18 +191,18 @@ for c in bash docker tmux ssh curl jq; do
 done
 (( ${#coremiss[@]} )) && fail "missing required: ${coremiss[*]} (install them first — docker: https://docs.docker.com/engine/install/)"
 
-# ---- docker usable-check: "installed" ≠ "usable by the user who runs sbxd" ----
+# ---- docker usable-check: "installed" ≠ "usable by the user who runs hotbedd" ----
 # The classic on a fresh/followed-the-docs box: docker is installed, the CLI
 # answers root fine, yet the dashboard shows docker as "down" — because the
-# user running sbxd can't reach /var/run/docker.sock (socket group) or the
+# user running hotbedd can't reach /var/run/docker.sock (socket group) or the
 # engine isn't running. Non-fatal: warn with the exact remedy.
 duser="${SUDO_USER:-$USER}"
 dusable=0
 if timeout 10 docker info >/dev/null 2>&1; then
-    # launched via sudo? root reaches the socket even when sbxd's real user
+    # launched via sudo? root reaches the socket even when hotbedd's real user
     # cannot — check that user's group membership despite root's success.
     if [[ -n "${SUDO_USER:-}" ]] && ! id -nG "$duser" 2>/dev/null | tr ' ' '\n' | grep -qxi docker; then
-        say "docker reachable — but '$duser' (the user who will run sbxd) is NOT in the"
+        say "docker reachable — but '$duser' (the user who will run hotbedd) is NOT in the"
         say "  docker socket group → the dashboard's health badge says \"down\". Remedy:"
         say "    sudo usermod -aG docker \"$duser\"   # re-login for the group change"
         dusable=1
@@ -226,19 +226,19 @@ else
     fi
 fi
 
-# ---- container stack image: build sbx:base once so dashboard create works ----
-# 'sbx:<stack>' is a kit-built image with no registry upstream. On a fresh
+# ---- container stack image: build hotbed:base once so dashboard create works ----
+# 'hotbed:<stack>' is a kit-built image with no registry upstream. On a fresh
 # box the first dashboard create would otherwise dangle on 'pull access
-# denied for sbx'. Any other stack builds on demand in the same path.
-if [[ ${dusable:-0} = 1 ]] && ! timeout 10 docker image inspect sbx:base >/dev/null 2>&1; then
-    say "stack image sbx:base missing — building it now (one-time, layer-cached; takes a bit)…"
+# denied for hbd'. Any other stack builds on demand in the same path.
+if [[ ${dusable:-0} = 1 ]] && ! timeout 10 docker image inspect hotbed:base >/dev/null 2>&1; then
+    say "stack image hotbed:base missing — building it now (one-time, layer-cached; takes a bit)…"
     blog="$(mktemp)"
-    if SBX_ROOT="$ROOT" "$ROOT/bin/sbx" build base >"$blog" 2>&1; then
-        say "sbx:base ready — container creation from the dashboard works out of the box"
+    if HOTBED_ROOT="$ROOT" "$ROOT/bin/hbd" build base >"$blog" 2>&1; then
+        say "hotbed:base ready — container creation from the dashboard works out of the box"
     else
-        say "sbx:base build failed (non-fatal) — last build log lines:"
+        say "hotbed:base build failed (non-fatal) — last build log lines:"
         tail -n 5 "$blog" | sed 's/^/    /'
-        say "  the first dashboard create retries it automatically; manual build: $ROOT/bin/sbx build base"
+        say "  the first dashboard create retries it automatically; manual build: $ROOT/bin/hbd build base"
     fi
     rm -f "$blog"
 fi
@@ -268,21 +268,21 @@ if [[ ! -f "$ROOT/vm/images/debian-13-genericcloud-amd64.qcow2" ]]; then
     ans="$(ask "fetch the Debian cloud master image now? (~330 MB download, ~1 GB on disk; without it no VM backends work) [y/N]" n)"
     if [[ $DO_IMAGE -eq 1 ]] && [[ ! $ans =~ ^[Yy]$ ]]; then ans=y; fi
     if [[ $ans =~ ^[Yy]$ ]]; then
-        SBX_ROOT="$ROOT" bash "$ROOT/vm/sbxvm.sh" fetch-image
+        HOTBED_ROOT="$ROOT" bash "$ROOT/vm/hotbedvm.sh" fetch-image
     else
-        say "skipping image fetch — run: SBX_ROOT=\"$ROOT\" bash \"$ROOT/vm/sbxvm.sh\" fetch-image  (needed once before creating VMs)"
+        say "skipping image fetch — run: HOTBED_ROOT=\"$ROOT\" bash \"$ROOT/vm/hotbedvm.sh\" fetch-image  (needed once before creating VMs)"
     fi
 else
     say "cloud master image already present"
 fi
 
 # ---- optional first config (-–config-init imports host opencode providers) -----
-if [[ ! -f "$HOME/.config/sbxd/config.json" ]]; then
+if [[ ! -f "$HOME/.config/hotbedd/config.json" ]]; then
     if [[ $DO_CONFIG -eq 1 ]]; then
-        env SBX_ROOT="$ROOT" "$SBXD" config init || say "config init failed (non-fatal — run later: sbxd config init)"
+        env HOTBED_ROOT="$ROOT" "$SBXD" config init || say "config init failed (non-fatal — run later: hotbedd config init)"
     else
-        say "config: none yet — create with: SBX_ROOT=\"$ROOT\" \"$SBXD\" config init"
+        say "config: none yet — create with: HOTBED_ROOT=\"$ROOT\" \"$SBXD\" config init"
     fi
 fi
 
-say "done. next:  $BIN_DIR/sbxd-serve   →  dashboard/API at http://127.0.0.1:7770"
+say "done. next:  $BIN_DIR/hotbedd-serve   →  dashboard/API at http://127.0.0.1:7770"

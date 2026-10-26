@@ -1,5 +1,5 @@
 # CI-lite: everything that needs no docker and no libvirt. The hermetic
-# gate (tests/sbxddsmoke.sh) needs engines — it runs on the release host,
+# gate (tests/hotbedddsmoke.sh) needs engines — it runs on the release host,
 # not here (see docs/RELEASING.md §5).
 name: ci
 on:
@@ -14,6 +14,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: sbxd/go.mod
+          go-version-file: hotbed/go.mod
       - run: make check
       - run: bash scripts/static-check.sh

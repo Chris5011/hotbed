@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/release.sh VERSION — cross-build the sbxd daemon (linux amd64+arm64),
+# scripts/release.sh VERSION — cross-build the hotbedd daemon (linux amd64+arm64),
 # stamp the tagged version in, hash, and drop everything into dist/.
 #
 # Go toolchain only (module is stdlib-only; CGO disabled). No docker required.
@@ -15,16 +15,16 @@ export GOOS=linux
 export CGO_ENABLED=0
 
 for arch in amd64 arm64; do
-    ( cd "$repo/sbxd" && GOARCH="$arch" go build -trimpath \
-        -ldflags "-s -w -X sbxd/internal/env.Version=v$VER" \
-        -o "$out/sbxd-v$VER-linux-$arch" ./cmd/sbxd )
+    ( cd "$repo/hotbedd" && GOARCH="$arch" go build -trimpath \
+        -ldflags "-s -w -X hotbed/internal/env.Version=v$VER" \
+        -o "$out/hotbedd-v$VER-linux-$arch" ./cmd/hotbedd )
 done
 
-( cd "$out" && sha256sum sbxd-v$VER-linux-* > SHA256SUMS )
+( cd "$out" && sha256sum hotbedd-v$VER-linux-* > SHA256SUMS )
 
 # Stamp proof: run the native-arch binary and let it print its version.
 native="$(go env GOARCH)"
-"$out/sbxd-v$VER-linux-$native" version
+"$out/hotbedd-v$VER-linux-$native" version
 
 echo
 ls -lh "$out"

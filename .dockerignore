@@ -1,9 +1,9 @@
-# Keep the sbx image build contexts tiny.
+# Keep the hbd image build contexts tiny.
 #
-# Both kit Dockerfiles build with $SBX_ROOT as the docker context:
-#   bin/sbx build <stack>          → containers/Dockerfile (COPYs containers/entrypoint.sh)
-#   vm/sbxvmd build                → vm/sbxvmd/Dockerfile  (COPYs vm/sbxvmd/entry)
-#   daemon RecipeImageEnsure       → same as bin/sbx (dashboard create)
+# Both kit Dockerfiles build with $HOTBED_ROOT as the docker context:
+#   bin/hbd build <stack>          → containers/Dockerfile (COPYs containers/entrypoint.sh)
+#   vm/hotbedvmd build                → vm/hotbedvmd/Dockerfile  (COPYs vm/hotbedvmd/entry)
+#   daemon RecipeImageEnsure       → same as bin/hbd (dashboard create)
 # Everything else — vm/images/ alone is ~1 GB once fetched — must not ride
 # along in the context upload of every build.
 *
@@ -11,6 +11,6 @@
 !containers/Dockerfile
 !containers/entrypoint.sh
 !vm/
-!vm/sbxvmd/
-!vm/sbxvmd/Dockerfile
-!vm/sbxvmd/entry
+!vm/hotbedvmd/
+!vm/hotbedvmd/Dockerfile
+!vm/hotbedvmd/entry

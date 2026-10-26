@@ -1,11 +1,11 @@
 # syntax=docker/dockerfile:1
-# OpenCode-SBX sandbox images
+# hotbed sandbox images
 #
 # One Dockerfile, one shared "common" base layer, and one minimal target per
-# stack. sbx builds them as  sbx:<stack>  images:
+# stack. hbd builds them as  hotbed:<stack>  images:
 #
-#   docker build --target node   -t sbx:node .
-#   docker build --target python -t sbx:python .
+#   docker build --target node   -t hotbed:node .
+#   docker build --target python -t hotbed:python .
 #   ...
 #
 # All stacks share git/network/ssh/build tooling + a fallback opencode binary,
@@ -65,8 +65,8 @@ RUN apt-get update \
       '  *":/usr/local/go/bin:"*) ;;' \
       '  *) export PATH="/usr/local/go/bin:/usr/local/cargo/bin:$PATH" ;;' \
       'esac' \
-      > /etc/profile.d/sbx-path.sh \
-      && chmod 0755 /etc/profile.d/sbx-path.sh \
+      > /etc/profile.d/hotbed-path.sh \
+      && chmod 0755 /etc/profile.d/hotbed-path.sh \
  && rm -rf /var/lib/apt/lists/*
 
 # fallback opencode binary (official release channel); if the host has its own
@@ -87,32 +87,32 @@ RUN set -e \
  && opencode --version
 
 # sandbox user + shared-cache directory skeletons
-RUN groupadd -g 1000 sbx \
- && useradd -m -d /home/sbx -g sbx -u 1000 -s /bin/bash sbx \
- && echo 'sbx ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/sbx \
- && chmod 0440 /etc/sudoers.d/sbx \
+RUN groupadd -g 1000 hbd \
+ && useradd -m -d /home/hbd -g hbd -u 1000 -s /bin/bash hbd \
+ && echo 'hbd ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/hbd \
+ && chmod 0440 /etc/sudoers.d/hbd \
  && mkdir -p \
-      /home/sbx/.config/opencode \
-      /home/sbx/.local/share/opencode \
-      /home/sbx/.npm \
-      /home/sbx/.cache/pip \
- && chown -R sbx:sbx /home/sbx
+      /home/hbd/.config/opencode \
+      /home/hbd/.local/share/opencode \
+      /home/hbd/.npm \
+      /home/hbd/.cache/pip \
+ && chown -R hbd:hbd /home/hbd
 
-COPY containers/entrypoint.sh /usr/local/bin/sbx-entry
-RUN chmod 0755 /usr/local/bin/sbx-entry
+COPY containers/entrypoint.sh /usr/local/bin/hotbed-entry
+RUN chmod 0755 /usr/local/bin/hotbed-entry
 
-ENTRYPOINT ["/usr/local/bin/sbx-entry"]
+ENTRYPOINT ["/usr/local/bin/hotbed-entry"]
 
 # greet the shell with a clearly-marked sandbox prompt + handy env
-RUN cat >> /home/sbx/.bashrc <<'EOF'
+RUN cat >> /home/hbd/.bashrc <<'EOF'
 
-# --- sandbox conveniences (added by OpenCode-SBX) ---
-export PS1='\[\e[36m\]sbx\[\e[0m\]:\w\$ '
+# --- sandbox conveniences (added by hotbed) ---
+export PS1='\[\e[36m\]hbd\[\e[0m\]:\w\$ '
 export PATH="$HOME/go/bin:$PATH"
 export GOPATH="$HOME/go"
 export GOMODCACHE="$HOME/go/pkg/mod"
 EOF
-RUN chown sbx:sbx /home/sbx/.bashrc
+RUN chown hbd:hbd /home/hbd/.bashrc
 
 WORKDIR /workspace
 
@@ -153,9 +153,9 @@ RUN set -e \
  && /usr/local/go/bin/go version
 
 ENV PATH="/usr/local/go/bin:${PATH}" \
-    GOPATH=/home/sbx/go \
-    GOMODCACHE=/home/sbx/go/pkg/mod \
-    GOBIN=/home/sbx/go/bin
+    GOPATH=/home/hbd/go \
+    GOMODCACHE=/home/hbd/go/pkg/mod \
+    GOBIN=/home/hbd/go/bin
 
 ###### stack: rust #############################################################
 FROM common AS rust

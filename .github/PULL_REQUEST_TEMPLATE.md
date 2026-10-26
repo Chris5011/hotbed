@@ -8,10 +8,10 @@
 # How verified
 
 - [ ] `make check` green (gofmt guard + `go vet` + build)
-- [ ] `bash -n vm/sbxvm.sh && bash -n tests/sbxddsmoke.sh`
+- [ ] `bash -n vm/hotbedvm.sh && bash -n tests/hotbedddsmoke.sh`
 - [ ] dashboard JS: excerpted `appJS` passes `node --check` (snippet: docs/RELEASING.md §2)
 - [ ] full suite via the §4 certification dance: `____ passed, 0 failed` (incl. `certsuite` cleanup)
-- [ ] `git status` clean of runtime artifacts (vm/images, vm/vms, dist/, sbxd/bin)
+- [ ] `git status` clean of runtime artifacts (vm/images, vm/vms, dist/, hotbed/bin)
 
 # Screenshots / evidence
 

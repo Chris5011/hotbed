@@ -1,0 +1,15 @@
+{
+  "name": "hotbed-desktop",
+  "productName": "Hotbed",
+  "version": "0.1.0",
+  "description": "Electron shell for the hotbedd dashboard (hotbed)",
+  "main": "main.js",
+  "author": "chris5011",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}

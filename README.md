@@ -1,4 +1,4 @@
-# OpenCode-SBX
+# Hotbed
 
 Disposable sandboxed dev environments for **OpenCode** and other AI coding
 agents — container-first, with a headless VM escape hatch — so that everything
@@ -7,25 +7,25 @@ machine.
 
 ```text
         ┌─────────────────────────────────────────────────────────────┐
- host ──│ ~/OpenCode-SBX (this kit)                                   │
-        │                                                             │
-        │  bin/sbx     throwaway Docker container per project dir     │
-        │               project bind-mounted at /workspace            │
-        │               toolchains die with the container             │
-        │                                                             │
-        │  bin/sbxvm    headless KVM VM (libvirt or docker)           │
-        │               for what containers can't do: systemd,        │
-        │               nested docker, kernel-level work              │
-        │                                                             │
-        │  containers/  image definitions (1 Dockerfile, 5 stacks)    │
-        │  vm/          master image, per-VM disks, seeds             │
-        │  tests/       container · VM · SBX Desktop test suites      │
+ host ──│ ~/hotbed (this kit)                                    │
+        │                                                        │
+        │  bin/hbd     throwaway Docker container per project    │
+        │               project bind-mounted at /workspace       │
+        │               toolchains die with the container        │
+        │                                                        │
+        │  bin/hotbedvm    headless KVM VM (libvirt or docker)   │
+        │               for what containers can't do: systemd,   │
+        │               nested docker, kernel-level work         │
+        │                                                        │
+        │  containers/  image definitions (1 Dockerfile, 5 stacks)│
+        │  vm/          master image, per-VM disks, seeds        │
+        │  tests/       container · VM · daemon test suites      │
         └─────────────────────────────────────────────────────────────┘
 ```
 
 **Design rule of thumb:** if the work is "code, build, test, install dev
-tools" → `sbx` (containers). If the work needs systemd, a real kernel,
-nested Docker, or a full distro → `sbxvm`. Both keep your host clean.
+tools" → `hbd` (containers). If the work needs systemd, a real kernel,
+nested Docker, or a full distro → `hotbedvm`. Both keep your host clean.
 
 ---
 
@@ -36,10 +36,10 @@ nested Docker, or a full distro → `sbxvm`. Both keep your host clean.
 3. [Requirements](#requirements)
 4. [Install: step by step](#install-step-by-step)
 5. [One-time setup](#one-time-setup)
-6. [sbx — container sandboxes](#sbx--container-sandboxes)
-7. [sbxvm — the VM escape hatch](#sbxvm--the-vm-escape-hatch)
-8. [The docker backend (sbxvmd)](#the-docker-backend-sbxvmd)
-9. [sbxd — SBX Desktop (daemon, dashboard, docker-style CLI)](#sbxd--sbx-desktop-daemon-dashboard-docker-style-cli)
+6. [hbd — container sandboxes](#hotbed--container-sandboxes)
+7. [hotbedvm — the VM escape hatch](#hotbedvm--the-vm-escape-hatch)
+8. [The docker backend (hotbedvmd)](#the-docker-backend-hotbedvmd)
+9. [hotbedd — Hotbed (daemon, dashboard, docker-style CLI)](#hotbedd--hotbed-desktop-daemon-dashboard-docker-style-cli)
 10. [How it works under the hood](#how-it-works-under-the-hood)
 11. [Field debugging recipes](#field-debugging-recipes)
 12. [Tests](#tests)
@@ -59,7 +59,7 @@ waiting to happen. This kit gives every project a throwaway environment:
 
 - **Per-project.** The project directory is bind-mounted at `/workspace` —
   that directory is the *blast radius*. Nothing else on the host is reachable.
-- **Everything dies with the sandbox.** `sbx rm` / `sbxvm destroy` deletes
+- **Everything dies with the sandbox.** `hbd rm` / `hotbedvm destroy` deletes
   the container/VM and every tool the agent installed. The host stays clean.
 - **Fast iteration.** Shared package caches (npm/pip/go/cargo) live in named
   Docker volumes — wiping sandboxes is instant, reinstalling is cache-fast.
@@ -68,7 +68,7 @@ waiting to happen. This kit gives every project a throwaway environment:
 
 ## The two layers at a glance
 
-|                       | `sbx` (containers)                | `sbxvm` (VMs)                       |
+|                       | `hbd` (containers)                | `hotbedvm` (VMs)                       |
 |-----------------------|-----------------------------------|-------------------------------------|
 | start/attach latency  | ~0.5 s                            | create ~2–3 min, then attach ~1 s   |
 | blast radius          | one project bind mount            | one project share + the VM disk     |
@@ -91,7 +91,7 @@ waiting to happen. This kit gives every project a throwaway environment:
   `/sys/module/kvm_intel/parameters/nested`), `/dev/kvm` writable.
 - RAM budget: ≥ 8 GB for the docker engine plus 2–4 GB per running VM.
 
-### Container side (sbx)
+### Container side (hbd)
 
 - **A running docker engine.** Docker Desktop on Windows/WSL2: enable
   *Settings → Resources → WSL Integration* for your distro (so its paths are
@@ -105,7 +105,7 @@ waiting to happen. This kit gives every project a throwaway environment:
   (bind-mounted into sandboxes), `~/.gitconfig` and `~/.ssh` (mounted
   read-only for commits and git-over-ssh).
 
-### VM side (sbxvm)
+### VM side (hotbedvm)
 
 Packages (Debian-family names):
 
@@ -148,7 +148,7 @@ sudo systemctl restart libvirtd
 `create` also checks and (if needed) sets the `o+x` traverse bit on `$HOME`
 automatically, so libvirt can reach images under your home.
 
-The [docker backend](#the-docker-backend-sbxvmd) skips everything above:
+The [docker backend](#the-docker-backend-hotbedvmd) skips everything above:
 no libvirt packages, no qemu on the host, no xorriso — it needs only the
 docker engine with nested KVM working behind it.
 
@@ -186,33 +186,33 @@ VMs of either backend need **nested KVM** (a writable `/dev/kvm`) — see
 
 The daemon itself has one of two routes (installer or binary):
 
-- **Prebuilt binary** (no Go needed): take `sbxd-vX.Y.Z-linux-<arch>` +
+- **Prebuilt binary** (no Go needed): take `hotbedd-vX.Y.Z-linux-<arch>` +
   `SHA256SUMS` from the
-  [Releases](https://github.com/Chris5011/OpenCode-SBX/releases) page
+  [Releases](https://github.com/Chris5011/hotbed/releases) page
   (arch map: `x86_64` → `amd64`, `aarch64` → `arm64`), verify, and drop the
   binary anywhere in the kit tree — `install.sh` adopts it into
-  `sbxd/bin/sbxd` itself (the explicit equivalent is
-  `install -m755 sbxd-vX.Y.Z-linux-amd64 sbxd/bin/sbxd`):
+  `hotbed/bin/hotbedd` itself (the explicit equivalent is
+  `install -m755 hotbedd-vX.Y.Z-linux-amd64 hotbed/bin/hotbedd`):
   ```bash
   sha256sum -c SHA256SUMS --ignore-missing
-  mv sbxd-vX.Y.Z-linux-amd64 dist/           # or the kit root — both work
+  mv hotbedd-vX.Y.Z-linux-amd64 dist/           # or the kit root — both work
   ```
-  *What the binary is:* every SBX Desktop piece — the `sbxd` CLI, the REST
+  *What the binary is:* every Hotbed piece — the `hotbedd` CLI, the REST
   + SSE controller and the embedded dashboard — in one static, stdlib-only
-  Go file. Not included: the `sbx`/`sbxvm` CLIs, which are bash scripts
+  Go file. Not included: the `hbd`/`hotbedvm` CLIs, which are bash scripts
   living in the kit tree (see step 2). The daemon alone can inventory,
   start/stop, log and attach to everything that already exists and spawn
   new *containers* natively — but *creating VMs* and their journal
-  fallback shell out to the kit's `vm/sbxvm.sh`, so you'll want the tree
+  fallback shell out to the kit's `vm/hotbedvm.sh`, so you'll want the tree
   too.
-- **Go 1.26+ toolchain**: `install.sh` (next steps) builds `sbxd` itself.
+- **Go 1.26+ toolchain**: `install.sh` (next steps) builds `hotbedd` itself.
   (`--with-deps` can fetch and install the toolchain for you.)
 
 ### 2 · Get the kit tree
 
 ```bash
-git clone https://github.com/Chris5011/OpenCode-SBX.git
-cd OpenCode-SBX
+git clone https://github.com/Chris5011/hotbed.git
+cd hotbed
 ```
 
 Cloning is just the easiest way to fetch: **nothing in the kit or the
@@ -225,17 +225,17 @@ On a second (e.g. headless) machine, any of these fetches is fine:
 
 ```bash
 # a) has the CLI tooling and auth →
-gh release download vX.Y.Z -R Chris5011/OpenCode-SBX      # binary + SHA256SUMS
-gh repo clone Chris5011/OpenCode-SBX                      # the tree
+gh release download vX.Y.Z -R Chris5011/hotbed      # binary + SHA256SUMS
+gh repo clone Chris5011/hotbed                      # the tree
 
 # b) minimal: raw curl against the release URLs — needs a token while the
 #    repo is private (PAT with repo scope); token-free once public:
 curl -fL -H "Authorization: Bearer $TOKEN" \
-     -O https://github.com/Chris5011/OpenCode-SBX/releases/download/vX.Y.Z/sbxd-vX.Y.Z-linux-amd64
+     -O https://github.com/Chris5011/hotbed/releases/download/vX.Y.Z/hotbedd-vX.Y.Z-linux-amd64
 
 # c) the two boxes reach each other → skip GitHub entirely:
 rsync -av --exclude vm/images --exclude vm/vms --exclude dist \
-      --exclude sbxd/bin SRC_TREE/ newbox:apps/OpenCode-SBX/
+      --exclude hotbed/bin SRC_TREE/ newbox:apps/hotbed/
 ```
 
 Then `sha256sum -c SHA256SUMS --ignore-missing`, drop the binary into the
@@ -254,13 +254,13 @@ ripgrep, ssh, build tools, and the Go toolchain for the source build), then
 runs the normal install:
 
 ```bash
-git clone https://github.com/Chris5011/OpenCode-SBX.git \
-  && cd OpenCode-SBX && ./install.sh --with-deps --yes
+git clone https://github.com/Chris5011/hotbed.git \
+  && cd hotbed && ./install.sh --with-deps --yes
 ```
 
 It will:
 
-- symlink `sbx`, `sbxd` and a `sbxd-serve` wrapper (pins `SBX_ROOT` so the
+- symlink `hbd`, `hotbedd` and a `hotbedd-serve` wrapper (pins `HOTBED_ROOT` so the
   daemon always finds this tree) into `~/.local/bin`. That dir is on your
   PATH on Debian-family setups once it exists (they auto-add it on the next
   login shell; in an open terminal: `export PATH="$HOME/.local/bin:$PATH"`).
@@ -269,26 +269,26 @@ It will:
 - gate-check the stack above and print exactly what's missing, split into
   required vs. optional;
 - offer the one-time Debian master-image fetch (~330 MB download, ~950 MB
-  on disk). Skipping is fine — retry any time with `sbxvm fetch-image`;
+  on disk). Skipping is fine — retry any time with `hotbedvm fetch-image`;
 - with `--config-init`, import LLM providers from your host opencode
-  config (do it later instead: `sbxd config init`). Mind: it is an
+  config (do it later instead: `hotbedd config init`). Mind: it is an
   **import** — on a fresh box without `~/.config/opencode/opencode.json`
   there is nothing to import and it exits with that error. Either copy
   that file (plus `~/.opencode/bin/opencode` and `~/.local/share/opencode`
   for the in-sandbox TUI) over from another machine, or write
-  `~/.config/sbxd/config.json` directly (`sbxd config print` shows the
+  `~/.config/hotbedd/config.json` directly (`hotbedd config print` shows the
   shape). Unconfigured is fine for pure sandbox/VM testing — only the
   accounting proxy stays idle.
 
 ### 4 · Start the daemon
 
 ```bash
-sbxd-serve
+hotbedd-serve
 # → dashboard + API on http://127.0.0.1:7770 (loopback by default)
 ```
 
-`sbxd-serve` is a plain foreground process — run it in a terminal, a tmux
-pane or a systemd unit. The CLIs (`sbx`, `sbxvm`, `sbxd`) also work
+`hotbedd-serve` is a plain foreground process — run it in a terminal, a tmux
+pane or a systemd unit. The CLIs (`hbd`, `hotbedvm`, `hotbedd`) also work
 without the daemon (they fall back to direct engine calls); the dashboard
 obviously doesn't.
 
@@ -296,19 +296,19 @@ obviously doesn't.
 
 - *tunnel* (no exposure): from your workstation, `ssh -L 7770:127.0.0.1:7770
   <box>` and browse `http://127.0.0.1:7770` there; or
-- *opt-in LAN exposure*: `SBXD_BIND=0.0.0.0 sbxd-serve` (or edit the
-  `sbxd-serve` wrapper). Loud ping: **the dashboard/API has no login** —
+- *opt-in LAN exposure*: `HOTBEDD_BIND=0.0.0.0 hotbedd-serve` (or edit the
+  `hotbedd-serve` wrapper). Loud ping: **the dashboard/API has no login** —
   the CSRF guard protects browsers only, so with a non-loopback bind your
   *firewall position* is the gate (same trust model as the proxy listener,
   which must be network-reachable for sandboxes anyway). Prefer
   `ufw allow from <trusted-subnet>` style scoping, not world-open ports.
-- *snakeoil TLS — makes the dashboard a secure context*: `SBXD_TLS=1
-  sbxd-serve` (or `--tls`). Browsers only grant `navigator.clipboard`
+- *snakeoil TLS — makes the dashboard a secure context*: `HOTBEDD_TLS=1
+  hotbedd-serve` (or `--tls`). Browsers only grant `navigator.clipboard`
   over https — over plain http on a LAN box the copy buttons degrade to a
   fallback with a pointed toast. The daemon auto-generates a self-signed
-  cert and pins it at `~/.local/state/sbxd/tls/` (fingerprint printed,
+  cert and pins it at `~/.local/state/hotbedd/tls/` (fingerprint printed,
   stable across restarts, delete the files to regenerate). Combine with
-  `SBXD_BIND` for `https://<box>:7770`.
+  `HOTBEDD_BIND` for `https://<box>:7770`.
 
 ```bash
 curl -s http://127.0.0.1:7770/api/health
@@ -318,9 +318,9 @@ curl -s http://127.0.0.1:7770/api/health
 ### 5 · Verify + first sandbox
 
 ```bash
-sbx doctor                # engine, bind mounts, images, opencode bits
-sbxd ps                   # unified inventory (the dashboard shows the same, live)
-cd some/project && sbx    # shell in — the stack image builds on first use
+hbd doctor                # engine, bind mounts, images, opencode bits
+hotbedd ps                   # unified inventory (the dashboard shows the same, live)
+cd some/project && hbd    # shell in — the stack image builds on first use
 ```
 
 Point a browser at `http://127.0.0.1:7770`: the sidebar should list your
@@ -333,7 +333,7 @@ per-sandbox keys and $-wallets as needed — full walkthrough in
 [P2](#p2--the-llm-proxy-wallets-and-one-global-opencode-config). On a fresh
 headless box, remember the step-3 note: `config init` is an import, so
 either bring `~/.config/opencode/` over from a machine that has it or
-write `~/.config/sbxd/config.json` by hand.
+write `~/.config/hotbedd/config.json` by hand.
 
 ---
 
@@ -344,15 +344,15 @@ The scripted [install above](#install-step-by-step) already does
 manually, the three things it automates are:
 
 ```bash
-# put sbx on your PATH (symlinks ~/.local/bin/sbx → this kit's bin/sbx)
-sbx install-self
+# put hbd on your PATH (symlinks ~/.local/bin/hbd → this kit's bin/hbd)
+hbd install-self
 
 # check the container environment: engine, bind mounts, images, opencode bits
-sbx doctor
+hbd doctor
 
-# fetch + auto-patch the Debian cloud master image for sbxvm (one-time;
+# fetch + auto-patch the Debian cloud master image for hotbedvm (one-time;
 # ~326 MB download, ~950 MB on disk)
-sbxvm fetch-image
+hotbedvm fetch-image
 ```
 
 After this you never need root again for daily work (qemu runs unprivileged
@@ -360,31 +360,31 @@ as you; every VM is per-user data).
 
 ---
 
-## sbx — container sandboxes
+## hbd — container sandboxes
 
 ### Mental model
 
-`sbx` makes **one persistent, throwaway Docker container per project
+`hbd` makes **one persistent, throwaway Docker container per project
 directory**. The container name is derived from the project's absolute path
-(`sbx-<stack>-<hash8>`), so re-running `sbx` anywhere in that project
+(`hotbed-<stack>-<hash8>`), so re-running `hbd` anywhere in that project
 reattaches to the *same* sandbox. Inside it you are a user with **your host
 uid**, the project is mounted at `/workspace`, passwordless sudo works
 (container-local!), and the internet is reachable — the workflow an agent
 expects.
 
-Why persistent: containers keep running detached (`sbx stop` to pause), so
+Why persistent: containers keep running detached (`hbd stop` to pause), so
 the agent's state survives your terminal and reboots (restart policy
-`unless-stopped`), while tooling it installs still dies with `sbx rm`.
+`unless-stopped`), while tooling it installs still dies with `hbd rm`.
 
 ### Quick start
 
 ```bash
 cd ~/some/project
-sbx                       # shell in (creates & builds the sandbox on first use)
-sbx opencode              # opencode TUI inside the sandbox
-sbx --fresh               # one-shot ephemeral sandbox instead; dies on exit
-sbx status                # what exists for this project right now
-sbx rm --yes              # nuke this project's sandbox and everything in it
+hbd                       # shell in (creates & builds the sandbox on first use)
+hbd opencode              # opencode TUI inside the sandbox
+hbd --fresh               # one-shot ephemeral sandbox instead; dies on exit
+hbd status                # what exists for this project right now
+hbd rm --yes              # nuke this project's sandbox and everything in it
 ```
 
 From inside you (or an agent) can `apt install`, `pip install`, `npm i -g`,
@@ -394,17 +394,17 @@ compile, run servers — none of it lands on the host.
 
 | stack    | image        | tooling you get                                 |
 |----------|--------------|-------------------------------------------------|
-| `node`   | `sbx:node`   | Node 22 LTS + npm + corepack                    |
-| `python` | `sbx:python` | python3-dev, pipx, uv                           |
-| `go`     | `sbx:go`     | latest stable Go + module cache volume          |
-| `rust`   | `sbx:rust`   | rustup stable, minimal profile                  |
-| `base`   | `sbx:base`   | fallback: git, build tools, python3             |
+| `node`   | `hotbed:node`   | Node 22 LTS + npm + corepack                    |
+| `python` | `hotbed:python` | python3-dev, pipx, uv                           |
+| `go`     | `hotbed:go`     | latest stable Go + module cache volume          |
+| `rust`   | `hotbed:rust`   | rustup stable, minimal profile                  |
+| `base`   | `hotbed:base`   | fallback: git, build tools, python3             |
 
 All stacks also get: git, curl/wget, jq, ripgrep, openssh-client, build
 toolchain (gcc/make/pkg-config), python3+pip, sudo (passwordless *inside*
 only), and a baked opencode fallback binary (an official release).
 
-Auto detection (`sbx stack` to print; override with `--stack NAME`):
+Auto detection (`hbd stack` to print; override with `--stack NAME`):
 
 - `go.mod`, `go.work` → go
 - `Cargo.toml` → rust
@@ -414,46 +414,46 @@ Auto detection (`sbx stack` to print; override with `--stack NAME`):
 - otherwise → base
 
 Images build on first use and are cached afterwards. Rebuild explicitly:
-`sbx build [stacks...]`, fully fresh: `sbx --no-cache build`.
+`hbd build [stacks...]`, fully fresh: `hbd --no-cache build`.
 
 ### What's mounted in
 
 | host path                        | sandbox path                | mode | purpose                        |
 |----------------------------------|-----------------------------|------|--------------------------------|
 | the project dir                  | `/workspace`                | rw   | the project (blast radius)     |
-| `~/.local/share/opencode`        | `/home/sbx/.local/share/opencode` | rw | opencode state & auth (sessions, logins) |
-| `~/.config/opencode`             | `/home/sbx/.config/opencode`| rw   | opencode config                |
+| `~/.local/share/opencode`        | `/home/hbd/.local/share/opencode` | rw | opencode state & auth (sessions, logins) |
+| `~/.config/opencode`             | `/home/hbd/.config/opencode`| rw   | opencode config                |
 | `~/.opencode/bin/opencode`       | `/usr/local/bin/opencode`   | ro   | *your* opencode binary wins over the baked one |
-| `~/.gitconfig`                   | `/home/sbx/.gitconfig`      | ro   | commits carry your identity    |
-| `~/.ssh`                         | `/home/sbx/.ssh`            | ro   | git push/pull over ssh         |
-| named volume `sbx-npm`           | `/home/sbx/.npm`            | rw   | npm cache (node)               |
-| named volume `sbx-pip`           | `/home/sbx/.cache/pip`      | rw   | pip/uv cache (python)          |
-| named volume `sbx-go`            | `/home/sbx/go`              | rw   | Go cache (go)                  |
-| named volume `sbx-cargo`         | `/usr/local/cargo`          | rw   | cargo cache (rust)             |
+| `~/.gitconfig`                   | `/home/hbd/.gitconfig`      | ro   | commits carry your identity    |
+| `~/.ssh`                         | `/home/hbd/.ssh`            | ro   | git push/pull over ssh         |
+| named volume `hotbed-npm`           | `/home/hbd/.npm`            | rw   | npm cache (node)               |
+| named volume `hotbed-pip`           | `/home/hbd/.cache/pip`      | rw   | pip/uv cache (python)          |
+| named volume `hotbed-go`            | `/home/hbd/go`              | rw   | Go cache (go)                  |
+| named volume `hotbed-cargo`         | `/usr/local/cargo`          | rw   | cargo cache (rust)             |
 
 Opt out: `--no-auth`, `--no-occonf`, `--no-git`, `--no-ssh`. Add more:
 `--mount HOST:CT[:ro]` and `--env KEY=VAL` (repeatable, must come before the
-command, e.g. `sbx --mount /data:/data shell`).
+command, e.g. `hbd --mount /data:/data shell`).
 
-Helpers for the strict case: `sbx --fresh --no-auth --no-ssh --net none`.
+Helpers for the strict case: `hbd --fresh --no-auth --no-ssh --net none`.
 
 ### Command reference
 
 ```text
-sbx (no args) | shell     interactive shell in this project's sandbox
-sbx opencode [-- args]    opencode TUI inside the sandbox
-sbx exec [--] cmd...      one-shot command in the sandbox (tty-aware)
-sbx root [--] cmd...      as root inside the sandbox (apt-get update ...)
-sbx status | stop | rm    manage THIS project's sandbox (--yes skips prompt)
-sbx ls | ps               all sbx sandboxes (stack, state, project)
-sbx prune [--yes]         remove all sbx containers (asks, or --yes)
-sbx caches [ls|nuke]      list / wipe sbx-* cache volumes (--yes)
-sbx build [stacks...]     (re)build images; sbx --no-cache build to be sure
-sbx stack                 print the auto-detected stack for this cwd
-sbx doctor                environment diagnosis
-sbx --fresh [cmd...]      ephemeral mode: --rm container, dies on exit
-sbx install-self          symlink into ~/.local/bin
-sbx version | help        meta
+hbd (no args) | shell     interactive shell in this project's sandbox
+hbd opencode [-- args]    opencode TUI inside the sandbox
+hbd exec [--] cmd...      one-shot command in the sandbox (tty-aware)
+hbd root [--] cmd...      as root inside the sandbox (apt-get update ...)
+hbd status | stop | rm    manage THIS project's sandbox (--yes skips prompt)
+hbd ls | ps               all hbd sandboxes (stack, state, project)
+hbd prune [--yes]         remove all hbd containers (asks, or --yes)
+hbd caches [ls|nuke]      list / wipe hotbed-* cache volumes (--yes)
+hbd build [stacks...]     (re)build images; hbd --no-cache build to be sure
+hbd stack                 print the auto-detected stack for this cwd
+hbd doctor                environment diagnosis
+hbd --fresh [cmd...]      ephemeral mode: --rm container, dies on exit
+hbd install-self          symlink into ~/.local/bin
+hbd version | help        meta
 ```
 
 Global options (place **before** the command): `--stack NAME`, `--fresh`,
@@ -462,19 +462,19 @@ Global options (place **before** the command): `--stack NAME`, `--fresh`,
 
 ---
 
-## sbxvm — the VM escape hatch
+## hotbedvm — the VM escape hatch
 
 Some things a container can't do well: systemd services, nested Docker,
-kernel modules, anything needing "a real machine". `sbxvm` creates headless
+kernel modules, anything needing "a real machine". `hotbedvm` creates headless
 **KVM-accelerated Debian 13 VMs** through libvirt/virt-install, provisioned
 tail-to-back by cloud-init. The same CLI also runs a second backend with
 **no libvirt at all** — plain Docker containers with qemu inside — see
-[the docker backend](#the-docker-backend-sbxvmd).
+[the docker backend](#the-docker-backend-hotbedvmd).
 
 ### What you get
 
 - SSH in as user `dev` with a dedicated auto-generated key
-  (`~/.ssh/sbxvm_key`), **passwordless sudo**, docker group membership.
+  (`~/.ssh/hotbedvm_key`), **passwordless sudo**, docker group membership.
 - Preinstalled via cloud-init: `docker.io`, `build-essential`, git, jq,
   ripgrep, pipx/venv, openssh-server and the official opencode release
   at `/usr/local/bin/opencode`.
@@ -487,21 +487,21 @@ tail-to-back by cloud-init. The same CLI also runs a second backend with
 ### Quick start
 
 ```bash
-sbxvm create agent1 --cpu 2 --mem 4096 --disk 20 --share ~/projects/agent1
+hotbedvm create agent1 --cpu 2 --mem 4096 --disk 20 --share ~/projects/agent1
 #   ~2–3 min: boot → cloud-init provisions → automatic reboot into the full
 #   kernel → /workspace mount verified, then returns control
 
-sbxvm ssh agent1                          # shell inside
-sbxvm opencode agent1                     # opencode TUI (cwd /workspace)
-sbxvm snapshot agent1 save before-agent   # freeze the moment
-sbxvm ssh agent1                          # agent does its (messy) work…
-sbxvm snapshot agent1 revert before-agent # …and the machine goes back in time
-sbxvm start agent1
-sbxvm destroy agent1 --yes                # reclaim everything
+hotbedvm ssh agent1                          # shell inside
+hotbedvm opencode agent1                     # opencode TUI (cwd /workspace)
+hotbedvm snapshot agent1 save before-agent   # freeze the moment
+hotbedvm ssh agent1                          # agent does its (messy) work…
+hotbedvm snapshot agent1 revert before-agent # …and the machine goes back in time
+hotbedvm start agent1
+hotbedvm destroy agent1 --yes                # reclaim everything
 ```
 
 `create` defaults: `--cpu 4 --mem 6144 --disk 20`. Name rules:
-`^[a-zA-Z][a-zA-Z0-9._-]*$`; the libvirt domain is `sbxvm-<name>`, all VM data
+`^[a-zA-Z][a-zA-Z0-9._-]*$`; the libvirt domain is `hotbedvm-<name>`, all VM data
 lives in `vm/vms/<name>/`.
 
 ### The provisioning pipeline (what `create` runs)
@@ -525,9 +525,9 @@ lives in `vm/vms/<name>/`.
 Since v0.2.10 the pipeline also **stages opencode from the host** over its
 own ssh channel when the guest's egress can't reach GitHub (ICMP+DNS fine,
 TCP 443 blackholed — seen behind policy routers/VPNs), and **self-syncs the
-sbx proxy** so fresh guests get their model list immediately. Since
+hbd proxy** so fresh guests get their model list immediately. Since
 v0.2.11 the dashboard's create returns **the moment the machine is
-spawned** (`SBXVM_SPAWN_ONLY=1` + a `postboot` verb) and the post-boot
+spawned** (`HOTBEDVM_SPAWN_ONLY=1` + a `postboot` verb) and the post-boot
 half runs in the daemon's background — any VM reaching boot-end without a
 sync target is wired automatically exactly once (audited `sandbox.sync`).
 
@@ -538,8 +538,8 @@ container-free machine for experiments); live snapshots then also work.
 
 ```bash
 # host → VM (rsync over the VM's SSH; the key and the lease IP do the rest)
-rsync -av -e "ssh -i ~/.ssh/sbxvm_key" ~/my/dir/ \
-      "dev@$(sbxvm ip agent1):/workspace/mydir/"
+rsync -av -e "ssh -i ~/.ssh/hotbedvm_key" ~/my/dir/ \
+      "dev@$(hotbedvm ip agent1):/workspace/mydir/"
 
 # VM → host: with a share, just cp to /workspace and it appears on the host.
 # Without a share: symmetrical rsync (same command, other direction).
@@ -556,7 +556,7 @@ instant revert, no external files.
   state preserved, RAM state not). No-share VMs snapshot live, RAM included.
 - `snapshot revert` drops all post-snapshot changes and leaves the VM in the
   snapshot's own power state — typically `shut off`, so follow with
-  `sbxvm start <name>` (a message in the output reminds you).
+  `hotbedvm start <name>` (a message in the output reminds you).
 - `destroy` refuses nothing: it stops the VM, deletes *all* snapshots first
   (virsh otherwise refuses to undefine a domain with snapshots), undefines
   with NVRAM cleanup and removes `vm/vms/<name>/` entirely.
@@ -564,74 +564,74 @@ instant revert, no external files.
 ### Command reference
 
 ```text
-sbxvm fetch-image                 download + auto-patch the master image (once)
-sbxvm create NAME [opts]          create + fully provision a VM
+hotbedvm fetch-image                 download + auto-patch the master image (once)
+hotbedvm create NAME [opts]          create + fully provision a VM
       [--cpu N] [--mem MB] [--disk GB] [--share DIR]
-sbxvm ssh NAME [-] command        ssh as dev@ (interactive shell w/o command)
-sbxvm shell NAME                  alias of ssh
-sbxvm opencode NAME [--] args     opencode TUI inside the VM (cwd /workspace)
-sbxvm ip NAME                     current lease IP (from virsh domifaddr)
-sbxvm start | stop NAME           power control (stop = ACPI, then forced)
-sbxvm destroy NAME [--yes         delete VM: stop + snapshots + disk + dir
+hotbedvm ssh NAME [-] command        ssh as dev@ (interactive shell w/o command)
+hotbedvm shell NAME                  alias of ssh
+hotbedvm opencode NAME [--] args     opencode TUI inside the VM (cwd /workspace)
+hotbedvm ip NAME                     current lease IP (from virsh domifaddr)
+hotbedvm start | stop NAME           power control (stop = ACPI, then forced)
+hotbedvm destroy NAME [--yes         delete VM: stop + snapshots + disk + dir
         required when non-interactive]
-sbxvm ls                          list VMs: state, IP, snapshot count
-sbxvm snapshot NAME save|list|revert|delete [...]
-sbxvm console NAME                attach the serial console (needs a real TTY)
-sbxvm version | help              meta
+hotbedvm ls                          list VMs: state, IP, snapshot count
+hotbedvm snapshot NAME save|list|revert|delete [...]
+hotbedvm console NAME                attach the serial console (needs a real TTY)
+hotbedvm version | help              meta
 ```
 
-Env flag: `SBXVM_SERIAL_FILE=1` before `create` logs the serial console to
+Env flag: `HOTBEDVM_SERIAL_FILE=1` before `create` logs the serial console to
 `vm/vms/<name>/serial.log` (a mode-0666 file readable by you) instead of
 only a pty.
 
 ---
 
-## The docker backend (sbxvmd)
+## The docker backend (hotbedvmd)
 
-The same `sbxvm` CLI can drive VMs **without libvirt at all**: each VM is one
+The same `hotbedvm` CLI can drive VMs **without libvirt at all**: each VM is one
 plain Docker container running qemu. Select it per invocation:
 
 ```bash
-SBXVM_BACKEND=docker sbxvm version        # sbxvm 0.1.0 (backend: docker)
-SBXVM_BACKEND=docker sbxvm create demo --cpu 2 --mem 2048 --disk 12 \
+HOTBEDVM_BACKEND=docker hotbedvm version        # hotbedvm 0.1.0 (backend: docker)
+HOTBEDVM_BACKEND=docker hotbedvm create demo --cpu 2 --mem 2048 --disk 12 \
     --share ~/projects/demo
-SBXVM_BACKEND=docker sbxvm ssh demo
+HOTBEDVM_BACKEND=docker hotbedvm ssh demo
 ```
 
-(or `export SBXVM_BACKEND=docker` once per shell. **libvirt stays the
+(or `export HOTBEDVM_BACKEND=docker` once per shell. **libvirt stays the
 default** so the original path is never switched by accident.) The same
 command reports which backend a given invocation will use:
-`SBXVM_BACKEND=docker sbxvm version` → `(backend: docker)`.
+`HOTBEDVM_BACKEND=docker hotbedvm version` → `(backend: docker)`.
 
 ### Shape
 
-- **One container = one VM** (`sbxvmd-<name>`, `--restart unless-stopped`).
+- **One container = one VM** (`hotbedvmd-<name>`, `--restart unless-stopped`).
   Lifecycle is plain `docker run/stop/rm`; `stop` traps SIGTERM in PID-1 and
   hands the guest an ACPI shutdown (then a hard kill after 50 s — a stopped
   guest always exits cleanly).
-- **State lives in a named volume** (`sbxvmd-store`), not in bind mounts: the
-  patched master (`sbxvm fetch-image`, the same one-time fetch) copied in as
+- **State lives in a named volume** (`hotbedvmd-store`), not in bind mounts: the
+  patched master (`hotbedvm fetch-image`, the same one-time fetch) copied in as
   `/store/master.qcow2`, and per-VM
   `/store/vms/<name>/{disk.qcow2, seed.iso, serial.log}` — the qcow2 gets
   native ext4 I/O inside the engine instead of the Desktop bind-mount tax.
-- The runtime image `sbxvmd:latest` is **built automatically** on first
-  `create` (Debian + qemu + xorriso; sources in `vm/sbxvmd/`). The host side
+- The runtime image `hotbedvmd:latest` is **built automatically** on first
+  `create` (Debian + qemu + xorriso; sources in `vm/hotbedvmd/`). The host side
   writes the seed files as usual into `vm/vms/<name>/seedwork/` and leaves
   the rest to the container: the seed dir is bind-mounted read-only at
   `/seed-src` and packed into `seed.iso` *inside* (no host xorriso).
 - **SSH is a published port, not a DHCP lease**: the container publishes
   `127.0.0.1::<random>` and **that port changes on every stop/start** (and on
-  the restart each snapshot save does). `sbxvm ssh|ip|ls` re-resolve it via
-  `docker port`, so always go through the CLI; `sbxvm ip demo` prints
+  the restart each snapshot save does). `hotbedvm ssh|ip|ls` re-resolve it via
+  `docker port`, so always go through the CLI; `hotbedvm ip demo` prints
   `127.0.0.1:<port>` for hand-rolled ssh/rsync.
 - `--share DIR` is bind-mounted at `/share` in the container and exposed to
   the guest as the same 9p virtfs as the libvirt path (`hostshare` →
   `/workspace`).
-- Serial console: `SBXVM_BACKEND=docker sbxvm console demo` streams it via
-  `docker exec` (`sbxvmd-entry serial`); it also lands in
+- Serial console: `HOTBEDVM_BACKEND=docker hotbedvm console demo` streams it via
+  `docker exec` (`hotbedvmd-entry serial`); it also lands in
   `/store/vms/demo/serial.log` (rotated to `.1` per boot). Debug helpers:
-  `docker logs sbxvmd-demo` (PID-1 side) and a qemu monitor under the hood —
-  `docker exec sbxvmd-demo sbxvmd-entry ctl 'info status'`.
+  `docker logs hotbedvmd-demo` (PID-1 side) and a qemu monitor under the hood —
+  `docker exec hotbedvmd-demo hotbedvmd-entry ctl 'info status'`.
 - **KVM is mandatory**: `create`/`start` probe nested `/dev/kvm` through a
   container first and **fail loudly on a TCG-only engine** — there is no
   silent fallback; software emulation would make the VM worthless.
@@ -678,17 +678,17 @@ Snapshots are **always offline** on this backend (the qcow2 must be unlocked,
 and running-VM state can't be captured through a stopped container anyway):
 `save` does `docker stop` (ACPI grace) → `qemu-img snapshot -c` in a
 throwaway toolbox container → `docker start`; `revert` needs the VM stopped
-and **leaves it stopped** — follow with `sbxvm start <name>` (the CLI says
+and **leaves it stopped** — follow with `hotbedvm start <name>` (the CLI says
 so); `list` reads with `-U` while the VM runs. RAM state is never captured —
 the same trade-off a 9p-shared VM has on libvirt.
 
 ---
 
-## sbxd — SBX Desktop (daemon, dashboard, docker-style CLI)
+## hotbedd — Hotbed (daemon, dashboard, docker-style CLI)
 
-`sbxd` is the resident control plane for the whole kit: one Go binary that
-serves a **unified inventory** of every sandbox kind (bin/sbx containers,
-sbxvmd docker-backend VMs, libvirt domains), a **web dashboard** and a
+`hotbedd` is the resident control plane for the whole kit: one Go binary that
+serves a **unified inventory** of every sandbox kind (bin/hbd containers,
+hotbedvmd docker-backend VMs, libvirt domains), a **web dashboard** and a
 **docker-lexicon CLI** — GUI and CLI are both clients of the same REST/SSE
 API. No SDKs: engines are driven through `docker`/`virsh` and the kit's own
 CLIs, so the binary stays stdlib-only and single-file.
@@ -697,7 +697,7 @@ CLIs, so the binary stays stdlib-only and single-file.
         Windows Terminal / browser / Electron shell
               │  (quick-connect, copy-connection)
 ┌─────────────▼────────────────────────────────────────┐
-│ sbxd — localhost-only daemon (default port 7770)     │
+│ hotbedd — localhost-only daemon (default port 7770)     │
 │  • inventory scan: docker ps/stats, virsh domstats   │
 │  • REST + SSE API for dashboard & CLI                │
 │  • attach desk: one persistent tmux session each     │
@@ -712,42 +712,42 @@ CLIs, so the binary stays stdlib-only and single-file.
 ### Quick start
 
 ```bash
-cd sbxd && go build -o bin/sbxd ./cmd/sbxd
-./bin/sbxd serve            # dashboard at http://127.0.0.1:7770
-./bin/sbxd ps               # unified table (containers + both VM backends)
-./bin/sbxd stats            # with live CPU/MEM (docker stats / virsh domstats)
-./bin/sbxd attach smoke3    # persistent tmux session, shell inside (detach: Ctrl-b d)
-./bin/sbxd attach agent2 --oc   # same session but with the opencode TUI
-./bin/sbxd connect smoke3   # print connection variants (ssh/shell first)
-./bin/sbxd logs smoke3      # docker logs / serial / file-tail, streamed
-./bin/sbxd start|stop NAME  # engine start/stop (docker / kit sbxvm semantics)
-./bin/sbxd rm NAME [--yes]  # fully delete a sandbox (VM: disk+snapshots w/ --yes)
-./bin/sbxd doctor
+cd hotbedd && go build -o bin/hotbedd ./cmd/hotbedd
+./bin/hotbedd serve            # dashboard at http://127.0.0.1:7770
+./bin/hotbedd ps               # unified table (containers + both VM backends)
+./bin/hotbedd stats            # with live CPU/MEM (docker stats / virsh domstats)
+./bin/hotbedd attach smoke3    # persistent tmux session, shell inside (detach: Ctrl-b d)
+./bin/hotbedd attach agent2 --oc   # same session but with the opencode TUI
+./bin/hotbedd connect smoke3   # print connection variants (ssh/shell first)
+./bin/hotbedd logs smoke3      # docker logs / serial / file-tail, streamed
+./bin/hotbedd start|stop NAME  # engine start/stop (docker / kit hotbedvm semantics)
+./bin/hotbedd rm NAME [--yes]  # fully delete a sandbox (VM: disk+snapshots w/ --yes)
+./bin/hotbedd doctor
 ```
 
-CLI verbs talk to the daemon when it runs (`SBXD_PORT`, default 7770) and
+CLI verbs talk to the daemon when it runs (`HOTBEDD_PORT`, default 7770) and
 fall back to direct engine calls otherwise.
 
 ### The desktop shell
 
-`sbxd/desktop/` is a thin Electron wrapper (~200 lines of `main.js`): a
-native window pointing at the dashboard, which auto-boots `sbxd` inside WSL
+`hotbed/desktop/` is a thin Electron wrapper (~200 lines of `main.js`): a
+native window pointing at the dashboard, which auto-boots `hotbedd` inside WSL
 via `wsl.exe` if unreachable — Docker-Desktop-style. The webapp itself stays
 portable: any browser gets the identical UI at the same URL. Run instructions
-in `sbxd/desktop/README.md`.
+in `hotbed/desktop/README.md`.
 
 ### P2 — the LLM proxy, wallets and one global OpenCode config
 
-P2 turns sbxd into the **single money-aware gate** for every agent call a
-sandbox makes. The upstream provider key never leaves sbxd; sandboxes hold
-only their own minted `sbxk-…` bearer key, and each sandbox gets a budget
+P2 turns hotbedd into the **single money-aware gate** for every agent call a
+sandbox makes. The upstream provider key never leaves hotbedd; sandboxes hold
+only their own minted `hbk-…` bearer key, and each sandbox gets a budget
 (USD/day wallet) enforced *before* any request is forwarded.
 
 ```text
 sandbox (opencode TUI)                                   
-  │ Authorization: Bearer sbxk-<sandbox>-<rand>          
+  │ Authorization: Bearer hbk-<sandbox>-<rand>          
   ▼                                                      
-sbxd proxy :7775  ── 401 unknown/revoked key        
+hotbedd proxy :7775  ── 401 unknown/revoked key        
   │     ┝─ 429 wallet dry (today ≥ budget)          
   │     ┝─ re-auth shoulder: real provider key never in the sandbox
   ▼                                                      
@@ -755,24 +755,24 @@ upstream (openai or anthropic style) ── SSE streams pass
 through verbatim; usage parsed from final chunk /
 message_start/_delta, else estimated (bytes/4, est=true)
   ▼
-~/.local/state/sbxd/usage.jsonl  →  burn dashboard tab
+~/.local/state/hotbedd/usage.jsonl  →  burn dashboard tab
 ```
 
 Setup, once:
 
 ```bash
-./bin/sbxd config init     # import providers from host ~/.config/opencode/opencode.json
-./bin/sbxd key mint NAME   # per-sandbox proxy key (provider default)
-./bin/sbxd budget NAME 5   # $/day wallet (0 = unlimited, default)
-./bin/sbxd sync NAME       # push proxy-backed opencode config INTO the sandbox
+./bin/hotbedd config init     # import providers from host ~/.config/opencode/opencode.json
+./bin/hotbedd key mint NAME   # per-sandbox proxy key (provider default)
+./bin/hotbedd budget NAME 5   # $/day wallet (0 = unlimited, default)
+./bin/hotbedd sync NAME       # push proxy-backed opencode config INTO the sandbox
 #   or in the dashboard: Burn tab → per-sandbox sync button
 #   (VMs wire this up automatically at boot-end since v0.2.11)
 ```
 
 After a sync, the sandbox's opencode only ever sees one provider
-(`sbx-proxy`) whose `apiKey` is the sandboxes' minted key — edit the global
-config at `~/.config/sbxd/config.json` (`sbxd config edit` searches for open
-editors, `sbxd config set proxy.port 7775` etc.) and **running daemons pick
+(`hotbed-proxy`) whose `apiKey` is the sandboxes' minted key — edit the global
+config at `~/.config/hotbedd/config.json` (`hotbedd config edit` searches for open
+editors, `hotbedd config set proxy.port 7775` etc.) and **running daemons pick
 it up without a restart** (stores are stateless file views; the proxy
 re-reads config on every request).
 
@@ -780,19 +780,19 @@ re-reads config on every request).
 
 On Docker Desktop engines the containers run in a separate utility VM whose
 sandboxes *cannot* reach the WSL distro's proxy listener on any route
-(distro IP, bridge gateway or `host.docker.internal`); sbxd fixes this
+(distro IP, bridge gateway or `host.docker.internal`); hotbedd fixes this
 instead of failing loudly:
 
 - the **first container sync** (or daemon boot) spawns the relay, a
   `--network host` container running this same binary in a dedicated
-  **`sbxd proxy`** (standalone, dashboard-less) mode, with the daemon's
-  config/keys/state dirs bind-mounted (sbx:base image or any local glibc
+  **`hotbedd proxy`** (standalone, dashboard-less) mode, with the daemon's
+  config/keys/state dirs bind-mounted (hotbed:base image or any local glibc
   base; `--restart unless-stopped`; host-uid — it is **not** labeled
-  `dev.sbx`, so it never shows in the inventory);
+  `dev.hotbed`, so it never shows in the inventory);
 - the relay name is **per state set** (`sbx-relay-<confighash>`,
-  overridable with `SBXD_RELAY_NAME`) — two sbxd processes (a real daemon
+  overridable with `HOTBEDD_RELAY_NAME`) — two hotbedd processes (a real daemon
   and a hermetic test suite) can run side by side without adopting or
-  destroying each other's relay; a pre-name-spacing `sbx-proxy-relay` is
+  destroying each other's relay; a pre-name-spacing `hotbed-proxy-relay` is
   migrated on first spawn (`relay.migrate` in the audit trail);
 - the sandbox then dials `http://<bridge-gateway>:<proxy-port>/v1`
   (typically `172.17.0.1:7775`) — reachable by construction;
@@ -805,13 +805,13 @@ instead of failing loudly:
   is restored on daemon boot;
 - `doctor` shows the relay line on Docker Desktop engines ("proxy relay: …
   (running at gw …)"), every declined/failed relay attempt is audited
-  (`relay.skip` with the reason), and `SBXD_RELAY_DISABLE=1` turns the
+  (`relay.skip` with the reason), and `HOTBEDD_RELAY_DISABLE=1` turns the
   feature off (non-Docker-Desktop engines never spawn it: native dockerd,
   bridge-mode WSL setups and VM sandboxes have host-reachable routes
   already).
 
 The sweeper only ever stops idle sandboxes its own daemon spawned: kit
-containers carry a `dev.sbx.owner` label (stable hash of the spawning
+containers carry a `dev.hotbed.owner` label (stable hash of the spawning
 daemon's config dir) and foreign-owned sandboxes are skipped — a hermetic
 test daemon can never idle-stop the user's real sandboxes.
 
@@ -819,11 +819,11 @@ What lives where (all local, all `chmod 600`, env-overridable for tests):
 
 | Path (default) | Contents |
 |---|---|
-| `~/.config/sbxd/config.json` | providers (base_url + **upstream key**), default model, proxy port/bind, `prices` overrides |
-| `~/.local/share/sbxd/keys.json` | per-sandbox `sbxk-…` tokens + per-sandbox budgets |
-| `~/.local/share/sbxd/synced/<name>.json` | what each sandbox was last synced with |
-| `~/.local/state/sbxd/usage.jsonl` | one line per proxied call: tokens in/out, cost, est flag, dur, status |
-| `~/.local/state/sbxd/tunnel-<name>.pid/.log` | the ssh -R tunnels keeping guest loopback on the proxy |
+| `~/.config/hotbedd/config.json` | providers (base_url + **upstream key**), default model, proxy port/bind, `prices` overrides |
+| `~/.local/share/hotbedd/keys.json` | per-sandbox `hbk-…` tokens + per-sandbox budgets |
+| `~/.local/share/hotbedd/synced/<name>.json` | what each sandbox was last synced with |
+| `~/.local/state/hotbedd/usage.jsonl` | one line per proxied call: tokens in/out, cost, est flag, dur, status |
+| `~/.local/state/hotbedd/tunnel-<name>.pid/.log` | the ssh -R tunnels keeping guest loopback on the proxy |
 
 Accounting rules: upstream usage wins when reported (OpenAI final chunk /
 non-stream `usage`, Anthropic `message_start`/`message_delta`); otherwise
@@ -837,16 +837,16 @@ Budgets are wallets per sandbox *name*: the proxy checks `today ≥ budget`
 revoked key or an empty wallet stops the spend instantly even mid-session.
 
 **Reachability** — how sandboxes find the proxy (base_url written into their
-opencode config; sbxd verifies it actually answers before):
+opencode config; hotbedd verifies it actually answers before):
 
 | Sandbox kind | Path | base_url |
 |---|---|---|
-| VMs (sbxvmd, libvirt, docker-in-docker) | persistent `ssh -R` tunnel, kept alive by sbxd (pid/log in state dir) | `http://127.0.0.1:7775/v1` |
+| VMs (hotbedvmd, libvirt, docker-in-docker) | persistent `ssh -R` tunnel, kept alive by hotbedd (pid/log in state dir) | `http://127.0.0.1:7775/v1` |
 | Containers (probed in order) | WSL eth0 IP → `host.docker.internal` | first that answers |
-| nothing answers | sync reports the failure + how to fix (e.g. kit `SBX_NET=host`) | — |
+| nothing answers | sync reports the failure + how to fix (e.g. kit `HBD_NET=host`) | — |
 
 The tunnel belongs to the daemon: it respawns automatically if ssh drops or
-sbxd restarts. Note on Docker-Desktop WSL setups: containers cannot reach
+hotbedd restarts. Note on Docker-Desktop WSL setups: containers cannot reach
 WSL-side ports directly (they run in a separate VM), so VMs always go through
 their ssh tunnel and plain containers either reach the probed route or tell
 you what to change at creation time.
@@ -854,11 +854,11 @@ you what to change at creation time.
 New CLI verbs (all file-backed — work with or without the daemon):
 
 ```bash
-./bin/sbxd config init|print|get|set|path|edit
-./bin/sbxd usage [NAME]      # global per-sandbox table, or a full drill-down
-./bin/sbxd key mint|ls|revoke NAME
-./bin/sbxd budget NAME [USD] # show or set; proxy trips 429 when dry
-./bin/sbxd sync NAME|all [--provider P]
+./bin/hotbedd config init|print|get|set|path|edit
+./bin/hotbedd usage [NAME]      # global per-sandbox table, or a full drill-down
+./bin/hotbedd key mint|ls|revoke NAME
+./bin/hotbedd budget NAME [USD] # show or set; proxy trips 429 when dry
+./bin/hotbedd sync NAME|all [--provider P]
 ```
 
 New dashboard surfaces: a per-sandbox **Burn** tab (tokens, calls, est
@@ -884,11 +884,11 @@ history too). Purge and pin changes are audit-logged (`ledger.purge`,
 
 **Counted vs uncounted.** The proxy and ledger always count what reaches
 them; a sandbox shows zero rows only when its opencode bypasses the proxy.
-Every request must carry both (a) the synced proxy config (`sbxd sync
-NAME` writes a `sbx-proxy` provider with the sandbox's own key) and (b)
+Every request must carry both (a) the synced proxy config (`hotbedd sync
+NAME` writes a `hotbed-proxy` provider with the sandbox's own key) and (b)
 the attach-time `XDG_CONFIG_HOME` override that makes opencode read it.
 Attach, the one-shot connection variants, Windows Terminal and the kit's
-own `sbx shell|opencode|exec` all inject the override for containers; VM
+own `hbd shell|opencode|exec` all inject the override for containers; VM
 guests get the config written directly and a persistent ssh tunnel. If a
 session predates a later sync, its next attach respawns the (bare) shell
 pane automatically so the env lands - a running opencode TUI is never
@@ -896,11 +896,11 @@ respawned; close it and re-attach once to switch to counted mode.
 
 ### P3 — recipes, config-file budgets, mounts, egress, sweeper, audit, create wizard
 
-P3 turns sbxd from observer into **operator**: everything the kit used to
-only do through `bin/sbx` becomes declarative and daemon-managed, with an
+P3 turns hotbedd from observer into **operator**: everything the kit used to
+only do through `bin/hbd` becomes declarative and daemon-managed, with an
 audit trail for the control plane.
 
-**Everything settable, lives in `config.json`** (`sbxd config edit`):
+**Everything settable, lives in `config.json`** (`hotbedd config edit`):
 constant wallets are no longer per-invocation flags but configuration, plus
 token pricing for honest burn math:
 
@@ -918,24 +918,24 @@ token pricing for honest burn math:
     "claude-sonnet-4":   [3, 15],
     "openai/completions/": [0.15, 0.6] // "prefix/" matches all models underneath
   },
-  "budgets":       { "myproj": 5, "sbx-side-tests": 0 },    // USD wallets
-  "budget_tokens": { "myproj": 250000, "sbx-side-tests": 0 }, // token wallets
+  "budgets":       { "myproj": 5, "hotbed-side-tests": 0 },    // USD wallets
+  "budget_tokens": { "myproj": 250000, "hotbed-side-tests": 0 }, // token wallets
   "sweeper":       { "idle_stop_minutes": 45 }   // auto-stop dead sandboxes
 }
 ```
 
-`sbxd budgets` shows every wallet against actual burn; `sbxd config set
+`hotbedd budgets` shows every wallet against actual burn; `hotbedd config set
 sweeper.idle_stop_minutes N` re-reads live — no restart. The **sweeper**
 (daemon goroutine, samples every 30s) stops kit-labeled sandboxes whose CPU
-stayed under 1% for the configured window (VM-backed `sbxvmd-*` containers
-are always spared); reversible with `sbxd start NAME`; every stop lands in
+stayed under 1% for the configured window (VM-backed `hotbedvmd-*` containers
+are always spared); reversible with `hotbedd start NAME`; every stop lands in
 the audit trail.
 
-**Recipes — declarative sandboxes** (`sbx.yaml` next to your project):
+**Recipes — declarative sandboxes** (`hbd.yaml` next to your project):
 
 ```yaml
-name: myproj          # container becomes sbx-myproj
-stack: go             # needs the kit image once: bin/sbx build go
+name: myproj          # container becomes hotbed-myproj
+stack: go             # needs the kit image once: bin/hbd build go
 mounts:
   - ~/projects/core:/workspace/core   # ~ expands; ":ro" suffix keeps it read-only
   - /var/data/cache:/cache:ro
@@ -945,40 +945,40 @@ ports: ["8080:8080"]  # published for real at container create
 budget: 5             # USD wallet
 budget_tokens: 250000
 egress: proxy-only    # config-time fence, see below
-sync: true            # opencode → sbx proxy wiring after spawn
+sync: true            # opencode → hbd proxy wiring after spawn
 attach: --oc          # extra flags for the suggested attach command
 ```
 
 ```bash
-./bin/sbxd recipe print sbx.yaml     # honest plan of the exact spawn
-./bin/sbxd recipe validate sbx.yaml  # checks: name/stack/dup targets/egress/budgets
-./bin/sbxd recipe up sbx.yaml [--yes]  # create+start → wallets → egress → sync
+./bin/hotbedd recipe print hbd.yaml     # honest plan of the exact spawn
+./bin/hotbedd recipe validate hbd.yaml  # checks: name/stack/dup targets/egress/budgets
+./bin/hotbedd recipe up hbd.yaml [--yes]  # create+start → wallets → egress → sync
 ```
 
-`recipe up` recreates the kit's container contract faithfully (dev.sbx
+`recipe up` recreates the kit's container contract faithfully (dev.hotbed
 labels, opencode auth mounts, git/ssh identity read-only, per-stack package
-cache volume, restart policy) — so `bin/sbx attach sbx-myproj` works
+cache volume, restart policy) — so `bin/hbd attach hotbed-myproj` works
 unchanged. Duplicate names are refused; non-interactive runs need `--yes`.
 
-**Mounts after the fact** (`sbxd mount`): `mount ls NAME` / `mount add NAME
+**Mounts after the fact** (`hotbedd mount`): `mount ls NAME` / `mount add NAME
 /h:/x[:ro] --yes` / `mount rm NAME /x --yes`. Docker bakes volumes at
 creation, so add/rm does a guarded recreate (same image, same flags,
 original mounts carried, state in named volumes/paths keeps) and skipping
-`--yes` in a non-TTY means "do nothing". VM-backed `sbxvmd-*` containers
+`--yes` in a non-TTY means "do nothing". VM-backed `hotbedvmd-*` containers
 refuse live recreation with an explanation.
 
 **Egress presets** — a convenience fence (not a security boundary):
-`sbxd egress NAME proxy-only` fences public addresses out of the sandbox
-netns (iptables OUTPUT chain SBX_EGRESS; loopback, established flows, RFC1918
-and DNS stay open) so LLM traffic must ride the sbx proxy on the host.
-`sbxd egress NAME none` keeps only loopback+established; `allow` resets to
+`hotbedd egress NAME proxy-only` fences public addresses out of the sandbox
+netns (iptables OUTPUT chain HBD_EGRESS; loopback, established flows, RFC1918
+and DNS stay open) so LLM traffic must ride the hbd proxy on the host.
+`hotbedd egress NAME none` keeps only loopback+established; `allow` resets to
 the Docker default. Needs no restart: rules live in the netns, so re-apply
 after any recreate. Containers that already run iptables get it via plain
-exec; everything else uses a tiny auto-built helper image (`sbxd-egress-helper:1`, built once on first use).
+exec; everything else uses a tiny auto-built helper image (`hotbedd-egress-helper:1`, built once on first use).
 
 **Audit trail** — `state/audit.jsonl` records the control plane: sandbox
 start/stop/spawn, key mint/revoke, wallet changes, mount recreates, egress
-changes, sweeper stops. `sbxd audit [N]` renders the last N as a table.
+changes, sweeper stops. `hotbedd audit [N]` renders the last N as a table.
 Best-effort by design: a failed audit write never blocks the action.
 
 **Create wizard** — sidebar `＋ New sandbox` on the dashboard (identical
@@ -993,13 +993,13 @@ loopback-only dashboard, traversal outside home is rejected).
 ### House rules & security posture (P2 included)
 
 
-- Dashboard binds loopback by default (`127.0.0.1`, `--bind`/`SBXD_BIND`
+- Dashboard binds loopback by default (`127.0.0.1`, `--bind`/`HOTBEDD_BIND`
   is explicit opt-in for network reachability), never touches
-  `~/.ssh/sbxvm_key`, never falls back to a TCG-only engine.
+  `~/.ssh/hotbedvm_key`, never falls back to a TCG-only engine.
 - The proxy **must** be reachable from sandboxes, so it binds `0.0.0.0:7775`
-  — the rest is gated: every request needs a minted, non-revoked `sbxk-…`
+  — the rest is gated: every request needs a minted, non-revoked `hbk-…`
   key (401 otherwise), wallets can return 429, and config/keys files are
-  `0600`. Upstream provider keys live only in sbxd's config file and are
+  `0600`. Upstream provider keys live only in hotbedd's config file and are
   rewritten into the outbound request server-side.
 - A synced sandbox config is written into a *shared-write* path the kit
   already mounts for VMs, or a container-only XDG shim path — never over a
@@ -1007,7 +1007,7 @@ loopback-only dashboard, traversal outside home is rejected).
 
 #### Not on the roadmap by design
 
-Two "obvious" desktop-type features are deliberately not part of SBX
+Two "obvious" desktop-type features are deliberately not part of HBD
 Desktop, recorded here so the positioning is explicit:
 
 - **Shared-host user/permission concept** — deliberately not by default.
@@ -1016,7 +1016,7 @@ Desktop, recorded here so the positioning is explicit:
   namespace with list filtering, per-user proxy wallets and burn ledgers,
   and host folder mounts disabled outright (a shared folder is the first
   cross-user leak). Anything less is a false sense of multi-user safety.
-- **Hosted server-mode** (SBX Desktop as SaaS for teams) is rejected as
+- **Hosted server-mode** (Hotbed as SaaS for teams) is rejected as
   native multi-tenancy — that is Gitpod/Codespaces territory, not a
   desktop tool's. The sensible middle path if remote use is wanted:
   *remote-daemon mode* — keep the single-tenant daemon, point a local UI/CLI
@@ -1031,18 +1031,18 @@ Desktop, recorded here so the positioning is explicit:
   burn/cost ledger, budget ceilings, SSE-aware token counting — plus the
   global OpenCode settings file pushed into sandboxes, with verified
   reachability paths per sandbox kind (ssh tunnel for VMs, probe for containers).
-- **P3 (shipped)**: recipes (`sbx.yaml` print/validate/up), wallets + token
+- **P3 (shipped)**: recipes (`hbd.yaml` print/validate/up), wallets + token
   pricing + sweeper knob in `config.json`, mounts after creation (guarded
   recreate), egress presets (iptables in the sandbox netns with helper
-  fallback), end-to-end control-plane audit trail + `sbxd audit`, the
+  fallback), end-to-end control-plane audit trail + `hotbedd audit`, the
   dashboard create wizard (POST `/api/create`) and tokens in the burn view.
-  The create wizard now covers **all three vessels**: `container` (sbx) and
+  The create wizard now covers **all three vessels**: `container` (hbd) and
   both VM kinds (`vm` + `vm_backend: libvirt|docker`) — kind radios, VM
   sizing (vCPU/MEM/disk/optional 9p share dir), backend auto-picked by
   engine reachability, and duplicate/charset validation matching the kit's
-  own rules (`sbxvm.sh create` runs underneath, so provisioning semantics
+  own rules (`hotbedvm.sh create` runs underneath, so provisioning semantics
   are identical to the CLI). Start/Stop/Delete in the dashboard and CLI
-  (`sbxd start|stop|rm NAME`) already span all three kinds.
+  (`hotbedd start|stop|rm NAME`) already span all three kinds.
 
 - **VM boot self-registration**: the kit signals the daemon when a guest
   boot starts (`POST /api/vm/boot {"name":…,"phase":"begin"}`) and again
@@ -1050,7 +1050,7 @@ Desktop, recorded here so the positioning is explicit:
   `"phase":"end"`). Between the two signals the dashboard shows an amber
   **booting** state instead of the engine's premature `running`, attach is
   politely refused with a hint, and endpoint security is the daemon's own:
-  loopback-by-default listener (remote exposure is an explicit `SBXD_BIND`
+  loopback-by-default listener (remote exposure is an explicit `HOTBEDD_BIND`
   opt-in) + CSRF origin guard (the kit's curl has no Origin
   header, i.e. a native client). A begin that never gets its end expires
   after ~30 minutes (`boot_pending.json` in the state dir, survives daemon
@@ -1070,9 +1070,9 @@ Desktop, recorded here so the positioning is explicit:
   (Debian `trixie-slim`: git, curl, jq, ripgrep, build-essential, python3,
   pip-csafety override, `git safe.directory '*'`, opencode fallback) and one
   minimal per-stack target (`node`, `python`, `go`, `rust`, `base`).
-- The image bakes user `sbx` (uid 1000); at **runtime** the entrypoint
+- The image bakes user `hbd` (uid 1000); at **runtime** the entrypoint
   (`containers/entrypoint.sh`) creates/adjusts a user matching your *actual*
-  host uid (`SBX_UID`/`SBX_GID`), grants passwordless sudo, fixes ownership
+  host uid (`HBD_UID`/`HBD_GID`), grants passwordless sudo, fixes ownership
   of `$HOME`/cargo registry if stale (only when needed), then `setpriv`s to
   your uid and execs the command. Persistent mode (no command) execs
   `sleep infinity` so you attach/detach at will.
@@ -1082,7 +1082,7 @@ Desktop, recorded here so the positioning is explicit:
 
 - **Master image**: official `debian-13-genericcloud-amd64.qcow2`
   (cloud.debian.org, trixie). `fetch-image` → downloads → **patches** → puts
-  a `.sbxvm-patched` marker next to it, so patching is idempotent and
+  a `.hotbedvm-patched` marker next to it, so patching is idempotent and
   re-download safe. The patch (applied offline with `debugfs`, no booting):
   - strips every GRUB `load_video` call from `/boot/grub/grub.cfg`, and
   - writes `GRUB_GFXPAYLOAD_LINUX=text` and
@@ -1102,7 +1102,7 @@ Desktop, recorded here so the positioning is explicit:
   live inside the overlay's qcow2 metadata.
 - **Networking**: libvirt `default` NAT network (`virbr0`,
   `192.168.122.0/24`) — the VM reaches the internet through your host;
-  the host talks to the VM via SSH (`sbxvm ip` reads the dhcp lease).
+  the host talks to the VM via SSH (`hotbedvm ip` reads the dhcp lease).
 - **9p share**: `--filesystem type=mount,…,target=hostshare` +
   accessmode `mapped`. Guest side mounts it with a systemd `.mount` unit
   (`options=trans=virtio,version=9p2000.L`; requested `msize=104857600`
@@ -1116,10 +1116,10 @@ Desktop, recorded here so the positioning is explicit:
 These recipes were hard-won — they live here so you don't have to rediscover
 them:
 
-**Capture the serial console** (what `sbxvm console` needs a TTY for):
+**Capture the serial console** (what `hotbedvm console` needs a TTY for):
 
 ```bash
-PTY=$(virsh --connect qemu:///system ttyconsole sbxvm-<name>)
+PTY=$(virsh --connect qemu:///system ttyconsole hotbedvm-<name>)
 timeout 8 cat "$PTY"          # read
 printf '\n' > "$PTY"          # press Enter, if you must talk to a getty
 ```
@@ -1128,7 +1128,7 @@ printf '\n' > "$PTY"          # press Enter, if you must talk to a getty
 the master image lost its patch. Check & re-patch:
 
 ```bash
-ls vm/images/*.sbxvm-patched || sbxvm fetch-image   # re-fetch (auto-patches)
+ls vm/images/*.hotbedvm-patched || hotbedvm fetch-image   # re-fetch (auto-patches)
 # boot shape (outside libvirt, in vm/.work — NOT /tmp, it's a RAM tmpfs):
 mkdir -p vm/.work && cd vm/.work
 qemu-img convert -O raw ../images/debian-13-genericcloud-amd64.qcow2 v.raw
@@ -1136,7 +1136,7 @@ S=$(fdisk -l v.raw | awk '/Linux root/ {print $2; exit}')   # rootfs sector
 dd if=v.raw of=v.ext4 bs=512 skip=$S status=none
 G=$(debugfs -R "cat /boot/grub/grub.cfg" v.ext4 2>/dev/null)
 echo "$G" | grep -cE '^[[:space:]]*load_video[[:space:]]*$'    # want: 0 (unpatched: 4)
-echo "$G" | grep -c  'disabled by sbxvm'                       # want: 4 (the strips)
+echo "$G" | grep -c  'disabled by hotbedvm'                       # want: 4 (the strips)
 debugfs -R "cat /etc/default/grub" v.ext4 | grep -E 'GRUB_(GFXPAYLOAD|TERMINAL)'
 # expect: GRUB_GFXPAYLOAD_LINUX=text / GRUB_TERMINAL_OUTPUT="console serial"
 ```
@@ -1153,7 +1153,7 @@ grep -ac 'Booting' serial.log        # counts reset loops
 -chardev file,id=biosdbg,path=bios.log -device isa-debugcon,iobase=0x402,chardev=biosdbg
 ```
 
-**"ssh did not come up"**: check `sbxvm ls` for the lease IP, and the serial
+**"ssh did not come up"**: check `hotbedvm ls` for the lease IP, and the serial
 for cloud-init progress. First-boot provisioning needs ~60–90 s at fastest.
 
 **tmpfs trap:** `/tmp` in WSL2 setups is a *RAM-backed* tmpfs. Multi-GB
@@ -1167,7 +1167,7 @@ newer CLI in `$PATH` → weird `409`s; both are Desktop-side settings, see
 (SYNs arrive, no SYN-ACKs leave the guest): the guest's `docker0` took
 `172.17.0.1/16`, which collides with Docker Desktop's publisher source IP.
 The seed's `/etc/docker/daemon.json` `bip` fix exists for exactly this — see
-[the docker backend](#the-docker-backend-sbxvmd).
+[the docker backend](#the-docker-backend-hotbedvmd).
 
 ---
 
@@ -1177,7 +1177,7 @@ The seed's `/etc/docker/daemon.json` `bip` fix exists for exactly this — see
 tests/smoke.sh      # container sandboxes — stacks, mounts, fresh runs, rm/prune
 tests/vmsmoke.sh    # VMs (libvirt backend) — boots a real throwaway VM
 tests/vmdsmoke.sh   # VMs (docker backend) — boots a VM inside a container
-tests/sbxddsmoke.sh # SBX Desktop suite — the comprehensive gate (see below)
+tests/hotbedddsmoke.sh # Hotbed suite — the comprehensive gate (see below)
 ```
 
 Every suite prints its own tally (`== result: N passed, 0 failed ==`); the
@@ -1189,10 +1189,10 @@ P1 section — the invocation dance is documented in `docs/RELEASING.md` §4.
 `pyproject.toml` → python, `go.mod` → go, `Cargo.toml` → rust, empty → base),
 one smoke-sandbox per stack with its toolchain running (node+npm, python+uv,
 go, rust), fresh runs leave nothing behind, container-written files are
-host-user owned, exec/status/reattach/exit-code propagation, `sbx opencode`
+host-user owned, exec/status/reattach/exit-code propagation, `hbd opencode`
 works, `rm`/`ls` bookkeeping, `prune`, `caches ls`.
 
-`vmsmoke.sh`: creates a real throwaway VM (`sbxvmsmoke-<epoch>`) with a
+`vmsmoke.sh`: creates a real throwaway VM (`hotbedvmsmoke-<epoch>`) with a
 mktemp share and exercises the whole loop — master + libvirt present,
 create+ssh, user/sudo, 9p host→guest and guest→host, opencode in VM, docker
 service, snapshot save → rogue-writes → revert → restart → file resurrected,
@@ -1203,15 +1203,15 @@ The reset-loop / boot investigation also produced a one-line live test
 embedded in vmsmoke: if a fresh VM can't ssh, it prints the serial log path.
 
 `vmdsmoke.sh`: the same loop against the docker backend (the suite presets
-`SBXVM_BACKEND=docker`) — creates `sbxvmdsmoke-<epoch>`, a VM that is itself
+`HOTBEDVM_BACKEND=docker`) — creates `hotbedvmdsmoke-<epoch>`, a VM that is itself
 a Docker container, then checks ssh/sudo, 9p host→guest and guest→host,
 opencode, full kernel, **a real `docker run --rm hello-world` inside the VM**
 (the check that dies first if the guest-bridge collision ever returns),
 snapshot save → rogue-write → revert → restart → file resurrected, then
 destroy + vm dir + container-undefined checks.
 
-`sbxddsmoke.sh`: spins the daemon on a scratch port (7790, auto-stopped
-again) and verifies the SBX Desktop surface — health probes, unified `ps`,
+`hotbedddsmoke.sh`: spins the daemon on a scratch port (7790, auto-stopped
+again) and verifies the Hotbed surface — health probes, unified `ps`,
 `stats` with CPU/MEM, all `connect` variants (primary copy-connection first),
 the persistent tmux attach lifecycle (rolled → alive → live shell in pane →
 cleaned up), instant SSE snapshot, serial-log frames, dashboard assets and
@@ -1227,17 +1227,17 @@ needs at least one *running* sandbox in the inventory for the P1 part.
 ## File map
 
 ```text
-bin/sbx                    container sandbox CLI (the daily driver)
-bin/sbxvm → vm/sbxvm.sh    VM CLI (symlinked by install-self)
+bin/hbd                    container sandbox CLI (the daily driver)
+bin/hotbedvm → vm/hotbedvm.sh    VM CLI (symlinked by install-self)
 containers/Dockerfile      5 stack images from one shared base layer
 containers/entrypoint.sh   runtime uid/sudo/ownership bootstrap
 tests/smoke.sh             container suite (all stacks; no VMs needed)
 tests/vmsmoke.sh           VM suite (libvirt; boots a real throwaway VM)
 tests/vmdsmoke.sh          VM suite (docker backend; VM = container)
-tests/sbxddsmoke.sh        SBX Desktop suite — comprehensive gate (P1+P2+P3)
-sbxd/                      SBX Desktop: Go daemon + dashboard + docker-style CLI
+tests/hotbedddsmoke.sh        Hotbed suite — comprehensive gate (P1+P2+P3)
+hotbed/                      Hotbed: Go daemon + dashboard + docker-style CLI
 SECURITY.md                full security survey: fixed findings + accepted risks
-  cmd/sbxd/                entrypoint (main.go)
+  cmd/hotbed/                entrypoint (main.go)
   internal/engine/         docker/virsh/kit-CLI wrappers, file tail
   internal/sandbox/        unified entity + cross-runtime collector
   internal/attach/         tmux sessions, ConnInfo, wt.exe launcher, ssh -R
@@ -1250,16 +1250,16 @@ SECURITY.md                full security survey: fixed findings + accepted risks
   internal/ledger/         usage journal, token/cost summaries, pricing
   internal/proxy/          LLM proxy: auth, budgets, usage-aware SSE pass
   internal/cfgsync/        per-sandbox opencode config generation + stale markers
-  internal/env/            shared constants, kit-root resolution, SBXD_* dirs
-  bin/sbxd                 built binary
-  desktop/                 thin Electron shell (see sbxd/desktop/README.md)
+  internal/env/            shared constants, kit-root resolution, HOTBEDD_* dirs
+  bin/hotbedd                 built binary
+  desktop/                 thin Electron shell (see hotbed/desktop/README.md)
 vm/images/
   debian-13-genericcloud-amd64.qcow2        patched master (shared by all VMs)
-  debian-13-genericcloud-amd64.qcow2.sbxvm-patched   idempotency marker
-vm/sbxvmd/                 docker backend runtime: Dockerfile + PID-1 `entry`
+  debian-13-genericcloud-amd64.qcow2.hotbedvm-patched   idempotency marker
+vm/hotbedvmd/                 docker backend runtime: Dockerfile + PID-1 `entry`
 vm/vms/<name>/             per-VM seed files (+ disk & serial on libvirt; the
                            docker backend keeps disk/serial in the
-                           `sbxvmd-store` volume, seeds here)
+                           `hotbedvmd-store` volume, seeds here)
 vm/.work/                  scratch convention for multi-GB disk work
                            (never /tmp — RAM-backed tmpfs)
 ```
@@ -1271,17 +1271,17 @@ vm/.work/                  scratch convention for multi-GB disk work
 - **Master image**: ~950 MB on disk (~3 GiB virtual), shared read-only by all VMs.
 - **Per VM**: overlay starts ≈ 200 KB and grows only with actual writes
   (sparse up to `--disk` size). Twenty-GB default means typical 2–3 GB usage.
-- Reclaim: `sbxvm destroy <name> --yes` (everything of that VM, incl.
-  snapshots), `sbx rm --yes` / `sbx prune --yes` (containers),
-  `sbx caches nuke --yes` (cache volumes), `docker rmi sbx:*`
+- Reclaim: `hotbedvm destroy <name> --yes` (everything of that VM, incl.
+  snapshots), `hbd rm --yes` / `hbd prune --yes` (containers),
+  `hbd caches nuke --yes` (cache volumes), `docker rmi hotbed:*`
   (images will rebuild on demand). To fully restore from zero:
   delete `vm/images/` and `vm/vms/`, then `fetch-image` again.
 - **Docker backend extra**: VM state lives in the named docker volume
-  `sbxvmd-store` (the ~950 MB master shared by all VMs + one
-  `/store/vms/<name>/` subdir per VM). `SBXVM_BACKEND=docker sbxvm destroy <name> --yes` removes the
-  container and that VM's store dir; the volume and the `sbxvmd:latest`
-  runtime image remain until you `docker volume rm sbxvmd-store` /
-  `docker rmi sbxvmd:latest` (the image is rebuilt automatically on the next
+  `hotbedvmd-store` (the ~950 MB master shared by all VMs + one
+  `/store/vms/<name>/` subdir per VM). `HOTBEDVM_BACKEND=docker hotbedvm destroy <name> --yes` removes the
+  container and that VM's store dir; the volume and the `hotbedvmd:latest`
+  runtime image remain until you `docker volume rm hotbedvmd-store` /
+  `docker rmi hotbedvmd:latest` (the image is rebuilt automatically on the next
   `create`). Housekeeping rule of thumb: `docker system df` shows the real
   picture when the engine also holds the sandbox images and caches.
 
@@ -1297,11 +1297,11 @@ This kit makes *misuse messes* cheap — it is not a malware containment cell.
 - The agent can read what has been deliberately mounted in: host opencode
   state/token, `~/.gitconfig`, `~/.ssh` (ro). A determined misbehaving agent
   could exfiltrate those. If that worries you for a given task:
-  `sbx --fresh --no-auth --no-ssh --net none` or a no-share `sbxvm create`.
-- **P2 reduces one of these surfaces**: after `sbxd sync NAME`, the sandbox's
-  opencode holds only its own `sbxk-…` proxy key (scoped to that sandbox,
+  `hbd --fresh --no-auth --no-ssh --net none` or a no-share `hotbedvm create`.
+- **P2 reduces one of these surfaces**: after `hotbedd sync NAME`, the sandbox's
+  opencode holds only its own `hbk-…` proxy key (scoped to that sandbox,
   revocable, budget-capped). The upstream provider key stays in
-  `~/.config/sbxd/config.json` on the host and is rewritten server-side —
+  `~/.config/hotbedd/config.json` on the host and is rewritten server-side —
   it no longer has to ride along inside the sandbox at all.
 - The P2 proxy listener binds `0.0.0.0` *by design* (sandboxes must reach
   it). Its own gate: authentications via per-sandbox bearer keys, wallet
@@ -1317,7 +1317,7 @@ This kit makes *misuse messes* cheap — it is not a malware containment cell.
   installs is only as trustworthy as the apt/npm/pypi registries it pulls
   from — same as your other installs, just *not on your machine*.
 - Good for: "agent ate my node_modules / blew up globals / pip'd into
-  system" — none of it survives `sbx rm` or `sbxvm destroy`.
+  system" — none of it survives `hbd rm` or `hotbedvm destroy`.
   Not designed against: a malicious agent actively attacking the Docker or
   libvirt socket (root-equivalent), kernel-level container escapes, or
   piecing together your mounted credentials.
@@ -1325,14 +1325,14 @@ This kit makes *misuse messes* cheap — it is not a malware containment cell.
 ### Ship / distribution
 
 Source ships; the heavy Debian cloud master (~1 GB unpacked) is fetched at
-runtime with `sbxvm fetch-image` — that is why `vm/images/` is gitignored, and
+runtime with `hotbedvm fetch-image` — that is why `vm/images/` is gitignored, and
 per-VM seed ISOs are generated, not committed. Concretely:
 
 - **Install on a new host**: prerequisites + scripted walkthrough in
   [Install: step by step](#install-step-by-step) — `./install.sh` gates the
-  deps, installs `sbx` + `sbxd-serve`, and offers the one-time image fetch.
+  deps, installs `hbd` + `hotbedd-serve`, and offers the one-time image fetch.
 - **Release artifacts**: `make release` builds version-stamped
-  `dist/sbxd-v<ver>-linux-{amd64,arm64}` + `SHA256SUMS` (Go toolchain only).
+  `dist/hotbedd-v<ver>-linux-{amd64,arm64}` + `SHA256SUMS` (Go toolchain only).
 - **Agents doing the release**: follow `docs/RELEASING.md` to the letter —
   it encodes the verified build/suite/git flow and the known pitfalls.
 

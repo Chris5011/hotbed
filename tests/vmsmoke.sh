@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# vmsmoke.sh — end-to-end verification of sbxvm (phase 2).
+# vmsmoke.sh — end-to-end verification of hotbedvm (phase 2).
 # Creates a temporary VM, checks ssh/9p/opencode/snapshot/revert, destroys it.
 # Takes several minutes (VM boot + first cloud-init run). Run:  tests/vmsmoke.sh
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SBXVM="$ROOT/vm/sbxvm.sh"
-VMNAME="sbxvmsmoke-$(date +%s | tail -c 5)"
-SHARE="$(mktemp -d /tmp/opencode/sbxvmsmoke.XXXXXX)"
+SBXVM="$ROOT/vm/hotbedvm.sh"
+VMNAME="hotbedvmsmoke-$(date +%s | tail -c 5)"
+SHARE="$(mktemp -d /tmp/opencode/hotbedvmsmoke.XXXXXX)"
 PASS=0; FAIL=0
 
 pass() { printf '  \e[32m✔\e[0m %s\n' "$1"; PASS=$((PASS + 1)); }
@@ -21,7 +21,7 @@ cleanup() {
 trap cleanup EXIT
 
 hdr "runtime"
-if [[ -f "$ROOT/vm/images/debian-13-genericcloud-amd64.qcow2" ]]; then pass "master image present"; else fail "master image (run sbxvm fetch-image)"; fi
+if [[ -f "$ROOT/vm/images/debian-13-genericcloud-amd64.qcow2" ]]; then pass "master image present"; else fail "master image (run hotbedvm fetch-image)"; fi
 "$SBXVM" ls >/dev/null 2>&1 && pass "libvirt reachable" || fail "libvirt reachable"
 
 hdr "create + boot ($VMNAME)"

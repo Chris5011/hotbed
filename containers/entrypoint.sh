@@ -1,8 +1,8 @@
 #!/bin/bash
-# sbx-entry — entrypoint for OpenCode-SBX sandboxes.
+# hotbed-entry — entrypoint for hotbed sandboxes.
 #
 # Runs as root at container start and prepares the environment for the
-# runtime user (SBX_UID/SBX_GID, normally the host user's ids so that files
+# runtime user (HBD_UID/HBD_GID, normally the host user's ids so that files
 # created in bind-mounted dirs have sane host ownership):
 #
 #   1. ensure a passwd/group entry exists for the runtime uid/gid
@@ -14,30 +14,30 @@
 # with e.g. `bash` it execs an interactive shell (ephemeral --fresh mode).
 set -u
 
-SBX_UID="${SBX_UID:-1000}"
-SBX_GID="${SBX_GID:-1000}"
-HOME_DIR="/home/sbx"
+HBD_UID="${HBD_UID:-1000}"
+HBD_GID="${HBD_GID:-1000}"
+HOME_DIR="/home/hbd"
 
-log() { printf '[sbx-init] %s\n' "$*" >&2; }
+log() { printf '[hotbed-init] %s\n' "$*" >&2; }
 
 # --- 1. user/group existence ------------------------------------------------
-GROUP_NAME="$(getent group "$SBX_GID" | cut -d: -f1)"
+GROUP_NAME="$(getent group "$HBD_GID" | cut -d: -f1)"
 if [ -z "$GROUP_NAME" ]; then
-    GROUP_NAME="sbx-g$SBX_GID"
-    groupadd -g "$SBX_GID" "$GROUP_NAME"
-    log "created group $GROUP_NAME ($SBX_GID)"
+    GROUP_NAME="hotbed-g$HBD_GID"
+    groupadd -g "$HBD_GID" "$GROUP_NAME"
+    log "created group $GROUP_NAME ($HBD_GID)"
 fi
 
-USER_NAME="$(getent passwd "$SBX_UID" | cut -d: -f1)"
+USER_NAME="$(getent passwd "$HBD_UID" | cut -d: -f1)"
 if [ -z "$USER_NAME" ]; then
-    USER_NAME="sbx-u$SBX_UID"
-    useradd -M -d "$HOME_DIR" -g "$GROUP_NAME" -u "$SBX_UID" -s /bin/bash "$USER_NAME"
-    log "created user $USER_NAME ($SBX_UID)"
+    USER_NAME="hotbed-u$HBD_UID"
+    useradd -M -d "$HOME_DIR" -g "$GROUP_NAME" -u "$HBD_UID" -s /bin/bash "$USER_NAME"
+    log "created user $USER_NAME ($HBD_UID)"
 fi
 
 # --- 2. passwordless sudo (container-local only) ----------------------------
-if [ "$SBX_UID" != "0" ]; then
-    SUDOERS="/etc/sudoers.d/sbx-u$SBX_UID"
+if [ "$HBD_UID" != "0" ]; then
+    SUDOERS="/etc/sudoers.d/hotbed-u$HBD_UID"
     if [ ! -f "$SUDOERS" ]; then
         printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$USER_NAME" > "$SUDOERS"
         chmod 0440 "$SUDOERS"
@@ -48,9 +48,9 @@ fi
 own_path() {
     local p="$1" stale
     [ -e "$p" ] || return 0
-    stale="$(find "$p" \! \( -user "$SBX_UID" -a -group "$SBX_GID" \) -print -quit 2>/dev/null)"
+    stale="$(find "$p" \! \( -user "$HBD_UID" -a -group "$HBD_GID" \) -print -quit 2>/dev/null)"
     if [ -n "$stale" ]; then
-        chown -R "$SBX_UID:$SBX_GID" "$p" 2>/dev/null || true
+        chown -R "$HBD_UID:$HBD_GID" "$p" 2>/dev/null || true
         log "fixed ownership on $p"
     fi
 }
@@ -63,7 +63,7 @@ export USER="$USER_NAME"
 export LOGNAME="$USER_NAME"
 
 if [ "$#" -eq 0 ]; then
-    exec setpriv --reuid="$SBX_UID" --regid="$SBX_GID" --init-groups sleep infinity
+    exec setpriv --reuid="$HBD_UID" --regid="$HBD_GID" --init-groups sleep infinity
 else
-    exec setpriv --reuid="$SBX_UID" --regid="$SBX_GID" --init-groups "$@"
+    exec setpriv --reuid="$HBD_UID" --regid="$HBD_GID" --init-groups "$@"
 fi

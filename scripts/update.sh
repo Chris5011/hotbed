@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# scripts/update.sh -- self-update a deployed OpenCode-SBX kit tree.
+# scripts/update.sh -- self-update a deployed hotbed kit tree.
 #
 #   scripts/update.sh              # latest release + latest tree, keep daemon running
 #   scripts/update.sh --yes        # also restart the resident daemon afterwards
-#   scripts/update.sh --yes --tls  # restart AND flip SBXD_TLS (https) in the same shot
+#   scripts/update.sh --yes --tls  # restart AND flip HOTBEDD_TLS (https) in the same shot
 #   scripts/update.sh v0.2.5       # pin a tag
 #
 # Order matters: tree first (gh via git the repo is auth'd with), then the
@@ -44,7 +44,7 @@ fail() { printf '\033[31;1mupdate:\033[0m %s\n' "$*" >&2; exit 1; }
 
 command -v gh >/dev/null 2>&1 || fail "gh CLI required (gh auth login once)"
 command -v git >/dev/null 2>&1 || fail "git required"
-[[ -f vm/sbxvm.sh && -f bin/sbx && -d sbxd ]] || fail "run from the kit tree"
+[[ -f vm/hotbedvm.sh && -f bin/hbd && -d hotbedd ]] || fail "run from the kit tree"
 
 # ---- arch + latest release ----------------------------------------------------
 case "$(uname -m)" in
@@ -67,7 +67,7 @@ if git merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
         <(git ls-files --others --exclude-standard 2>/dev/null | sort))"
     aside=""
     if [[ -n "$colliders" ]]; then
-        aside="$(mktemp -d "${TMPDIR:-/tmp}/sbxd-update-aside.XXXXXX")"
+        aside="$(mktemp -d "${TMPDIR:-/tmp}/hotbedd-update-aside.XXXXXX")"
         warn "untracked files collide with incoming tree changes -- moving them aside for the merge:"
         while IFS= read -r f; do
             [[ -n "$f" ]] || continue
@@ -121,21 +121,21 @@ git rev-parse -q --verify "refs/tags/$TAG" >/dev/null \
 
 # ---- release asset for the daemon binary ---------------------------------------
 mkdir -p dist
-rm -f "dist/sbxd-$TAG-linux-$KA" "dist/SHA256SUMS"
-say "downloading release asset (sbxd-$TAG-linux-$KA + SHA256SUMS)..."
+rm -f "dist/hotbedd-$TAG-linux-$KA" "dist/SHA256SUMS"
+say "downloading release asset (hotbedd-$TAG-linux-$KA + SHA256SUMS)..."
 gh release download "$TAG" --repo "$(gh repo view --json nameWithOwner --jq .nameWithOwner)" \
-    --pattern "sbxd-$TAG-linux-$KA" --pattern SHA256SUMS --dir dist --clobber
+    --pattern "hotbedd-$TAG-linux-$KA" --pattern SHA256SUMS --dir dist --clobber
 ( cd dist && sha256sum -c SHA256SUMS --ignore-missing ) >/dev/null 2>&1 \
     || fail "SHA256SUMS verification failed -- refusing to install the binary"
-install -m 755 "dist/sbxd-$TAG-linux-$KA" sbxd/bin/sbxd
-say "daemon binary installed: sbxd/bin/sbxd <- dist/sbxd-$TAG-linux-$KA"
+install -m 755 "dist/hotbedd-$TAG-linux-$KA" hotbed/bin/hotbedd
+say "daemon binary installed: hotbed/bin/hotbedd <- dist/hotbedd-$TAG-linux-$KA"
 
 # ---- prereqs, wrappers, base image pre-build -----------------------------------
 ./install.sh --yes
 
 # ---- optional daemon restart (bind + TLS preserved via honest detection) ---------
 # lsn prints "<addr>:<port> <pid>" for the given port's listener; the pid rides
-# INSIDE ss's users:(("sbxd",pid=N,...)) token, so match() it anywhere in the
+# INSIDE ss's users:(("hotbedd",pid=N,...)) token, so match() it anywhere in the
 # tail fields -- a naive grep for "0.0.0.0:7770 twice on one line" never matches
 # and always misread the real bind.
 lsn() {
@@ -161,7 +161,7 @@ if [[ $YES -eq 1 ]]; then
     esac
     OLD_TLS=0
     if [[ -n "$OLD_PID" && -r "/proc/$OLD_PID/environ" ]] \
-        && tr '\0' '\n' <"/proc/$OLD_PID/environ" 2>/dev/null | grep -q '^SBXD_TLS=1$'; then
+        && tr '\0' '\n' <"/proc/$OLD_PID/environ" 2>/dev/null | grep -q '^HOTBEDD_TLS=1$'; then
         OLD_TLS=1
     fi
     TLS_RUN="$OLD_TLS"
@@ -169,12 +169,12 @@ if [[ $YES -eq 1 ]]; then
         TLS_RUN=1
         say "TLS: requested via --tls flag"
     elif [[ $OLD_TLS -eq 1 ]]; then
-        say "TLS: preserving the old daemon's SBXD_TLS=1"
+        say "TLS: preserving the old daemon's HOTBEDD_TLS=1"
     fi
     if [[ -n "$OLD_PID" ]]; then
         TLSNOTE=""
-        if [[ $TLS_RUN -eq 1 ]]; then TLSNOTE=" SBXD_TLS=1"; fi
-        say "resident daemon: PID $OLD_PID on $OLD_ADDR -> restarting with SBXD_BIND=$BIND$TLSNOTE"
+        if [[ $TLS_RUN -eq 1 ]]; then TLSNOTE=" HOTBEDD_TLS=1"; fi
+        say "resident daemon: PID $OLD_PID on $OLD_ADDR -> restarting with HOTBEDD_BIND=$BIND$TLSNOTE"
     fi
     if [[ -n "$OLD_PID" ]]; then
         say "stopping old daemon (PID $OLD_PID)..."
@@ -184,12 +184,12 @@ if [[ $YES -eq 1 ]]; then
             fail "port 7770 still answered after stopping PID $OLD_PID -- not double-starting; check: ss -ltnp | grep 7770"
         fi
     fi
-    SDE_LOG="${TMPDIR:-/tmp}/sbxd-update-serve.log"
+    SDE_LOG="${TMPDIR:-/tmp}/hotbedd-update-serve.log"
     : >"$SDE_LOG"
     if [[ $TLS_RUN -eq 1 ]]; then
-        SBXD_BIND="$BIND" SBXD_TLS=1 nohup "$ROOT/sbxd/bin/sbxd" serve >"$SDE_LOG" 2>&1 &
+        HOTBEDD_BIND="$BIND" HOTBEDD_TLS=1 nohup "$ROOT/hotbed/bin/hotbedd" serve >"$SDE_LOG" 2>&1 &
     else
-        SBXD_BIND="$BIND" nohup "$ROOT/sbxd/bin/sbxd" serve >"$SDE_LOG" 2>&1 &
+        HOTBEDD_BIND="$BIND" nohup "$ROOT/hotbed/bin/hotbedd" serve >"$SDE_LOG" 2>&1 &
     fi
     sleep 3
     nread="$(lsn 7770)"
@@ -218,7 +218,7 @@ if [[ $YES -eq 1 ]]; then
 else
     say "done. restart the daemon to pick up the new binary:"
     say "  kill \$(ss -ltnp 2>/dev/null | grep :7770 | grep -o 'pid=[0-9]*' | cut -d= -f2 | head -1)"
-    say "  SBXD_BIND=0.0.0.0 SBXD_TLS=1 sbxd-serve   # https for the clipboard (see README)"
-    say "  SBXD_BIND=0.0.0.0 sbxd-serve              # plain http (clipboard degrades honestly)"
+    say "  HOTBEDD_BIND=0.0.0.0 HOTBEDD_TLS=1 hotbedd-serve   # https for the clipboard (see README)"
+    say "  HOTBEDD_BIND=0.0.0.0 hotbedd-serve              # plain http (clipboard degrades honestly)"
 fi
 say "update complete ($TAG)"

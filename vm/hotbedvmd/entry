@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+# hotbedvmd-entry — PID-1 program of the hotbedvmd image (QEMU-in-Docker VM runtime).
+#
+# One container = one headless Debian VM. Modes (selected by $1):
+#
+#   hotbedvmd-entry boot          default (container ENTRYPOINT): prepare the
+#                              overlay disk + cloud-init seed in /store, exec
+#                              qemu, relay SIGTERM as an ACPI powerdown and
+#                              exit when qemu exits
+#   hotbedvmd-entry ctl [args]    talk to the qemu monitor unix socket
+#   hotbedvmd-entry serial        tail -F the VM's serial console log
+#   hotbedvmd-entry kvmok         exit 0 iff real KVM accel works in this container
+#   hotbedvmd-entry help          this text
+#   hotbedvmd-entry <anything>    exec passthrough (toolbox: qemu-img, ...)
+#
+# Environment (normal usage: set by vm/hotbedvm.sh with SBXVM_BACKEND=docker):
+#   SBXVMD_NAME   VM name (volume layout: /store/vms/<name>)   default: vm
+#   SBXVMD_CPU    vCPUs                                        default: 2
+#   SBXVMD_MEM    MiB of RAM                                   default: 2048
+#   SBXVMD_DISK   overlay size GB (only used on first boot)    default: 20
+#
+# Volumes mounted by the runner:
+#   /store       named volume hotbedvmd-store (master.qcow2 + vms/<name>/...)
+#   /seed-src    RO bind: host dir with user-data + meta-data (first boot)
+#   /share       RW bind: host dir shared to the guest via 9p
+#   /dev/kvm     device passthrough (absent -> slow TCG fallback, loud warn)
+#
+# The boot recipe mirrors the libvirt flow: virtio system disk, IDE cdrom with
+# the cloud-init seed (NoCloud volume id `cidata`), user-mode networking with
+# SSH forwarded to container port 22 (docker publish -p 127.0.0.1::22 maps it
+# to a dynamic host port), serial console to a file, monitor on a unix socket.
+# No display device at all: the master image is pre-patched for a text-only
+# GRUB (see README, "How it works under the hood").
+set -u
+
+NAME="${SBXVMD_NAME:-vm}"
+STORE="/store"
+VMDIR="/store/vms/${NAME}"
+DISK="${VMDIR}/disk.qcow2"
+SEED="${VMDIR}/seed.iso"
+SERIAL="${VMDIR}/serial.log"
+MON="/run/qemu-mon.sock"
+CPU="${SBXVMD_CPU:-2}"
+MEM="${SBXVMD_MEM:-2048}"
+DISK_G="${SBXVMD_DISK:-20}"
+
+log() { printf '[hotbedvmd] %s\n' "$*" >&2; }
+die() { printf '[hotbedvmd] FATAL: %s\n' "$*" >&2; exit 1; }
+
+QPID=""
+
+# --- modes -------------------------------------------------------------------
+
+help() {
+    cat <<EOF
+hotbedvmd-entry — qemu-in-container VM runtime for hotbed
+
+usage: docker exec hotbedvmd-<name> hotbedvmd-entry MODE [args]
+
+  boot            run the VM (this is the container ENTRYPOINT default)
+  ctl [args]      one shot to the qemu monitor; interactive if args omitted
+  serial          tail -F /store/vms/<name>/serial.log (serial console)
+  kvmok           exit 0 iff /dev/kvm is usable for qemu KVM accel
+  <cmd> ...       exec passthrough (toolbox), e.g.
+                  docker run --rm -v hotbedvmd-store:/store hotbedvmd:latest \
+                    qemu-img info /store/master.qcow2
+EOF
+}
+
+kvmok() {
+    [[ -w /dev/kvm ]] || { echo "NO: /dev/kvm missing or not writable in this container"; exit 1; }
+    local rc=0
+    timeout 4 qemu-system-x86_64 -enable-kvm -machine none -display none -nodefaults >/dev/null 2>&1 || rc=$?
+    # rc 124 = timeout had to kill qemu => it was happily running under KVM;
+    # any fast, real exit means "-enable-kvm" aborted (i.e. KVM unusable).
+    if [[ $rc -eq 124 ]]; then
+        echo "YES: KVM accel is usable"
+        exit 0
+    fi
+    echo "NO: qemu -enable-kvm did not survive startup (rc=$rc)"
+    exit 1
+}
+
+ctl() {
+    if [[ $# -gt 0 ]]; then
+        printf '%s\n' "$*" | timeout 4 socat - UNIX-CONNECT:"$MON" 2>&1 || :
+    else
+        exec socat -,raw,echo=0 UNIX-CONNECT:"$MON"
+    fi
+}
+
+serial() {
+    [[ -d "$VMDIR" ]] || die "no VM dir $VMDIR in this store"
+    [[ -f "$SERIAL" ]] || touch "$SERIAL"
+    exec tail -n 250 -F "$SERIAL"
+}
+
+# SIGTERM handler (docker stop): ask qemu to ACPI-power-down, give the guest
+# ~50s to flush, then hard-kill. Runs the same on SIGINT for good measure.
+powerdown() {
+    if [[ -z "$QPID" ]] || ! kill -0 "$QPID" 2>/dev/null; then
+        exit 0
+    fi
+    log "SIGTERM received — asking qemu for an ACPI powerdown"
+    printf 'system_powerdown\n' | timeout 3 socat - UNIX-CONNECT:"$MON" >/dev/null 2>&1 || :
+    local i
+    for i in $(seq 1 50); do
+        kill -0 "$QPID" 2>/dev/null || break
+        sleep 1
+    done
+    if kill -0 "$QPID" 2>/dev/null; then
+        log "grace period over — killing qemu -9"
+        kill -9 "$QPID" 2>/dev/null || :
+    fi
+    wait "$QPID" 2>/dev/null || :
+    log "shutdown complete"
+    exit 0
+}
+
+# --- boot (PID 1) ------------------------------------------------------------
+
+boot() {
+    log "starting VM '$NAME'"
+    [[ -f "$STORE/master.qcow2" ]] || die "missing $STORE/master.qcow2 — the store volume must be seeded first (hotbedvm does this)"
+
+    mkdir -p "$VMDIR"
+
+    # 1. overlay disk on the shared master (idempotent: survives restarts)
+    if [[ ! -f "$DISK" ]]; then
+        log "creating overlay disk (${DISK_G}G) on top of /store/master.qcow2"
+        qemu-img create -f qcow2 \
+            -o backing_file="$STORE/master.qcow2",backing_fmt=qcow2 \
+            "$DISK" "${DISK_G}G" >/dev/null || die "qemu-img create failed"
+    fi
+
+    # 2. cloud-init seed: pack the cdrom image on first boot when a seed source
+    #    is mounted. After that the seed lives in /store and is re-attached as
+    #    it is (harmless: cloud-init is idempotent across boots).
+    if [[ ! -f "$SEED" && -f /seed-src/user-data && -f /seed-src/meta-data ]]; then
+        log "packing seed.iso (cloud-init NoCloud, volid cidata)"
+        xorriso -as mkisofs -o "$SEED" -volid cidata -joliet -rock /seed-src \
+            >/dev/null 2>&1 || die "seed.iso build failed (xorriso)"
+    fi
+    [[ ! -f "$SEED" && ! -d /seed-src ]] \
+        && log "note: no seed found — booting disk-only (no cloud-init provisioning)"
+
+    # 3. keep the last boot's serial log around for post-mortems
+    [[ -s "$SERIAL" ]] && mv -f "$SERIAL" "$SERIAL.1"
+
+    # 4. accelerator: real KVM when /dev/kvm is here, TCG otherwise
+    local acc=() cpu_model accel_desc
+    if [[ "${SBXVMD_FORCE_TCG:-0}" == "1" ]]; then
+        acc=(-accel tcg); cpu_model=max
+        accel_desc="TCG (forced via SBXVMD_FORCE_TCG=1 — very slow)"
+    elif [[ -w /dev/kvm ]]; then
+        acc=(-enable-kvm); cpu_model=host
+        accel_desc="KVM"
+    else
+        acc=(-accel tcg); cpu_model=max
+        accel_desc="TCG — /dev/kvm missing: emulation will be VERY slow"
+    fi
+    log "accelerator: $accel_desc"
+
+    # 5. qemu command line. Explicit device forms (-drive if=none + -device)
+    #    so that -nodefaults cannot swallow anything vital.
+    local cmd=(
+        qemu-system-x86_64 "${acc[@]}"
+        -machine pc -cpu "$cpu_model"
+        -smp "$CPU" -m "$MEM"
+        -boot order=c -display none -nodefaults
+        -drive "file=$DISK,format=qcow2,if=none,id=vdisk"
+        -device virtio-blk-pci,drive=vdisk
+        -netdev "user,id=n0,hostfwd=tcp::22-:22"
+        -device virtio-net-pci,netdev=n0
+        -serial "file:$SERIAL"
+        -monitor "unix:$MON,server=on,wait=off"
+    )
+    [[ -f "$SEED" ]] && cmd+=(
+        -drive "file=$SEED,format=raw,if=none,id=seedcd,readonly=on"
+        -device ide-cd,drive=seedcd
+    )
+    if [[ -d /share ]]; then
+        log "sharing container /share -> guest 9p mount_tag=hostshare"
+        cmd+=(-virtfs "local,id=hostshare,path=/share,mount_tag=hostshare,security_model=mapped-xattr")
+    fi
+
+    rm -f "$MON"
+    log "booting qemu (serial -> $SERIAL, monitor -> $MON)"
+    "${cmd[@]}" &
+    QPID=$!
+    trap powerdown TERM INT
+    wait "$QPID"
+    local rc=$?
+    log "qemu exited (rc=$rc)"
+    exit "$rc"
+}
+
+# --- dispatch ----------------------------------------------------------------
+
+case "${1:-boot}" in
+    boot)    boot ;;
+    ctl)     shift; ctl "$@" ;;
+    serial)  serial ;;
+    kvmok)   kvmok ;;
+    help|-h|--help) help ;;
+    *) exec "$@" ;;      # toolbox mode: passthrough (qemu-img etc.)
+esac

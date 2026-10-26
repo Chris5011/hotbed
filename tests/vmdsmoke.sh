@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # vmdsmoke.sh — end-to-end verification of the sbx_vm docker backend
-# (SBXVM_BACKEND=docker: qemu inside a plain container, "sbxvmd").
+# (SBXVM_BACKEND=docker: qemu inside a plain container, "hotbedvmd").
 # Creates a temporary VM, checks ssh/9p/opencode/nested-docker/snapshot/
 # revert, destroys it. Takes several minutes (VM boot + first cloud-init
 # run). Requires nested KVM (/dev/kvm usable in containers).
@@ -8,10 +8,10 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SBXVM="$ROOT/vm/sbxvm.sh"
+SBXVM="$ROOT/vm/hotbedvm.sh"
 export SBXVM_BACKEND=docker
-VMNAME="sbxvmdsmoke-$(date +%s | tail -c 5)"
-SHARE="$(mktemp -d /tmp/opencode/sbxvmdsmoke.XXXXXX)"
+VMNAME="hotbedvmdsmoke-$(date +%s | tail -c 5)"
+SHARE="$(mktemp -d /tmp/opencode/hotbedvmdsmoke.XXXXXX)"
 PASS=0; FAIL=0
 
 pass() { printf '  \e[32m✔\e[0m %s\n' "$1"; PASS=$((PASS + 1)); }
@@ -27,7 +27,7 @@ trap cleanup EXIT
 run() { "$SBXVM" "$@" 2>&1; }
 
 hdr "runtime"
-if [[ -f "$ROOT/vm/images/debian-13-genericcloud-amd64.qcow2" ]]; then pass "master image present"; else fail "master image (run sbxvm fetch-image)"; fi
+if [[ -f "$ROOT/vm/images/debian-13-genericcloud-amd64.qcow2" ]]; then pass "master image present"; else fail "master image (run hotbedvm fetch-image)"; fi
 docker version --format '{{.Server.Version}}' >/dev/null 2>&1 \
     && pass "docker engine reachable" || fail "docker engine reachable"
 
@@ -35,7 +35,7 @@ hdr "create + boot ($VMNAME)"
 if run create "$VMNAME" --cpu 2 --mem 3072 --disk 20 --share "$SHARE" >/dev/null; then
     pass "create + ssh up (docker backend)"
 else
-    fail "create + ssh up (docker backend)  — see: docker logs sbxvmd-$VMNAME && docker exec sbxvmd-$VMNAME sbxvmd-entry serial"
+    fail "create + ssh up (docker backend)  — see: docker logs hotbedvmd-$VMNAME && docker exec hotbedvmd-$VMNAME hotbedvmd-entry serial"
     echo; printf '\e[31;1mSMOKE: aborted\e[0m\n'; exit 1
 fi
 
@@ -57,11 +57,11 @@ out="$(run ssh "$VMNAME" -- uname -r | tail -1)"
 # Nested docker: the hello-world pull goes out through slirp and can be
 # transiently slow on a fresh VM, so pull first (with retries) and run
 # second. Keep stderr for diagnostics. Filter out the CLI's own
-# "sbxvm: ssh dev@host:port" info banner before matching.
+# "hotbedvm: ssh dev@host:port" info banner before matching.
 out="$(run ssh "$VMNAME" -- \
     'for i in 1 2 3; do sudo docker pull hello-world >/dev/null 2>&1 && break; sleep 6; done
      sudo docker run --rm hello-world' \
-    | grep -av 'sbxvm:')"
+    | grep -av 'hotbedvm:')"
 [[ "$out" == *Hello* ]] && pass "nested docker container runs in VM" \
     || fail "nested docker in VM ($(printf '%s\n' "$out" | tail -n 1))"
 
@@ -77,7 +77,7 @@ out="$(run ssh "$VMNAME" -- 'sudo test -f /root/proof.txt && echo proof-ok' | ta
 hdr "teardown"
 run destroy "$VMNAME" --yes >/dev/null && pass "destroy" || fail "destroy"
 [[ ! -e "$ROOT/vm/vms/$VMNAME" ]] && pass "vm dir cleaned" || fail "vm dir cleaned"
-docker ps -a --format '{{.Names}}' | grep -qxF "sbxvmd-$VMNAME" \
+docker ps -a --format '{{.Names}}' | grep -qxF "hotbedvmd-$VMNAME" \
     && fail "container undefined" || pass "container undefined"
 
 echo

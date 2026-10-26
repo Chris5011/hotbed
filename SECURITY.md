@@ -1,24 +1,24 @@
-# SBX Security Posture
+# HBD Security Posture
 
 Status: **public alpha** (positioned for review, not for hostile hosting). This
-document is the security survey of the SBX desktop kit — what protects what,
+document is the security survey of the HBD desktop kit — what protects what,
 what was found and fixed, and what is deliberately out of scope.
 
 ## 1. Scope
 
-What SBX is:
+What HBD is:
 
-- `sbxd` — a localhost daemon (dashboard :7770 + LLM proxy :7775) that spawns
+- `hotbedd` — a localhost daemon (dashboard :7770 + LLM proxy :7775) that spawns
   and steers docker containers and libvirt/docker-backend VMs ("sandboxes").
-- The sbx proxy holds the **only copies** of upstream provider API keys (in
-  `~/.config/sbxd/config.json`, `0600`). Sandboxes never see a provider key —
-  they get a minted per-sandbox bearer token (`sbxk-…`) that only works
+- The hbd proxy holds the **only copies** of upstream provider API keys (in
+  `~/.config/hotbedd/config.json`, `0600`). Sandboxes never see a provider key —
+  they get a minted per-sandbox bearer token (`hbk-…`) that only works
   against the proxy.
 
-What SBX is **not**: a security boundary around untrusted workloads. Sandbox
+What HBD is **not**: a security boundary around untrusted workloads. Sandbox
 containers are uid-mapped but the default egress preset is `allow`; a
 container with `docker` socket access or a hostile Sun/* in the mount set can
-escape onto the host. Treat SBX sandboxes as "my own agents, fenced from the
+escape onto the host. Treat HBD sandboxes as "my own agents, fenced from the
 network", not "prison".
 
 ## 2. Protection model (verified)
@@ -43,7 +43,7 @@ network", not "prison".
 |                  | `configRoute` GET returns `MaskedCopy`; POST-merge skips `<masked>` keys.  |        |
 | Privilege        | No `sudo`, no host iptables mutations; egress rules exec *inside* the     | ✅ verified |
 |                  | sandbox netns (iptables there or a scoped helper container).              |        |
-| Ownership stamp  | Daemon-spawned objects carry `dev.sbx.owner` = f(config dir); sweepers    | ✅ verified |
+| Ownership stamp  | Daemon-spawned objects carry `dev.hotbed.owner` = f(config dir); sweepers    | ✅ verified |
 |                  | refuse to touch foreign-owner containers.                                 |        |
 
 ## 3. Fixed in this sweep (alpha hardening)
@@ -57,7 +57,7 @@ network", not "prison".
 | 5 | `/api/fs` prefix-checked the *textual* path only — a symlink inside home could resolve outside it (mount-picker escape). | `filepath.EvalSymlinks` on requested path + resolved home, prefix re-checked on resolved values. |
 | 6 | start/stop/delete/budget/terminal/import routes ran for any HTTP method. | Explicit `405` on non-POST (delete already had it). |
 | 7 | Empty budget maps could serialize as `null` in `config.json` (cosmetic-driven UI confusion). | `sane()` normalizes nil maps to `{}`. |
-| 8 | No way to delete a sandbox (create-only lifecycle).                 | `sbxd rm` + `POST /api/actions/delete` + dashboard Delete button; VM deletes require explicit confirm (`--yes` / `{"confirm":true}`); keys, tmux session, wallets and sync target are cleaned with the sandbox; every delete is audit-logged (`sandbox.rm`). *(also a functional fix, listed here for completeness)* |
+| 8 | No way to delete a sandbox (create-only lifecycle).                 | `hotbedd rm` + `POST /api/actions/delete` + dashboard Delete button; VM deletes require explicit confirm (`--yes` / `{"confirm":true}`); keys, tmux session, wallets and sync target are cleaned with the sandbox; every delete is audit-logged (`sandbox.rm`). *(also a functional fix, listed here for completeness)* |
 
 ## 4. Noted / accepted (alpha posture)
 
@@ -69,12 +69,12 @@ network", not "prison".
 | Budget enforcement may overshoot on concurrent bursts | Check-then-forward race inside the proxy; tiny window per request | Small overshoot bounded by in-flight requests per wallet; acceptable for a personal burn limiter |
 | Upstream key custody rests with config.json I/O | One file holds all provider secrets | `0600`/`0700` perms, masked API GET/merge round-trip; disk encryption is the real control |
 | Dashboard GET endpoints are side-effect free but unauthenticated | Loopback listener; origin guard covers mutations | Keep `dashboard.bind` on loopback (default) if the LAN is untrusted |
-| Foreign-named docker containers inherit sbxd CLI steering | `sbxd` names are requested, not enforced against `docker run` by hand | Arg-list exec + charset validation make this inert; deliberate choice |
-| `~/.ssh/sbxvm_key` used for VM ssh | Kit-generated dev key | Read-only by code in the daemon path; `accept-new` host-key policy scoped to 127.0.0.1 |
+| Foreign-named docker containers inherit hotbedd CLI steering | `hotbedd` names are requested, not enforced against `docker run` by hand | Arg-list exec + charset validation make this inert; deliberate choice |
+| `~/.ssh/hotbedvm_key` used for VM ssh | Kit-generated dev key | Read-only by code in the daemon path; `accept-new` host-key policy scoped to 127.0.0.1 |
 
 ## 5. Alpha release checklist
 
-- [x] Full test suite green (`tests/sbxddsmoke.sh`, hermetic port)
+- [x] Full test suite green (`tests/hotbedddsmoke.sh`, hermetic port)
 - [x] `rm` lifecycle verified live (container + VM guard refusal)
 - [x] Token entropy + constant-time compare shipped, old tokens unaffected
 - [x] Origin guard + method checks shipped; CLI/curl unaffected (no Origin)
@@ -88,5 +88,5 @@ network", not "prison".
 This is a desktop kit for single-user use. If you find a vulnerability,
 please open a GitHub issue describing it (or contact the maintainer);
 include reproduction steps and the audit trail lines from
-`~/.local/state/sbxd/audit.jsonl` if relevant. Please do not run destructive
+`~/.local/state/hotbedd/audit.jsonl` if relevant. Please do not run destructive
 proofs-of-concept against a live system you don't own.

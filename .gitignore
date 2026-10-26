@@ -1,8 +1,8 @@
-# OpenCode-SBX / SBX Desktop — what shipping means
+# hotbed / Hotbed — what shipping means
 # The repo ships SOURCE ONLY. Big/runtime artifacts are fetched or built on
 # the user's machine — see docs/RELEASING.md and install.sh.
 
-# Debian cloud master image — downloaded once at runtime via `sbxvm fetch-image`
+# Debian cloud master image — downloaded once at runtime via `hotbedvm fetch-image`
 # (~1 GB unpacked, ~330 MB compressed). NEVER commit it.
 vm/images/
 
@@ -14,13 +14,13 @@ vm/vms/
 # smoke capture logs. Local only — never commit.
 vm/.work/
 
-# Docker volume layout for the sbxvmd backend (runtime only)
-vm/sbxvmd/store/
+# Docker volume layout for the hotbedvmd backend (runtime only)
+vm/hotbedvmd/store/
 
 # Compiled daemon (release artifact: build via make release / make build,
 # attach to GitHub Releases — do not commit binaries)
-sbxd/bin/
-sbxd/sbxd
+hotbed/bin/
+hotbed/hotbedd
 
 # Release output + local junk
 dist/

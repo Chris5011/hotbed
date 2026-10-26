@@ -1,4 +1,4 @@
-# Contributing — dev guidelines for OpenCode-SBX / SBX Desktop
+# Contributing — dev guidelines for hotbed / Hotbed
 
 Rules of the road for anything that lands in this repo, including by agents.
 Goal: a linear, self-describing history that reads like a changelog — so a
@@ -75,11 +75,11 @@ fix(api): parse SSE JSON payload before appending to logbox
   "Merge branch '…'" noise.
 - Before opening a PR, locally:
   1. `make check` (gofmt guard, `go vet`, build)
-  2. `bash -n vm/sbxvm.sh && bash -n tests/sbxddsmoke.sh`
+  2. `bash -n vm/hotbedvm.sh && bash -n tests/hotbedddsmoke.sh`
   3. dashboard JS check — snippet in `docs/RELEASING.md` §2
   4. full suite via the §4 certification dance → `N passed, 0 failed`
 - Never stage runtime artifacts (`.gitignore` covers them, but verify:
-  `git status` must show no `vm/images`, `vm/vms`, `dist/`, `sbxd/bin`).
+  `git status` must show no `vm/images`, `vm/vms`, `dist/`, `hotbed/bin`).
 - Solo dev is not an excuse: open the PR anyway — it is your review record.
 
 ## Once public
