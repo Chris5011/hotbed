@@ -10,8 +10,10 @@ sandboxes from pre-rename daemons keep working, untouched, on this build.
 `sbx` (repo `docker/sbx-releases`) for the exact same use case — AI coding
 agents in isolated environments. Once public, every search for "sbx" would
 land there, not here. "Hotbed" is fresh everywhere that matters: npm, PyPI,
-crates.io, Homebrew and Docker Hub all had the name free, and `hotbed.dev`
-is unclaimed.
+crates.io, Homebrew and Docker Hub all had the name free. (Correction,
+2026-10-27: a WHOIS check found `hotbed.dev` already registered — the
+DNS-record probe at naming time was inconclusive. The repo links to no
+domain.)
 
 ## The new names
 
