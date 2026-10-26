@@ -314,21 +314,7 @@ func remoteTeeScript(path string) string {
 // TunnelPIDFile remembers the ssh -R tunnel per sandbox
 // (~/.local/state/sbxd/tunnel-<sandbox>.pid).
 func TunnelPIDFile(sandbox string) string {
-	return filepath.Join(env.StateDir(), "tunnel-"+sandboxName(sandbox)+".pid")
-}
-
-func sandboxName(s string) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(s) {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '_':
-			b.WriteRune(r)
-		}
-	}
-	if b.Len() == 0 {
-		return "_"
-	}
-	return b.String()
+	return filepath.Join(env.StateDir(), "tunnel-"+env.SafeName(sandbox)+".pid")
 }
 
 // EnsureTunnel keeps a persistent ssh remote-forward alive that pins the
@@ -363,7 +349,7 @@ func EnsureTunnel(sb sandbox.Sandbox, proxyPort string) (int, string, error) {
 	if err := os.MkdirAll(env.StateDir(), 0o700); err != nil {
 		return 0, "", err
 	}
-	log, err := os.OpenFile(filepath.Join(env.StateDir(), "tunnel-"+sandboxName(sb.Name)+".log"),
+	log, err := os.OpenFile(filepath.Join(env.StateDir(), "tunnel-"+env.SafeName(sb.Name)+".log"),
 		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return 0, "", err
@@ -407,7 +393,7 @@ func KillTunnel(sandbox string) {
 			}
 		}
 	}
-	name := sandboxName(sandbox)
+	name := env.SafeName(sandbox)
 	_ = os.Remove(filepath.Join(env.StateDir(), "tunnel-"+name+".pid"))
 	_ = os.Remove(filepath.Join(env.StateDir(), "tunnel-"+name+".log"))
 }

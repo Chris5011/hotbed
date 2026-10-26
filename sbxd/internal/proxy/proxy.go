@@ -112,10 +112,15 @@ type Service struct {
 	bo   *authBackoff
 }
 
-// New builds a service (client without timeouts: long streams allowed).
+// New builds a service. The upstream client only bounds the TIME UNTIL
+// response HEADERS (30 s): a full client.Timeout would kill SSE streams
+// mid-generation, but no bound at all lets a wedged upstream hold forked
+// request goroutines open forever (fd exhaustion).
 func New(cfg *config.Config, ks *keys.Store, led *ledger.Ledger) *Service {
 	return &Service{Cfg: cfg, Keys: ks, Led: led, bo: newAuthBackoff(),
-		HTTP: &http.Client{}}
+		HTTP: &http.Client{Transport: &http.Transport{
+			ResponseHeaderTimeout: 30 * time.Second,
+		}}}
 }
 
 // Port resolves the configured proxy port.

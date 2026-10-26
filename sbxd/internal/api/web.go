@@ -1051,7 +1051,7 @@ function renderCreator(){
       var rb=document.querySelector('input[name="cwkind"][value="vm-docker"]');
       if(rb && !document.querySelector('input[name="cwkind"]:checked[value^="vm"]')){ rb.checked=true; updateCreatorKind(); }
     }
-  }).catch(function(){});
+  }).catch(function(){ console.warn('dashboard: request failed silently in ?'); });
   $('cw-go').addEventListener('click',function(){
     var name=($('cw-name').value||'').trim().toLowerCase();
     var msg=$('cw-msg');
@@ -1316,7 +1316,7 @@ function drillToggle(name){
       var p=dj.proxy||{};
       var px=$('px-'+name);
       if(px){ px.innerHTML='proxy: <code>'+esc(p.base_url||'-')+'</code> - key '+(p.key_masked ? esc(p.key_masked)+' ('+esc(p.provider||'?')+')' : 'not synced yet'); }
-    }).catch(function(){});
+  }).catch(function(){ console.warn('dashboard: request failed silently in drillToggle'); });
   }).catch(function(){ host.innerHTML='<div class="subwrap hint">detail unavailable</div>'; });
 }
 
@@ -1435,7 +1435,7 @@ function renderHelp(){
     '<li>Every request a synced sandbox routes through the daemon proxy is journaled per sandbox in <span class="mono">~/.local/state/sbxd/usage.jsonl</span> (tokens in/out, model, cost if priced).</li>'+
     '<li><b>$ columns</b> come from the price table in <span class="mono">config.json</span> ($/Mtok, longest-prefix match per model). Models priced at 0 show $0.0000 - the token counts still walk.</li>'+
     '<li><b>est rows</b>: the provider did not report usage - tokens are estimated from response size (bytes/4) and marked est.</li>'+
-    '<li><b>Wallets</b> (budget USD / budget tokens per sandbox) are tracking budgets shown in the Burn table - they do not block the proxy by themselves.</li>'+
+    '<li><b>Wallets</b> (budget USD / budget tokens per sandbox) trip a 429 when exhausted (per UTC day) - the sandbox gets a clear message instead of burning through the ceiling; raise with <code>sbxd budget NAME [USD] [--tokens N]</code>. Mirrored in the Burn table via the "set" button.</li>'+
     '<li>Stale rows = the sandbox was deleted (its history stays until you purge or pin it). Live rows update every 5 s while the tab is open.</li>'+
     '</ul></div>'+
     hsec('Troubleshooting')+
@@ -1456,7 +1456,7 @@ function renderConfigGlobal(){
     '<div class="warnline" id="cfg-warn"></div>';
   fetch('/api/config').then(function(r){return r.json();}).then(function(cfg){
     var ed=$('cfg-editor'); if(ed){ ed.value=JSON.stringify(cfg,null,2); }
-  }).catch(function(){});
+  }).catch(function(){ console.warn('dashboard: request failed silently in renderConfigGlobal'); });
   var save=addTool($('glob-actions'),'Save',function(){
     var raw=$('cfg-editor').value, j;
     try{ j=JSON.parse(raw); }catch(e){ $('cfg-warn').textContent='not valid JSON: '+e.message; return; }
@@ -1569,7 +1569,7 @@ var s={FetchDetail:function(sb){
     }
     if(d.createdAt) extras.push({t:'started',v:esc(d.createdAt)});
     cardrowRender($('ov-cards'), extra.concat(extras));
-  }).catch(function(){});
+  }).catch(function(){ console.warn('dashboard: request failed silently in cardrowRender'); });
 }};
 var extra=[], extras=[];
 
@@ -1695,7 +1695,7 @@ function refreshHealth(){
   fetch('/api/health').then(function(r){return r.json();}).then(function(j){
     state.health=j; $('ver').textContent='v'+j.version;
     setBadge('h-docker', j.docker); setBadge('h-libvirt', j.libvirt); setBadge('h-tmux', j.tmux);
-  }).catch(function(){});
+  }).catch(function(){ console.warn('dashboard: request failed silently in refreshHealth'); });
 }
 function setBadge(id, ok){ var el=$(id); el.textContent=id.replace('h-','')+(ok?' up':' down'); el.className='hbadge '+(ok?'up':'down'); }
 

@@ -37,7 +37,7 @@ func proxyCmd(_ []string) error {
 		return fmt.Errorf("keys: %w", err)
 	}
 	px := proxy.New(cfg, ks, ledger.Open(cfg.Prices))
-	httpSrv := &http.Server{Addr: px.Addr(), Handler: px}
+	httpSrv := &http.Server{Addr: px.Addr(), Handler: px, IdleTimeout: 90 * time.Second, ReadHeaderTimeout: 15 * time.Second}
 
 	go func() {
 		sig := make(chan os.Signal, 1)

@@ -43,23 +43,9 @@ type Target struct {
 
 func storeDir() string { return filepath.Join(env.DataDir(), "synced") }
 
-func safeName(s string) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(s) {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '_':
-			b.WriteRune(r)
-		}
-	}
-	if b.Len() == 0 {
-		return "_"
-	}
-	return b.String()
-}
-
 // Lookup returns a synced target, if any.
 func Lookup(sandboxName string) (Target, bool) {
-	b, err := os.ReadFile(filepath.Join(storeDir(), safeName(sandboxName)+".json"))
+	b, err := os.ReadFile(filepath.Join(storeDir(), env.SafeName(sandboxName)+".json"))
 	if err != nil {
 		return Target{}, false
 	}
@@ -74,7 +60,7 @@ func Lookup(sandboxName string) (Target, bool) {
 // (mtime of its store entry). attach-session env stamps compare against
 // this to know when a running shell pane is stale.
 func LastSync(sandboxName string) (time.Time, bool) {
-	fi, err := os.Stat(filepath.Join(storeDir(), safeName(sandboxName)+".json"))
+	fi, err := os.Stat(filepath.Join(storeDir(), env.SafeName(sandboxName)+".json"))
 	if err != nil || fi.IsDir() {
 		return time.Time{}, false
 	}
@@ -93,7 +79,7 @@ func LookupMasked(sandboxName string) (Target, bool) {
 // RemoveTarget deletes a sandbox's stored sync target (rm lifecycle;
 // missing file is already the desired end state, so that's not an error).
 func RemoveTarget(sandboxName string) error {
-	err := os.Remove(filepath.Join(storeDir(), safeName(sandboxName)+".json"))
+	err := os.Remove(filepath.Join(storeDir(), env.SafeName(sandboxName)+".json"))
 	if os.IsNotExist(err) {
 		return nil
 	}
@@ -261,7 +247,7 @@ func Apply(sb sandbox.Sandbox, cfg *config.Config, ks *keys.Store,
 		return Target{}, err
 	}
 	b, _ := json.MarshalIndent(tgt, "", "  ")
-	if err := os.WriteFile(filepath.Join(storeDir(), safeName(sb.Name)+".json"), b, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(storeDir(), env.SafeName(sb.Name)+".json"), b, 0o600); err != nil {
 		return Target{}, err
 	}
 	return tgt, nil

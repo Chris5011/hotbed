@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Version of the sbxd daemon/CLI. A var on purpose: release builds inject
@@ -77,6 +78,24 @@ func getenv(k, def string) string {
 		return v
 	}
 	return def
+}
+
+// SafeName is THE file-name-safe form of a sandbox name (single source -
+// cfgsync and attach used to run two identical copies that could drift).
+// Lowercase, keeps only a-z 0-9 '-', '_' (dissolves unusual characters).
+// FILLS "_" when nothing survives, so it is always a usable filename.
+func SafeName(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '_':
+			b.WriteRune(r)
+		}
+	}
+	if b.Len() == 0 {
+		return "_"
+	}
+	return b.String()
 }
 
 func homeDefault(rel string) string {

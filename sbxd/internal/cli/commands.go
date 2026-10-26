@@ -229,7 +229,7 @@ func serve(args []string) error {
 	// LLM proxy listener (reachable from sandboxes by design)
 	if len(cfg.Opencode.Providers) > 0 {
 		go func() {
-			httpSrv := &http.Server{Addr: px.Addr(), Handler: px}
+			httpSrv := &http.Server{Addr: px.Addr(), Handler: px, ReadHeaderTimeout: 15 * time.Second}
 			if e := httpSrv.ListenAndServe(); e != nil && e != http.ErrServerClosed {
 				fmt.Fprintf(os.Stderr, "\033[31;1msbxd:\033[0m proxy disabled: %v\n", e)
 			}
@@ -242,7 +242,7 @@ func serve(args []string) error {
 		fmt.Fprintf(os.Stderr, "\033[33;1msbxd:\033[0m WARNING: dashboard/API listening on %s — UNAUTHENTICATED on the network; the CSRF guard protects browsers only, native clients pass — gate it (firewall) or use an ssh tunnel\n", addr)
 	}
 	scheme := "http"
-	httpSrv := &http.Server{Addr: addr, Handler: srv.Handler()}
+	httpSrv := &http.Server{Addr: addr, Handler: srv.Handler(), IdleTimeout: 90 * time.Second, ReadHeaderTimeout: 15 * time.Second}
 	if tlsOn {
 		crt, tlsPath, fp, err := api.SnakeoilTLS(bind)
 		if err != nil {

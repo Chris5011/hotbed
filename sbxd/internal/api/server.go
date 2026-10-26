@@ -4,6 +4,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -919,15 +920,9 @@ func (s *Server) createRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.Name = strings.ToLower(strings.TrimSpace(in.Name))
-	if in.Name == "" || len(in.Name) > 40 {
-		httpError(w, 400, "name required (≤40 chars)")
+	if err := validSandboxName("container", in.Name); err != nil {
+		httpError(w, 400, err.Error())
 		return
-	}
-	for _, c := range in.Name {
-		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
-			httpError(w, 400, "name: only a-z, 0-9 and '-'")
-			return
-		}
 	}
 	if in.Stack == "" {
 		in.Stack = "go"
@@ -1018,22 +1013,45 @@ func (s *Server) createRoute(w http.ResponseWriter, r *http.Request) {
 // boot since the kit seeds, provisions and boots end-to-end); budgets
 // apply identically; sync is done after the boot via the usual sync
 // route/button (the VM's ssh endpoint exists once it is running).
+// validSandboxName is the SINGLE name rule for both kinds (two charsets
+// used to drift apart): length cap, per-kind charset, and the first char
+// must be alphanumeric — an argv position is never a "--"-flag territory,
+// so docker/ssh/virsh calls can't be flag-injected via a crafted name.
+func validSandboxName(kind, name string) error {
+	switch kind {
+	case sandbox.KindContainer:
+		if name == "" || len(name) > 40 {
+			return errors.New("name required (a-z, 0-9, '-', max 40 chars)")
+		}
+		for _, c := range name {
+			if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
+				return errors.New("name: only a-z, 0-9 and '-'")
+			}
+		}
+		if c := name[0]; !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9') {
+			return errors.New("name must start with a letter or digit (never '-': it would parse as an engine flag)")
+		}
+	default: // vm (both backends)
+		if name == "" || len(name) > 40 {
+			return errors.New("vm name required (letters, digits, '.', '_', '-', max 40)")
+		}
+		if c := name[0]; !(c >= 'a' && c <= 'z') {
+			return errors.New("vm name must start with a letter (kit rule)")
+		}
+		for _, c := range name {
+			if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '.' || c == '_') {
+				return errors.New("vm name: only letters, digits and . _ - (kit rule)")
+			}
+		}
+	}
+	return nil
+}
+
 func (s *Server) createVM(w http.ResponseWriter, in createReq) {
 	name := strings.ToLower(strings.TrimSpace(in.Name))
-	if name == "" || len(name) > 40 {
-		httpError(w, 400, "name required (≤40 chars)")
+	if err := validSandboxName("vm", name); err != nil {
+		httpError(w, 400, err.Error())
 		return
-	}
-	first := name[0]
-	if !(first >= 'a' && first <= 'z') {
-		httpError(w, 400, "vm name must start with a letter (kit rule: a-zA-Z, digits, '.', '_', '-')")
-		return
-	}
-	for _, c := range name {
-		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '.' || c == '_') {
-			httpError(w, 400, "vm name: only letters, digits and . _ - (kit rule)")
-			return
-		}
 	}
 	backend := strings.TrimSpace(in.VMBackend)
 	if backend == "" {
