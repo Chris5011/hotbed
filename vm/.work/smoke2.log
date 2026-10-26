@@ -1,6 +1,0 @@
-[36;1msbxvm:[0m writing cloud-init seed (packed to seed.iso by the container itself)
-[36;1msbxvm:[0m starting container sbxvmd-smoke2
-[36;1msbxvm:[0m waiting for sshd on smoke2
-[32;1msbxvm:[0m ssh ready: dev@127.0.0.1:10522 (after ~11s)
-[36;1msbxvm:[0m waiting for cloud-init provisioning to finish (apt + kernel install...)
-[33;1msbxvm:[0m cloud-init still not done after ~720s — the VM may still be provisioning

@@ -492,7 +492,7 @@ sbxvm destroy agent1 --yes                # reclaim everything
 `^[a-zA-Z][a-zA-Z0-9._-]*$`; the libvirt domain is `sbxvm-<name>`, all VM data
 lives in `vm/vms/<name>/`.
 
-### The provisioning pipeline (`create` blocks until done)
+### The provisioning pipeline (what `create` runs)
 
 1. qcow2 **overlay disk** on the shared master image (thin — grows to usage).
 2. **cloud-init seed** (`seed.iso`, volume id `cidata`) with `user-data` /
@@ -509,6 +509,15 @@ lives in `vm/vms/<name>/`.
    `/workspace` mount.
 5. Done. The VM is fully usable. Later `update-grub`/kernel upgrades inside
    the guest keep working normally (see [the GRUB patch](#how-it-works-under-the-hood)).
+
+Since v0.2.10 the pipeline also **stages opencode from the host** over its
+own ssh channel when the guest's egress can't reach GitHub (ICMP+DNS fine,
+TCP 443 blackholed — seen behind policy routers/VPNs), and **self-syncs the
+sbx proxy** so fresh guests get their model list immediately. Since
+v0.2.11 the dashboard's create returns **the moment the machine is
+spawned** (`SBXVM_SPAWN_ONLY=1` + a `postboot` verb) and the post-boot
+half runs in the daemon's background — any VM reaching boot-end without a
+sync target is wired automatically exactly once (audited `sandbox.sync`).
 
 Tip: no `--share`? Then the VM works in a VM-local `/workspace` (a
 container-free machine for experiments); live snapshots then also work.
@@ -681,6 +690,8 @@ CLIs, so the binary stays stdlib-only and single-file.
 │  • REST + SSE API for dashboard & CLI                │
 │  • attach desk: one persistent tmux session each     │
 │  • embedded dashboard (no build step, vanilla JS)    │
+│    opens onto an Overview start page — host CPU /    │
+│    RAM / disk / uptime + live inventory counts       │
 │  • LLM proxy :7775 — token & dollar accounting       │
 │    (the ONLY listener reachable from sandboxes)      │
 └──────────────────────────────────────────────────────┘
@@ -743,6 +754,7 @@ Setup, once:
 ./bin/sbxd budget NAME 5   # $/day wallet (0 = unlimited, default)
 ./bin/sbxd sync NAME       # push proxy-backed opencode config INTO the sandbox
 #   or in the dashboard: Burn tab → per-sandbox sync button
+#   (VMs wire this up automatically at boot-end since v0.2.11)
 ```
 
 After a sync, the sandbox's opencode only ever sees one provider

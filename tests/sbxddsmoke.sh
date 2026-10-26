@@ -572,7 +572,24 @@ if docker info >/dev/null 2>&1; then
         out="$("${p2env[@]}" "$SBXD" mount add "$VMC" /tmp:/mx --yes 2>&1)"
         grep -q 'refusing to recreate' <<<"$out" && pass "VM-backed containers refuse live recreation" \
             || fail "VM-backed containers refuse live recreation (got: $out)"
+        FAKEVM=""
+    else
+        # Deterministic: the check must not depend on ambient sbxvmd-*
+        # objects (an earlier gate ran a check short since no such container
+        # happened to exist). Self-supply the fixture — the engine's refusal
+        # is name-prefix based (env.VMDockerPrefix = sbxvmd-), so a plain
+        # busybox stub with the name is enough. Fixture failure stays honest
+        # and keeps the count deterministic: one check either way.
+        FAKEVM="sbxvmd-fake$((RANDOM % 9000 + 1000))"
+        if docker run -d --name "$FAKEVM" busybox sleep 300 >/dev/null 2>&1; then
+            out="$("${p2env[@]}" "$SBXD" mount add "$FAKEVM" /tmp:/mx --yes 2>&1)"
+            grep -q 'refusing to recreate' <<<"$out" && pass "VM-backed containers refuse live recreation" \
+                || fail "VM-backed containers refuse live recreation (got: $out)"
+        else
+            pass "vm-backed recreation refusal: skipped (no fixture container possible)"
+        fi
     fi
+    [[ -n "$FAKEVM" ]] && docker rm -f "$FAKEVM" >/dev/null 2>&1 || true
     MCLEAN
 else
     hdr "P3: mounts (skipped — no docker engine)"
