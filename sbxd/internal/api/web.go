@@ -499,10 +499,22 @@ function showEmpty(){
   $('pane').hidden=true; $('empty').hidden=false;
 }
 
+/* token counts get thousands separators so "tok today" is readable */
+function fmtTok(n){
+  n=Math.round(Number(n)||0);
+  if(!n) return '0';
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g,',');
+}
+
 /* ---------- global views (overview / burn / config) ---------- */
 var hostTimer=null; // polling for the overview page; cleared on every view change
-function showGlobal(kind){
+var burnTimer=null; // polling for the burn ledger page; same contract
+function clearTimers(){
   if(hostTimer){ clearInterval(hostTimer); hostTimer=null; }
+  if(burnTimer){ clearInterval(burnTimer); burnTimer=null; }
+}
+function showGlobal(kind){
+  clearTimers();
   state.view=kind; state.sel=null; closeLogs();
   renderList();
   $('pane').hidden=true; $('empty').hidden=true; $('global').hidden=false;
@@ -631,6 +643,7 @@ function paintOvSandboxes(box){
         '<span class="chipmuted">'+esc(sb.kind)+(sb.backend?' · '+esc(sb.backend):'')+'</span>';
       if(sb.cpuPercent!=null&&sb.cpuPercent>0.005) pills+='<span class="chipmuted">'+sb.cpuPercent.toFixed(1)+'% cpu</span>';
       if(sb.memUsage) pills+='<span class="chipmuted">'+esc(sb.memUsage)+' mem</span>';
+      if(u.tokens_today) pills+='<span class="chipmuted">'+fmtTok(u.tokens_today)+' tok today</span>';
       if(u.calls) pills+='<span class="chipmuted">'+(u.calls||0)+' calls</span>';
       return '<div class="ov-card ovsbx" data-kind="'+esc(sb.kind)+'" data-name="'+esc(sb.name)+'" title="open '+esc(sb.name)+'">'+
         '<div class="ov-h"><b>'+esc(sb.name)+'</b>'+
@@ -672,10 +685,24 @@ function addTool(bar,label,fn){
 
 function renderBurnGlobal(){
   var body=$('glob-body');
+  // burn rows change as sandboxes dial the proxy - poll while the tab is
+  // open (skipping ticks whenever the user works an input or an open
+  // drill so neither focus nor open state is clobbered by a re-render).
+  if(burnTimer){ clearInterval(burnTimer); burnTimer=null; }
+  var finish=function(){
+    burnTimer=setInterval(function(){
+      var ae=document.activeElement;
+      if(state.view!=='burn') { clearInterval(burnTimer); burnTimer=null; return; }
+      if(ae && (ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT')) return;
+      if(body.querySelector('.drillrow:not([hidden])')) return;
+      renderBurnGlobal();
+    },5000);
+  };
   body.innerHTML='<div class="hint">loading…</div>';
   fetch('/api/usage').then(function(r){return r.json();}).then(function(j){
+    if(state.view!=='burn') return; // a view switch happened mid-flight
     var rows=j.rows||[];
-    if(!rows.length){ body.innerHTML='<div class="hint">No usage yet. Flow: sbxd config init → sbxd sync NAME → sandbox calls go through the proxy → rows appear here.</div>'; return; }
+    if(!rows.length){ body.innerHTML='<div class="hint">No usage yet. Flow: sbxd config init → sbxd sync NAME → sandbox calls go through the proxy → rows appear here.</div>'; finish(); return; }
     var todaySum=0,allSum=0,live=0,staleUnseen=0,staleTotal=0;
     rows.forEach(function(r){
       todaySum+=r.today_usd||0; allSum+=r.total_usd||0;
@@ -783,6 +810,7 @@ function renderBurnGlobal(){
           .then(function(res){ if(res.error){ toast('sync: '+res.error,'err'); } else { toast(name+' synced to proxy ('+(res.target.key_masked||'')+')','ok'); } });
       });
     });
+    finish();
   }).catch(function(){ burnRetry(body, renderBurnGlobal); });
 }
 
@@ -1223,7 +1251,7 @@ function jumpToCreated(kind, name, warnTxt){
 }
 
 function select(sb){
-  if(hostTimer){ clearInterval(hostTimer); hostTimer=null; }
+  clearTimers();
   state.sel=keyOf(sb);
   state.view='sandbox';                 // leaving any global view
   closeLogs();
