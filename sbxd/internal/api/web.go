@@ -512,6 +512,7 @@ function fmtTok(n){
 /* ---------- global views (overview / burn / config) ---------- */
 var hostTimer=null; // polling for the overview page; cleared on every view change
 var burnTimer=null; // polling for the burn ledger page; same contract
+var burnShowStale=false; // show-stale toggle state (undeclared ghost fixed: reading it in render guards threw and blanked the whole burn view)
 function clearTimers(){
   if(hostTimer){ clearInterval(hostTimer); hostTimer=null; }
   if(burnTimer){ clearInterval(burnTimer); burnTimer=null; }
@@ -1279,6 +1280,9 @@ function select(sb){
   updateButtons(sb);
   renderOverview(sb);
   renderConn(sb);
+  // keep the burned tab live across sandbox switches too - switching
+  // machines with the burn pane open must swap the data, not just the name
+  if(activeTab==='burn'){ renderBurnTab(sb); }
   if(activeTab==='logs'){ openLogs(sb); }
 }
 function renderOverview(sb){
