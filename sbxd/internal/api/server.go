@@ -1205,10 +1205,15 @@ func (s *Server) restoreVMBootSync(name string) {
 	}
 }
 
-// fsRoute backs the dashboard's folder browser (mount picker):
-// GET /api/fs?path=<dir> → entries under the user's home directory only.
-// Locally-bound dashboard convenience, stdlib only; traversal outside
-// home is rejected (loopback-only listener keeps symlink escape low-risk).
+// fsRoute backs the dashboard's folder browser (mount/share picker):
+// GET /api/fs?path=<dir> → directory entries. The browser STARTS in the
+// user's home directory (the response always carries "home" so the UI can
+// jump back), but any real host directory is browsable — over /mnt shares
+// and other volumes included. Pseudo-filesystems (/proc, /sys, /dev) are
+// refused: meaningless to mount, noisy to scroll. Symlink resolution stays
+// in front of the read so a home-relative link cannot disguise its target
+// — but with targets anywhere, a resolution IS the permission the picker
+// needs; the loopback listener + same-origin CSRF guard remain the boundary.
 func (s *Server) fsRoute(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		httpError(w, 405, "method not allowed")
@@ -1223,9 +1228,8 @@ func (s *Server) fsRoute(w http.ResponseWriter, r *http.Request) {
 	if raw := r.URL.Query().Get("path"); strings.TrimSpace(raw) != "" {
 		cur = filepath.Clean(strings.TrimSpace(raw))
 	}
-	// Symlink-resolve BEFORE the prefix check: a link inside home (say
-	// ~/point-to-etc) would otherwise let the picker browse — and the
-	// create-wizard bind-mount — directories elsewhere on the host.
+	// Symlink-resolve BEFORE the read: the picker shows the real tree, so
+	// ~/point-to-etc lands on /etc and lists /etc — never an obscured hop.
 	resolvedHome, err := filepath.EvalSymlinks(home)
 	if err != nil {
 		httpError(w, 500, "cannot resolve home: "+err.Error())
@@ -1236,11 +1240,13 @@ func (s *Server) fsRoute(w http.ResponseWriter, r *http.Request) {
 		httpError(w, 404, "cannot resolve "+cur+": "+err.Error())
 		return
 	}
-	if resolved != resolvedHome && !strings.HasPrefix(resolved, resolvedHome+string(filepath.Separator)) {
-		httpError(w, 400, "path outside home directory")
-		return
-	}
 	cur = resolved
+	for _, p := range []string{"/proc", "/sys", "/dev"} {
+		if cur == p || strings.HasPrefix(cur, p+string(filepath.Separator)) {
+			httpError(w, 400, "cannot browse "+cur+" (pseudo-filesystem — nothing mountable in there)")
+			return
+		}
+	}
 	ents, err := os.ReadDir(cur)
 	if err != nil {
 		httpError(w, 404, "cannot read "+cur+": "+err.Error())
@@ -1260,10 +1266,10 @@ func (s *Server) fsRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	out := append(dirs, files...) // folders first for the picker
 	parent := ""
-	if cur != home {
+	if cur != "/" {
 		parent = filepath.Dir(cur)
 	}
-	okJSON(w, map[string]any{"ok": true, "path": cur, "parent": parent, "entries": out})
+	okJSON(w, map[string]any{"ok": true, "path": cur, "home": resolvedHome, "parent": parent, "entries": out})
 }
 
 func (s *Server) configRoute(w http.ResponseWriter, r *http.Request) {

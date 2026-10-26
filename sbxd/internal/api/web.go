@@ -9,6 +9,7 @@ const indexHTML = `<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>SBX Desktop — OpenCode Sandboxes</title>
 <link rel="stylesheet" href="/static/style.css">
+<script>document.documentElement.setAttribute('data-theme',localStorage.getItem('sbx-theme')||'dark');</script>
 </head>
 <body>
 <header id="topbar">
@@ -17,6 +18,7 @@ const indexHTML = `<!doctype html>
     <span class="hbadge" id="h-docker">docker</span>
     <span class="hbadge" id="h-libvirt">libvirt</span>
     <span class="hbadge" id="h-tmux">tmux</span>
+    <button id="theme-toggle" class="iconbtn" title="Switch light / dark" aria-label="Switch theme">◐</button>
   </div>
 </header>
 
@@ -41,7 +43,7 @@ const indexHTML = `<!doctype html>
     <div id="empty">
       <div class="emptycard">
         <h3>No sandbox selected</h3>
-        <p>Pick one from the sidebar, or spin up a fresh kit-faithful sandbox.</p>
+        <p>Select a sandbox from the sidebar, or create a new one.</p>
         <button class="cta2" data-create>＋ Create sandbox</button>
       </div>
     </div>
@@ -85,7 +87,7 @@ const indexHTML = `<!doctype html>
       </div>
 
       <div id="tab-burn" class="tabpane">
-        <div class="hint">Per-sandbox token ledger: fed by the sbxd proxy (upstream usage or chars/4 estimate — marked).</div>
+        <div class="hint">Per-sandbox token ledger from the proxy. Upstream-reported usage where the provider gives it; chars/4 estimate where it doesn't (marked).</div>
         <div id="burn-sbx"></div>
       </div>
     </section>
@@ -113,11 +115,23 @@ const styleCSS = `/* SBX Desktop design system — hand-rolled, no framework */
   --acc:#5b8cff; --acc2:#7aa5ff; --acc-soft:rgba(91,140,255,.16);
   --grn:#4cc38a; --red:#e5484d; --yel:#e7a43b;
   --line:#232b3a; --line2:#2e3a4e;
+  --field:#0b0f16; --well:#0a0d12;
   --mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
   --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Inter",sans-serif;
   --r1:6px; --r2:10px; --r3:14px;
   --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px;
   --shadow:0 10px 30px rgba(2,6,14,.5);
+  color-scheme:dark;
+}
+html[data-theme=light]{
+  --bg:#f4f5f7; --bg2:#ffffff; --bg3:#eef1f5; --bg4:#e3e7ee;
+  --fg:#1b2430; --dim:#4c5768; --faint:#8a94a4;
+  --acc:#2f66e8; --acc2:#2f66e8; --acc-soft:rgba(47,102,232,.10);
+  --grn:#1a7f4b; --red:#d33a3f; --yel:#a86310;
+  --line:#e3e7ee; --line2:#d3d9e4;
+  --field:#ffffff; --well:#f2f4f7;
+  --shadow:0 8px 22px rgba(20,30,50,.10);
+  color-scheme:light;
 }
 *{box-sizing:border-box}
 html,body{height:100%}
@@ -162,8 +176,8 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13.5px/1.5 var(--sans);d
 .pill.running{background:rgba(76,195,138,.12);color:var(--grn);border-color:rgba(76,195,138,.4)}
 .pill.created{background:rgba(91,140,255,.12);color:var(--acc2);border-color:rgba(91,140,255,.4)}
 .pill.paused,.pill.restarting{background:rgba(231,164,59,.12);color:var(--yel);border-color:rgba(231,164,59,.4)}
-.pill.exited,.pill.dead,.pill.stopped{background:rgba(229,72,77,.1);color:#f08a8d;border-color:rgba(229,72,77,.35)}
-.pill.shutoff{background:rgba(231,164,59,.08);color:#cbb27a;border-color:rgba(231,164,59,.25)}
+.pill.exited,.pill.dead,.pill.stopped{background:rgba(229,72,77,.1);color:var(--red);border-color:rgba(229,72,77,.35)}
+.pill.shutoff{background:rgba(231,164,59,.08);color:var(--yel);border-color:rgba(231,164,59,.25)}
 .pill.booting{background:rgba(231,164,59,.14);color:var(--yel);border-color:rgba(231,164,59,.5);animation:sbxpulse 1.5s ease-in-out infinite}
 .pill.stopping,.pill.starting{background:rgba(231,164,59,.14);color:var(--yel);border-color:rgba(231,164,59,.5);animation:sbxpulse 1.5s ease-in-out infinite}
 @keyframes sbxpulse{from{opacity:1}50%{opacity:.55}to{opacity:1}}
@@ -220,7 +234,7 @@ button.tool{background:var(--bg3);border:1px solid var(--line2);border-radius:va
 .iconbtn{background:none;border:none;color:var(--faint);font-size:.8rem;padding:.3rem .5rem;border-radius:var(--r1);line-height:1}
 .iconbtn:hover{color:var(--red);background:rgba(229,72,77,.1);border:none}
 input,select,textarea{font-family:var(--sans)}
-input[type=text],input:not([type]),select,textarea{background:#0b0f16;border:1px solid var(--line2);color:var(--fg);border-radius:var(--r1);padding:.4rem .6rem;font-size:.8rem;height:32px}
+input[type=text],input:not([type]),select,textarea{background:var(--field);border:1px solid var(--line2);color:var(--fg);border-radius:var(--r1);padding:.4rem .6rem;font-size:.8rem;height:32px}
 input:focus,select:focus,textarea:focus{border-color:var(--acc);outline:none;box-shadow:0 0 0 3px var(--acc-soft)}
 input::placeholder,textarea::placeholder{color:var(--faint)}
 select{appearance:none;-webkit-appearance:none;padding-right:1.6rem;background-image:url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238d99ab' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right .55rem center;cursor:pointer}
@@ -249,7 +263,7 @@ select{appearance:none;-webkit-appearance:none;padding-right:1.6rem;background-i
 /* ---------- logs ---------- */
 .logbar{display:flex;align-items:center;gap:var(--s3);color:var(--faint);font-size:.76rem;margin-bottom:var(--s2)}
 .logbar button{padding:.25rem .6rem;font-size:.72rem}
-#logbox{background:#0a0d12;border:1px solid var(--line);border-radius:var(--r2);padding:var(--s3) var(--s4);height:min(52vh,640px);overflow:auto;font:11.5px/1.55 var(--mono);white-space:pre-wrap;word-break:break-word;margin:0}
+#logbox{background:var(--well);border:1px solid var(--line);border-radius:var(--r2);padding:var(--s3) var(--s4);height:min(52vh,640px);overflow:auto;font:11.5px/1.55 var(--mono);white-space:pre-wrap;word-break:break-word;margin:0}
 
 /* ---------- connection rows ---------- */
 #conn-rows .row{display:flex;align-items:center;gap:var(--s3);background:var(--bg2);border:1px solid var(--line);border-radius:var(--r2);padding:.55rem .7rem;margin-bottom:var(--s2)}
@@ -265,9 +279,9 @@ select{appearance:none;-webkit-appearance:none;padding-right:1.6rem;background-i
 .subwrap{margin:var(--s1) 0 var(--s2) var(--s1);font-size:.75rem}
 .subwrap .kv{color:var(--dim)}
 .recent td{color:var(--dim)}
-input.money{width:78px;background:#0b0f16;border:1px solid var(--line2);color:var(--fg);padding:.3rem .45rem;border-radius:var(--r1);font:.75rem var(--mono)}
+input.money{width:78px;background:var(--field);border:1px solid var(--line2);color:var(--fg);padding:.3rem .45rem;border-radius:var(--r1);font:.75rem var(--mono)}
 input.money.big{width:100%}
-textarea#cfg-editor{width:100%;min-height:54vh;background:#0a0d13;color:var(--fg);border:1px solid var(--line2);border-radius:var(--r2);padding:var(--s4);font:.78rem/1.55 var(--mono);white-space:pre;resize:vertical}
+textarea#cfg-editor{width:100%;min-height:54vh;background:var(--well);color:var(--fg);border:1px solid var(--line2);border-radius:var(--r2);padding:var(--s4);font:.78rem/1.55 var(--mono);white-space:pre;resize:vertical}
 .warnline{color:var(--yel);font-size:.78rem;margin:var(--s2) 0}
 
 /* ---------- create wizard: sandbox-kind radios + VM sizing ---------- */
@@ -287,7 +301,7 @@ tr.rowdim td:first-child{opacity:.95}
 .chipmuted{font-size:.6rem;color:var(--yel);border:1px solid rgba(231,164,59,.5);border-radius:999px;padding:.05rem .45rem;margin-left:.4rem;text-transform:uppercase;letter-spacing:.05em;vertical-align:middle}
 .starpin{background:none;border:none;color:var(--faint);cursor:pointer;font-size:1rem;padding:0 .15rem;line-height:1}
 .starpin:hover{color:var(--yel)}
-.starpin.on{color:#f5c542}
+.starpin.on{color:var(--yel)}
 
 /* ---------- toasts ---------- */
 #toasts{position:fixed;right:var(--s4);bottom:var(--s4);display:flex;flex-direction:column;gap:var(--s2);z-index:50}
@@ -312,13 +326,13 @@ tr.rowdim td:first-child{opacity:.95}
 .fm.iserr{color:var(--red)}
 label.check,label.ro{display:flex;align-items:center;gap:var(--s2);cursor:pointer;font-size:.8rem;color:var(--fg);user-select:none}
 label.check input,label.ro input{position:absolute;opacity:0;pointer-events:none}
-label.check .box,label.ro .box{width:15px;height:15px;border-radius:4px;border:1px solid var(--line2);background:#0b0f16;display:inline-block;position:relative;flex:none;transition:background .12s,border-color .12s}
+label.check .box,label.ro .box{width:15px;height:15px;border-radius:4px;border:1px solid var(--line2);background:var(--field);display:inline-block;position:relative;flex:none;transition:background .12s,border-color .12s}
 label.check input:checked~.box,label.ro input:checked~.box{background:var(--acc);border-color:var(--acc)}
 label.check input:checked~.box::after,label.ro input:checked~.box::after{content:"";position:absolute;left:4.6px;top:1.6px;width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
 label.check:hover .box,label.ro:hover .box{border-color:var(--acc)}
 .rows-t{font-size:.74rem;color:var(--dim);margin:var(--s3) 0 var(--s2)}
 .rows{display:flex;flex-direction:column;gap:var(--s2)}
-.drow{display:flex;align-items:center;gap:var(--s2);background:#0b0f16;border:1px solid var(--line);border-radius:var(--r2);padding:.45rem .6rem}
+.drow{display:flex;align-items:center;gap:var(--s2);background:var(--field);border:1px solid var(--line);border-radius:var(--r2);padding:.45rem .6rem}
 .drow:focus-within{border-color:var(--acc);box-shadow:0 0 0 3px var(--acc-soft)}
 .drow input{background:none;border:none;box-shadow:none;height:26px;padding:.1rem .2rem;font-size:.8rem;color:var(--fg);min-width:0}
 .drow input:focus{outline:none;box-shadow:none;border:none}
@@ -480,10 +494,10 @@ function showGlobal(kind){
   $('pane').hidden=true; $('empty').hidden=true; $('global').hidden=false;
   var titles={overview:'Overview — host & sandboxes', burn:'Burn — token & dollar ledger', create:'Create sandbox', config:'Config — global OpenCode settings'};
   var subs={
-    overview:'host CPU, memory, disk and the live sandbox inventory — refreshed every 5 s',
-    burn:'fed by the sbxd proxy — upstream keys never reach sandboxes',
-    create:'kit-faithful container via the daemon — mounts and ports bake in at creation',
-    config:'providers, default model, proxy port, prices — saved in ~/.config/sbxd/config.json'
+    overview:'Machine stats and every sandbox on this host. Updates every 5 seconds.',
+    burn:'Proxy traffic per sandbox and in total. Provider keys stay on the host.',
+    create:'Runs through the daemon. Mounts and ports are fixed at creation.',
+    config:'Providers, proxy and prices. Stored in ~/.config/sbxd/config.json'
   };
   $('glob-title').textContent = titles[kind] || 'Config — global OpenCode settings';
   $('glob-sub').textContent = subs[kind] || subs.config;
@@ -567,7 +581,7 @@ function renderHostOverview(){
       ovKV('daemon', 'sbxd '+esc(j.version||''))+
       ovKV('uptime', esc(humanDur(hs.uptime_seconds)))+
       '</div></div>';
-    body.innerHTML='<div class="hint">live host &amp; sandbox metrics — refreshed every 5 s<div class="ov-grid" style="margin-top:var(--s4)">'+
+    body.innerHTML='<div class="ov-grid">'+
       cpuCard+memCard+sbxCard+sysCard+diskCards+'</div>';
   }
   body.innerHTML='<div class="hint" style="display:flex;align-items:center;gap:8px"><span class="spin"></span>reading host metrics…</div>';
@@ -708,7 +722,7 @@ function renderCreator(){
   var body=$('glob-body');
   var stackOpts=['go','node','python','rust','base'].map(function(s){return '<option'+(s==='go'?' selected':'')+'>'+s+'</option>';}).join('');
   body.innerHTML=
-    '<div class="hint">Creates a sandbox through the daemon. <b>Containers</b> are kit-faithful (dev.sbx labels, opencode auth mounts, per-stack cache volume). <b>VMs</b> boot a full Debian guest with docker + opencode preinstalled (libvirt &quot;sbxvm&quot; or docker-backend &quot;sbxvmd&quot;) — creation returns the moment the machine is spawned; the guest finishes booting in the background and its models wire up automatically at boot-end (the cloud master image must be fetched once via <code>sbxvm fetch-image</code>).</div>'+
+    '<div class="hint">Containers run on this host\'s Docker with the kit\'s labels, mounts and auth setup. <b>VMs</b> boot a full Debian guest (libvirt or Docker-backed QEMU): creation returns at spawn and the guest finishes booting in the background — models arrive automatically once the guest is up. First VM on this host needs the master image once (<code>sbxvm fetch-image</code>).</div>'+
     '<div class="cw">'+
     '<div class="cw-card">'+
     '<div class="cw-sec"><div class="cw-sec-t">Sandbox kind</div>'+
@@ -717,7 +731,7 @@ function renderCreator(){
         '<label class="check"><input type="radio" name="cwkind" value="vm-libvirt"><span class="box"></span> VM · libvirt (sbxvm)</label>'+
         '<label class="check"><input type="radio" name="cwkind" value="vm-docker"><span class="box"></span> VM · docker (sbxvmd)</label>'+
       '</div>'+
-      '<div class="fm" id="cw-kindmsg">containers share the host kernel — seconds to spawn, mounts/ports bake in at creation.</div>'+
+      '<div class="fm" id="cw-kindmsg">Same kernel as the host. Spawns in seconds; mounts and ports are fixed at creation.</div>'+
     '</div>'+
     '<div class="cw-sec"><div class="cw-sec-t">Basics</div><div class="cw-grid two">'+
       '<div class="field"><label for="cw-name">Name</label><input id="cw-name" placeholder="myproj" autocomplete="off" spellcheck="false" maxlength="40"><div class="fm" id="cw-namemsg"></div></div>'+
@@ -746,7 +760,7 @@ function renderCreator(){
       '<div class="field"><label for="cw-vmdisk">Disk (GB)</label><input id="cw-vmdisk" class="money big" value="20" inputmode="numeric"><div class="fm">growable qcow2, 10–512</div></div>'+
       '<div class="field"><label for="cw-vmshare">Share directory (host)</label><div class="mwrap"><input id="cw-vmshare" placeholder="optional — e.g. ~/projects/myapp" spellcheck="false"><button type="button" class="browse" id="cw-vmshare-browse">Browse…</button></div><div class="fm">folder-picker as on container mounts — mounted at /workspace in the guest, empty = VM-local workspace</div></div>'+
     '</div>'+
-    '<div class="fm">the guest gets its root user + dev user with your uid inside; opencode connects through the sbx proxy — models wire up automatically at first boot-end (manual fallback: the sync button on the Burn overview).</div>'+
+    '<div class="fm">The guest logs in with your uid; opencode talks to the host proxy. Models arrive automatically at boot end (fallback: the sync button under Burn).</div>'+
     '</div>'+
     '<div class="cw-sec"><div class="cw-sec-t">OpenCode</div><div class="cw-grid two">'+
       '<div class="field"><label>Sync to sbx proxy</label><label class="check"><input type="checkbox" id="cw-sync" checked><span class="box"></span>mint sandbox key &amp; write transport</label><div class="fm">provider keys never enter the sandbox</div></div>'+
@@ -870,7 +884,7 @@ function updateCreatorKind(){
   var km=document.getElementById('cw-kindmsg');
   var nm=document.getElementById('cw-namemsg');
   if(km){
-    km.textContent = k==='container' ? 'containers share the host kernel — seconds to spawn, mounts/ports bake in at creation.' :
+    km.textContent = k==='container' ? 'Same kernel as the host. Spawns in seconds; mounts and ports are fixed at creation.' :
       k==='vm-libvirt' ? 'libvirt VM on the host (sbxvm-<name>) — needs qemu:///system; strongest isolation.' :
       'docker-backend VM (sbxvmd-<name>) — QEMU in a container; works where libvirt is unavailable (e.g. Docker Desktop).';
   }
@@ -921,7 +935,7 @@ function mountRow(host){
 }
 
 /* ---------- folder browser modal (GET /api/fs) ---------- */
-var fsState={cb:null,path:'',sel:'',parent:''};
+var fsState={cb:null,path:'',home:'',sel:'',parent:''};
 function openFS(cb){
   fsState.cb=cb;
   ensureFS();
@@ -941,7 +955,7 @@ function ensureFS(){
     '<div class="fs-pathbar"><button type="button" id="fs-up" title="up one level">↑</button><input id="fs-cur" spellcheck="false" autocomplete="off"><button type="button" id="fs-go">Go</button></div>'+
     '<div class="fs-crumb" id="fs-crumb"></div>'+
     '<div class="fs-list" id="fs-list"></div>'+
-    '<div class="fs-foot"><span class="fs-sel" id="fs-selfile"></span><button type="button" id="fs-cancel">Cancel</button><button type="button" class="primary" id="fs-ok">Use this folder</button></div>'+
+    '<div class="fs-foot"><span class="fs-sel" id="fs-selfile"></span><button type="button" id="fs-home" title="back to your home folder">Home</button><button type="button" id="fs-cancel">Cancel</button><button type="button" class="primary" id="fs-ok">Use this folder</button></div>'+
     '</div>');
   document.body.appendChild(m);
   m.querySelector('.fs-x').addEventListener('click',fsClose);
@@ -949,6 +963,7 @@ function ensureFS(){
   $('fs-go').addEventListener('click',function(){ fsLoad($('fs-cur').value.trim()); });
   $('fs-cur').addEventListener('keydown',function(ev){ if(ev.key==='Enter'){ fsLoad(this.value.trim()); } });
   $('fs-up').addEventListener('click',function(){ if(fsState.parent){ fsLoad(fsState.parent); } });
+  $('fs-home').addEventListener('click',function(){ if(fsState.home){ fsLoad(fsState.home); } });
   $('fs-ok').addEventListener('click',function(){
     var p=(fsState.sel&&fsState.sel.length)?fsState.sel:fsState.path;
     if(!p){ return; }
@@ -969,9 +984,10 @@ function fsLoad(p){
 }
 function fsRender(j){
   var list=$('fs-list');
-  fsState.path=j.path; fsState.parent=j.parent||''; fsState.sel='';
+  fsState.path=j.path; fsState.home=j.home||''; fsState.parent=j.parent||''; fsState.sel='';
   $('fs-cur').value=j.path;
   $('fs-up').disabled=!j.parent;
+  $('fs-home').disabled=!fsState.home;
   $('fs-ok').textContent='Use this folder';
   $('fs-selfile').textContent='';
   fsCrumbs(j.path);
@@ -1082,7 +1098,7 @@ function renderBurnTab(sb){
 
 function renderConfigGlobal(){
   var body=$('glob-body');
-  body.innerHTML='<div class="hint">Providers hold the upstream endpoints + keys — they stay in sbxd; sandboxes only ever see their minted proxy key. Values shown as <code>&lt;masked&gt;</code> are preserved on save. After editing providers run <code>sbxd sync</code> (or the sync button on the burn view).</div>'+
+  body.innerHTML='<div class="hint">Providers hold the upstream endpoints and keys. They stay in sbxd; sandboxes receive only their minted proxy key. Values shown as <code>&lt;masked&gt;</code> are preserved on save. After editing providers run <code>sbxd sync</code> (or the sync button on the burn view).</div>'+
     '<textarea id="cfg-editor" spellcheck="false"></textarea>'+
     '<div class="warnline" id="cfg-warn"></div>';
   fetch('/api/config').then(function(r){return r.json();}).then(function(cfg){
@@ -1372,6 +1388,11 @@ function init(){
   initTabs(); refreshHealth(); openEvents();
   renderList(); // paint the loading spinner right away — the first snapshot may take seconds
   setInterval(refreshHealth, 12000);
+  $('theme-toggle').addEventListener('click', function(){
+    var next=document.documentElement.getAttribute('data-theme')==='light'?'dark':'light';
+    document.documentElement.setAttribute('data-theme',next);
+    try{ localStorage.setItem('sbx-theme',next); }catch(e){}
+  });
   // patience hint while the very first inventory scan is still running
   setTimeout(function(){
     if(!state.firstData){

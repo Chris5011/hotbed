@@ -337,6 +337,26 @@ if grep -q 'cw-vmshare-browse' <<<"$APPJS" && grep -q 'function openFS' <<<"$APP
 else
     fail "dashboard: VM share folder picker missing"
 fi
+# folder picker policy: starts at home, browses the whole host tree,
+# refuses pseudo-filesystems.
+FSDEF="$(curl -s --max-time 3 "http://127.0.0.1:$PORT/api/fs")"
+python3 - "$FSDEF" <<'PY' 2>/dev/null && pass "fs picker: defaults to the home directory" \
+    || fail "fs picker: default is not home"
+import json,sys
+d=json.loads(sys.argv[1])
+sys.exit(0 if d.get('ok') and d.get('path')==d.get('home') else 1)
+PY
+curl -s --max-time 3 "http://127.0.0.1:$PORT/api/fs?path=/etc" | grep -q '"name":"passwd"' \
+    && pass "fs picker: browses host directories beyond home (/etc)" \
+    || fail "fs picker: /etc not browsable"
+curl -s --max-time 3 "http://127.0.0.1:$PORT/api/fs?path=/proc" | grep -q '"error"' \
+    && pass "fs picker: pseudo-filesystems refused (/proc)" \
+    || fail "fs picker: /proc should be refused"
+# light theme ships: both palettes in style.css and the toggle wired in app.js
+curl -s --max-time 3 "http://127.0.0.1:$PORT/static/style.css" | grep -q 'data-theme=light' \
+    && grep -q 'theme-toggle' <<<"$APPJS" \
+    && pass "dashboard: light theme available (palette + toggle)" \
+    || fail "dashboard: light theme missing"
 rm -rf "$scratch" 2>/dev/null || true
 
 hdr "vm boot registration (kit scheme probe)"
