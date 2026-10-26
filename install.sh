@@ -6,8 +6,13 @@
 #
 #   ./install.sh                     interactive defaults (asks about the image)
 #   ./install.sh --yes               accept defaults non-interactively
+#   ./install.sh --with-deps         apt-install all missing host prereqs first
 #   ./install.sh --fetch-image       pre-fetch the ~1 GB cloud master image now
 #   ./install.sh --config-init       import LLM providers once, non-interactively
+#
+# One line on a fresh Debian/Ubuntu box (installs deps + everything else):
+#   git clone https://github.com/Chris5011/OpenCode-SBX.git \
+#     && cd OpenCode-SBX && ./install.sh --with-deps --yes
 #
 # After installing:
 #   sbxd-serve            start the daemon (dashboard/API at 127.0.0.1:7770)
@@ -16,13 +21,17 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="$HOME/.local/bin"
-YES=0; DO_IMAGE=0; DO_CONFIG=0
+YES=0; DO_IMAGE=0; DO_CONFIG=0; DO_DEPS=0
 
 for a in "$@"; do
     case "$a" in
         --yes)         YES=1 ;;
+        --with-deps)   DO_DEPS=1 ;;
         --fetch-image) DO_IMAGE=1 ;;
         --config-init) DO_CONFIG=1 ;;
+        -h|--help)
+            grep '^#' "$0" | sed 's/^# \{0,1\}//' | tail -n +2
+            exit 0 ;;
         *) echo "unknown flag: $a (see --help)" >&2; exit 2 ;;
     esac
 done
@@ -41,6 +50,98 @@ ask()  { # ask QUESTION [default]
 
 mkdir -p "$BIN_DIR"
 say "install root: $ROOT"
+
+# ---- --with-deps: apt-install every missing host prerequisite -----------------
+# The dependency gate further down FAILS on a fresh box (docker, tmux, even go
+# for the source build). --with-deps turns "install them first" into "do it".
+# Debian/Ubuntu via apt-get; anything else exits with the plain tool list.
+if [[ $DO_DEPS -eq 1 ]]; then
+    if [[ $(id -u) -eq 0 ]]; then
+        SUDO=""
+    elif command -v sudo >/dev/null 2>&1; then
+        SUDO="sudo"
+    else
+        fail "--with-deps needs root or sudo (no sudo found)"
+    fi
+    # a piped/non-interactive run (`curl … | bash`) cannot answer sudo's
+    # password prompt - fail with the remedy instead of sudo's raw stderr
+    if [[ -n "$SUDO" ]] && ! $SUDO -n true 2>/dev/null; then
+        fail "--with-deps needs sudo. Run me in your own terminal (the password prompt is normal), or as root."
+    fi
+    if ! command -v apt-get >/dev/null 2>&1; then
+        fail "--with-deps supports apt (Debian/Ubuntu). Missing prereqs must be \
+installed manually: docker tmux git curl wget jq ripgrep ssh less xz zip unzip \
+file build-essential pkg-config python3 (docker: docs.docker.com/engine/install/)"
+    fi
+
+    # command -> apt package (only actually-missing commands are installed)
+    declare -a MISS=()
+    add() { command -v "$1" >/dev/null 2>&1 || MISS+=("$2"); }
+    add bash    bash
+    add docker  docker.io
+    add tmux    tmux
+    add git     git
+    add curl    curl
+    add wget    wget
+    add jq      jq
+    add rg      ripgrep
+    add ssh     openssh-client
+    add less    less
+    add xz      xz-utils
+    add zip     zip
+    add unzip   unzip
+    add file    file
+    add gcc     build-essential
+    add make    build-essential
+    add pkg-config pkg-config
+    add python3 python3
+    add pip3    python3-pip
+
+    if (( ${#MISS[@]} )); then
+        say "installing host dependencies via apt: ${MISS[*]}"
+        $SUDO apt-get update
+        $SUDO DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${MISS[@]}"
+    else
+        say "apt-installable dependencies: all present"
+    fi
+
+    # docker: engine enabled + the running user actually allowed to use it
+    if command -v docker >/dev/null 2>&1; then
+        $SUDO systemctl enable --now docker >/dev/null 2>&1 || true
+        if ! id -nG "${SUDO_USER:-$USER}" 2>/dev/null | tr ' ' '\n' | grep -qxi docker; then
+            $SUDO usermod -aG docker "${SUDO_USER:-$USER}" || true
+            say "added ${SUDO_USER:-$USER} to the docker group - re-login for it to apply"
+        fi
+    fi
+
+    # Go toolchain: only needed when there is no daemon binary anywhere; the
+    # official tarball beats apt's older golang (the daemon wants a recent Go).
+    if ! command -v go >/dev/null 2>&1 && [[ "$(uname -m)" == x86_64 || "$(uname -m)" == aarch64 ]]; then
+        say "installing the Go toolchain (official tarball: apt's golang is too old)"
+        GARCH="$(uname -m)"; [ "$GARCH" = x86_64 ] && GARCH=amd64 || GARCH=arm64
+        GVER="$(curl -fsSL 'https://go.dev/dl/?mode=json' | jq -r '.[0].version' | sed 's/^go//')"
+        GVER="${GVER:-1.24.0}"
+        curl -fsSL "https://go.dev/dl/go${GVER}.linux-${GARCH}.tar.gz" -o /tmp/opencode-gotool.tgz
+        $SUDO rm -rf /usr/local/go
+        $SUDO tar -xzf /tmp/opencode-gotool.tgz -C /usr/local
+        rm -f /tmp/opencode-gotool.tgz
+        export PATH="/usr/local/go/bin:$PATH"
+        go version
+    fi
+
+    # VM libvirt stack is heavy: opt-in rather than part of the default sweep
+    if ! command -v virsh >/dev/null 2>&1; then
+        ans="$(ask "install the libvirt VM stack too (qemu/kvm, ~300 MB)? [y/N]" n)"
+        if [[ $ans =~ ^[Yy]$ ]]; then
+            $SUDO DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+                libvirt-daemon-system libvirt-clients virtinst xorriso
+            $SUDO usermod -aG libvirt "${SUDO_USER:-$USER}" || true
+            $SUDO systemctl enable --now libvirtd >/dev/null 2>&1 || true
+        else
+            say "skipping libvirt - docker-backend VMs still work, apt line in --help"
+        fi
+    fi
+fi
 
 # ---- daemon binary: adopt a release asset, else build from source ------------
 SBXD="$ROOT/sbxd/bin/sbxd"

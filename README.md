@@ -206,6 +206,7 @@ The daemon itself has one of two routes (installer or binary):
   fallback shell out to the kit's `vm/sbxvm.sh`, so you'll want the tree
   too.
 - **Go 1.26+ toolchain**: `install.sh` (next steps) builds `sbxd` itself.
+  (`--with-deps` can fetch and install the toolchain for you.)
 
 ### 2 · Get the kit tree
 
@@ -245,6 +246,16 @@ step 3.
 
 ```bash
 ./install.sh            # interactive; add --yes to take all defaults
+```
+
+On a fresh Debian/Ubuntu box you can do it in one line: the flag below
+apt-installs every missing prerequisite first (docker, tmux, git, curl, jq,
+ripgrep, ssh, build tools, and the Go toolchain for the source build), then
+runs the normal install:
+
+```bash
+git clone https://github.com/Chris5011/OpenCode-SBX.git \
+  && cd OpenCode-SBX && ./install.sh --with-deps --yes
 ```
 
 It will:
