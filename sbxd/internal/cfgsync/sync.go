@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"sbxd/internal/config"
 	"sbxd/internal/env"
@@ -67,6 +68,17 @@ func Lookup(sandboxName string) (Target, bool) {
 		return Target{}, false
 	}
 	return t, true
+}
+
+// LastSync reports when the sandbox last received a synced proxy target
+// (mtime of its store entry). attach-session env stamps compare against
+// this to know when a running shell pane is stale.
+func LastSync(sandboxName string) (time.Time, bool) {
+	fi, err := os.Stat(filepath.Join(storeDir(), safeName(sandboxName)+".json"))
+	if err != nil || fi.IsDir() {
+		return time.Time{}, false
+	}
+	return fi.ModTime(), true
 }
 
 // LookupMasked returns only masked info (API responses).

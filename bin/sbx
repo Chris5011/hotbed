@@ -197,7 +197,17 @@ run_opts_common() {
 
 # tty-aware docker exec env (opencode TUI needs TERM etc.)
 exec_env_flags() {
+    local cn="$1"
     printf -- '--env=TERM=%s\n' "${TERM:-xterm-256color}"
+    # Point opencode at the sbxd-synced proxy config when it exists
+    # (sbxd sync NAME): requests then flow through the daemon's token
+    # accounting proxy instead of the bind-mounted direct provider. Mirrors
+    # the daemon's attach-time XDG override. Without a synced config this
+    # stays silent — host providers keep working, burn stays uncounted.
+    if [[ -n "$cn" ]] && "$DOCKER" exec -u 0 "$cn" test -f \
+        /home/sbx/.config/opencode-sbx/opencode/opencode.json >/dev/null 2>&1; then
+        printf -- '--env=XDG_CONFIG_HOME=/home/sbx/.config/opencode-sbx\n'
+    fi
 }
 
 # tty flags for interactive docker runs/execs
@@ -239,7 +249,7 @@ shell() {
         local flags=() opts=() envs=() ttys=()
         mapfile -t flags < <(mounts_and_flags)
         mapfile -t opts < <(run_opts_common)
-        mapfile -t envs < <(exec_env_flags)
+        mapfile -t envs < <(exec_env_flags "${cn:-}")
         mapfile -t ttys < <(tty_flags)
         info "ephemeral sandbox (--fresh): everything dies when you exit"
         exec "$DOCKER" container run --rm "${ttys[@]}" \
@@ -251,7 +261,7 @@ shell() {
     ensure_container
     local cn uid gid envs=()
     cn="$(cnname)"; uid="$(id -u)"; gid="$(id -g)"
-    mapfile -t envs < <(exec_env_flags)
+    mapfile -t envs < <(exec_env_flags "${cn:-}")
     ok "entering sandbox $cn (project mounted at /workspace)"
     exec "$DOCKER" exec -it \
         -u "${uid}:${gid}" \
@@ -269,7 +279,7 @@ exec_in() {
     ensure_container
     local cn uid gid envs=() ttys=()
     cn="$(cnname)"; uid="$(id -u)"; gid="$(id -g)"
-    mapfile -t envs < <(exec_env_flags)
+    mapfile -t envs < <(exec_env_flags "${cn:-}")
     mapfile -t ttys < <(tty_flags)
     if [[ "${1:-}" == "--" ]]; then shift; fi
     if [[ "$#" -eq 0 ]]; then
@@ -303,7 +313,7 @@ opencode() {
     ensure_container
     local cn uid gid envs=() flags=() opts=() ttys=()
     cn="$(cnname)"; uid="$(id -u)"; gid="$(id -g)"
-    mapfile -t envs < <(exec_env_flags)
+    mapfile -t envs < <(exec_env_flags "${cn:-}")
     mapfile -t ttys < <(tty_flags)
     if [[ "${1:-}" == "--" ]]; then shift; fi
     if [[ "$OPT_FRESH" == "1" ]]; then

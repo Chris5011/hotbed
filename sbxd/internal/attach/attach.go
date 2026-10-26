@@ -45,8 +45,17 @@ func EnsureSession(sb sandbox.Sandbox, mode string, port string) (string, error)
 	}
 	sess := SessionName(sb.Name)
 	if HasSession(sess) {
-		// still alive? if the pane died the session dies with it — trust tmux
-		return sess, nil
+		// still alive? if the pane died the session dies with it — trust tmux.
+		// Sessions only carry the env they were born with: when the synced
+		// proxy target changed since creation (or the session predates sync
+		// entirely), respawn shell-mode panes once so the attach env lands.
+		// Never respawn over a running opencode TUI.
+		if !sessionEnvMatched(sess, sb.Name) && rollSafe(sb, mode) {
+			KillSession(sess)
+			audit.Record("attach.roll", sb.Name, "shell session respawned (attach env out of sync with the synced proxy target)")
+		} else {
+			return sess, nil
+		}
 	}
 
 	uid, gid := hostID()
@@ -54,7 +63,12 @@ func EnsureSession(sb sandbox.Sandbox, mode string, port string) (string, error)
 	switch sb.Kind {
 	case sandbox.KindContainer:
 		xdg := ""
-		if mode == "opencode" {
+		// shell mode counts too: opencode started at the "Open Terminal"
+		// prompt should use the synced proxy config (per-sandbox key), not
+		// the bind-mounted direct provider — otherwise the burn ledger
+		// stays empty by construction. tmux sessions roll on attach, so
+		// the env lands with this attach.
+		if mode == "opencode" || mode == "shell" {
 			if tg, ok := cfgsync.Lookup(sb.Name); ok && tg.XDGOverride {
 				xdg = "-e XDG_CONFIG_HOME=" + cnXdgEnvValue + " "
 			}
@@ -63,7 +77,7 @@ func EnsureSession(sb sandbox.Sandbox, mode string, port string) (string, error)
 		case "opencode":
 			inner = fmt.Sprintf("docker exec -it -u %s:%s -w /workspace -e TERM=xterm-256color %s%s opencode", uid, gid, xdg, sb.Name)
 		default:
-			inner = fmt.Sprintf("docker exec -it -u %s:%s -w /workspace -e TERM=xterm-256color %s bash", uid, gid, sb.Name)
+			inner = fmt.Sprintf("docker exec -it -u %s:%s -w /workspace -e TERM=xterm-256color %s%s bash", uid, gid, xdg, sb.Name)
 		}
 	case sandbox.KindVM:
 		ssh := SSHCommand(sb, port)
@@ -83,7 +97,45 @@ func EnsureSession(sb sandbox.Sandbox, mode string, port string) (string, error)
 	if out, err := engine.Run("tmux", outer...); err != nil {
 		return "", fmt.Errorf("tmux new-session: %v (%s)", err, strings.TrimSpace(out))
 	}
+	markSession(sess, sb.Name)
 	return sess, nil
+}
+
+// Session env stamp: sessions carry the env they were created with. The
+// stamp records the synced proxy target's mtime at creation ("none" when
+// unsynced). On attach, a mismatch (target synced/updated after the pane
+// was born, or a pre-marker session) tells the daemon to respawn the pane
+// once — bare shells only — so the synced-proxy env actually lands.
+func markSession(sess, sbName string) {
+	_, _ = engine.Run("tmux", "set-environment", "-t", sess, "SBX_ENV", envStamp(sbName))
+}
+
+func envStamp(sbName string) string {
+	if mt, ok := cfgsync.LastSync(sbName); ok {
+		return strconv.FormatInt(mt.Unix(), 10)
+	}
+	return "none"
+}
+
+func sessionEnvMatched(sess, sbName string) bool {
+	out, _ := engine.Run("tmux", "show-environment", "-t", sess, "SBX_ENV")
+	return strings.TrimSpace(string(out)) == "SBX_ENV="+envStamp(sbName)
+}
+
+// rollSafe says whether respawning this pane may lose user work. Shell-mode
+// container panes are plain prompts by design — they only carry the env they
+// were born with, so they are respawned once to adopt synced-proxy env.
+// Mode "opencode" panes and VMs are left alone: a VM's guest config is
+// replaced by sync directly, and an opencode TUI is a user's active task.
+func rollSafe(sb sandbox.Sandbox, mode string) bool {
+	return sb.Kind == sandbox.KindContainer && mode == "shell" && !hasRunningOpencode(sb.Name)
+}
+
+// hasRunningOpencode reports whether an opencode process is alive inside the
+// sandbox container — the common case of work in progress in a shell pane.
+func hasRunningOpencode(name string) bool {
+	out, _ := engine.Run("docker", "exec", name, "pgrep", "-x", "opencode")
+	return strings.TrimSpace(out) != ""
 }
 
 // SSHCommand returns a ready-to-run ssh command into a VM sandbox.
@@ -125,9 +177,15 @@ func ConnInfo(sb sandbox.Sandbox, mode string, port string) sandbox.ConnInfo {
 		if mode == "" {
 			mode = "shell"
 		}
-		ci.BackendCmd = fmt.Sprintf("docker exec -it -u %s:%s -w /workspace -e TERM=xterm-256color %s opencode", uid, gid, sb.Name)
-		ci.ShellCmd = fmt.Sprintf("docker exec -it -u %s:%s -w /workspace -e TERM=xterm-256color %s bash", uid, gid, sb.Name)
-		inner = "docker exec -it -u " + uid + ":" + gid + " -w /workspace -e TERM=xterm-256color " + sb.Name + " bash"
+		// one-shot variants get the synced-proxy XDG override too, or the
+		// Windows Terminal path would read the bind-mounted direct config.
+		xdg := ""
+		if tg, ok := cfgsync.Lookup(sb.Name); ok && tg.XDGOverride {
+			xdg = "-e XDG_CONFIG_HOME=" + cnXdgEnvValue + " "
+		}
+		ci.BackendCmd = fmt.Sprintf("docker exec -it -u %s:%s -w /workspace -e TERM=xterm-256color %s%s opencode", uid, gid, xdg, sb.Name)
+		ci.ShellCmd = fmt.Sprintf("docker exec -it -u %s:%s -w /workspace -e TERM=xterm-256color %s%s bash", uid, gid, xdg, sb.Name)
+		inner = "docker exec -it -u " + uid + ":" + gid + " -w /workspace -e TERM=xterm-256color " + xdg + sb.Name + " bash"
 	case sandbox.KindVM:
 		ssh := SSHCommand(sb, port)
 		ci.ShellCmd = ssh
