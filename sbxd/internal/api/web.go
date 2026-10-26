@@ -492,6 +492,15 @@ function renderItem(sb){
 }
 function short(s){ return (s||'').replace(/^\/home\//,'~/'); }
 function keyOf(sb){ return sb.kind+'/'+sb.name; }
+/* persist the front-most view so a page reload lands where the user left */
+function saveView(){
+  try{
+    localStorage.setItem('sbx-view', JSON.stringify({
+      view: state.view, sel: state.sel,
+      tab: (typeof activeTab!=='undefined') ? activeTab : null
+    }));
+  }catch(e){}
+}
 
 function renderList(){
   // until the first inventory snapshot lands (the daemon's initial docker/
@@ -557,6 +566,7 @@ function showGlobal(kind){
   else if(kind==='overview'){ renderHostOverview(); }
   else if(kind==='help'){ renderHelp(); }
   else { renderConfigGlobal(); }
+  saveView();
 }
 function kindFor(name){
   var sb=state.list.filter(function(x){return x.name===name;})[0];
@@ -706,7 +716,7 @@ function askConfirm(opts, cb){
   var btn=$('ask-ok');
   btn.textContent=opts.confirmLabel||'Confirm';
   btn.classList.toggle('ask-danger', !!opts.danger);
-  btn.classList.add((!opts.danger)?'primary':'');
+  if(!opts.danger){ btn.classList.add('primary'); } else { btn.classList.remove('primary'); }
   var modal=$('ask-modal');
   var close=function(ok){
     modal.classList.remove('open');
@@ -748,10 +758,7 @@ function addTool(bar,label,fn){
   b.addEventListener('click',fn); bar.appendChild(b); return b;
 }
 
-var lastBurnSig=''; // skip re-renders whose data did not change (no churn, no scroll jumps)
-function burnSig(rows){
-  return rows.map(function(r){ return [r.sandbox,r.calls,r.today_usd,r.total_usd,r.tokens_today,r.tokens_in,r.tokens_out,r.exists,r.pinned,r.budget_usd,r.budget_tokens].join('/'); }).join('|');
-}
+var lastBurnKeys=''; // structural signature of the burn table; value changes do NOT rebuild
 function renderBurnGlobal(){
   var body=$('glob-body');
   // burn rows change as sandboxes dial the proxy - poll while the tab is
@@ -767,148 +774,193 @@ function renderBurnGlobal(){
       renderBurnGlobal();
     },5000);
   };
-  body.innerHTML='<div class="hint">loading…</div>';
+  // a live table stays visible during the fetch - only a first paint shows
+  // loading, so every 5s tick updates cells in place instead of flickering
+  if(!body.querySelector('#burntbl')){ body.innerHTML='<div class="hint">loading…</div>'; }
   fetch('/api/usage').then(function(r){return r.json();}).then(function(j){
     if(state.view!=='burn') return; // a view switch happened mid-flight
-    if(state.view!=='burn') return; // a view switch happened mid-flight
-    var rows=j.rows||[];
-    if(!rows.length){ lastBurnSig=''; body.innerHTML='<div class="hint">No usage yet. Flow: sbxd config init → sbxd sync NAME → sandbox calls go through the proxy → rows appear here.</div>'; finish(); return; }
-    var sig=burnSig(rows);
-    if(sig===lastBurnSig && body.querySelector('#burntbl') && body.querySelector('.burnbar')){ finish(); return; }
-    lastBurnSig=sig;
-    var todaySum=0,allSum=0,live=0,staleUnseen=0,staleTotal=0;
-    rows.forEach(function(r){
-      todaySum+=r.today_usd||0; allSum+=r.total_usd||0;
-      if(r.exists){ live++; } else { staleTotal++; if(!r.pinned) staleUnseen++; }
-    });
-    var bar='<div class="burnbar">'+
-      '<div class="bstat"><div class="v">$'+todaySum.toFixed(4)+'</div><div class="k">burn today</div></div>'+
-      '<div class="bstat"><div class="v">$'+allSum.toFixed(4)+'</div><div class="k">burn all-time</div></div>'+
-      '<div class="bstat"><div class="v">'+live+'</div><div class="k">live sandboxes</div></div>'+
-      '<div class="bstat'+(staleUnseen>0?' warn':'')+'"><div class="v">'+staleUnseen+'</div><div class="k">stale history rows</div></div>'+
-      '</div>'+
-      '<div class="burntools">'+
-        '<label><input type="checkbox" id="burn-show-stale"'+(burnShowStale?' checked':'')+'> show stale rows</label>'+
-        '<button class="tool" id="burn-purge">🗑 purge stale history'+(staleUnseen?' ('+staleUnseen+')':'')+'</button>'+
-        '<span class="hint">stale = sandbox deleted · ★ pinned histories stay visible and survive the bulk purge</span>'+
-      '</div>';
-    var tbl='<table class="tbl" id="burntbl"><thead><tr><th></th><th>sandbox</th><th>state</th><th>today $</th><th>total $</th><th>calls</th><th>tok today</th><th>budget $</th><th>budget tok</th><th></th></tr></thead><tbody>';
-    rows.forEach(function(r){
-      var stale=!r.exists;
-      var hidden=stale&&!r.pinned&&!burnShowStale;
-      var dim=stale?' class="rowdim"':'';
-      var state=stale?'<span class="chipmuted">stale</span>':'<span class="chipmuted" style="color:var(--grn);border-color:rgba(76,195,138,.5)">live</span>';
-      var pin='<button class="starpin'+(r.pinned?' on':'')+' tpin" data-sbx="'+esc(r.sandbox)+'" data-p="'+(r.pinned?1:0)+'" title="'+(r.pinned?'unpin':'pin burn history')+'">'+(r.pinned?'★':'☆')+'</button>';
-      var bud;
-      if(stale){
-        bud='<td>-</td><td>-</td>';
-      }else{
-        bud='<td><input class="money" data-sbx="'+esc(r.sandbox)+'" value="'+(r.budget_usd>0? r.budget_usd : '')+'"></td>'+
-            '<td><input class="money" data-tok="'+esc(r.sandbox)+'" value="'+(r.budget_tokens>0? r.budget_tokens : '')+'"></td>';
-      }
-      var acts;
-      if(stale){
-        acts='<button class="tool trowdel" data-sbx="'+esc(r.sandbox)+'">delete records</button>';
-      }else{
-        acts='<button class="tool tbud" data-sbx="'+esc(r.sandbox)+'">set</button>'+
-             '<button class="tool tdrill" data-sbx="'+esc(r.sandbox)+'">detail</button>'+
-             '<button class="tool tsync" data-sbx="'+esc(r.sandbox)+'">sync</button>';
-      }
-      tbl+='<tr'+dim+(hidden?' data-hidden="1"':'')+' data-sbx="'+esc(r.sandbox)+'"><td>'+pin+'</td><td>'+esc(r.sandbox)+'&nbsp;&nbsp;'+state+'</td>'+
-        '<td>$'+(r.today_usd||0).toFixed(4)+'</td><td>$'+(r.total_usd||0).toFixed(4)+'</td><td>'+(r.calls||0)+'</td><td>'+fmtTok(r.tokens_today)+'</td>'+
-        bud+'<td class="actions">'+acts+'</td></tr>'+
-        (stale?'':'<tr class="drillrow" data-sbx="'+esc(r.sandbox)+'" hidden><td colspan="10" id="drill-'+esc(r.sandbox)+'"></td></tr>');
-    });
-    tbl+='</tbody></table>';
-    body.innerHTML=bar+tbl;
-    var chk=body.querySelector('#burn-show-stale');
-    if(chk){ chk.addEventListener('change',function(){ burnShowStale=chk.checked; renderBurnGlobal(); }); }
-    var pp=body.querySelector('#burn-purge');
-    if(pp){
-      pp.disabled=staleUnseen===0;
-      if(staleUnseen>0){
-        pp.addEventListener('click',function(){
-          askConfirm({
-            title:'Purge stale burn history?',
-            body:'Delete the burn history of <b>'+staleUnseen+'</b> stale (unpinned) sandbox row(s)? Pinned <b>★</b> histories are kept.',
-            confirmLabel:'Purge '+staleUnseen,
-            danger:true,
-            attrs:['Permanently removes their journal rows from <span class="mono">usage.jsonl</span>. This cannot be undone.']
-          },function(ok){
-            if(!ok){ return; }
-            askConfirm({
-              title:'Second confirm',
-              body:'This <b>permanently</b> deletes the stale history. Proceed?',
-              confirmLabel:'Delete forever',
-              danger:true
-            },function(ok2){
-              if(!ok2){ return; }
-              fetch('/api/usage/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stale_only:true})})
-                .then(function(r){return r.json();}).then(function(res){
-                  if(res.error){ toast('purge: '+res.error,'err'); }
-                  else { toast('purged '+(res.purged||[]).length+' stale record set(s), '+(res.rows||0)+' rows dropped','ok'); renderBurnGlobal(); }
-                });
-            });
-          });
-        });
-      }
+    paintBurn(j.rows||[], body);
+    finish();
+  }).catch(function(){ lastBurnKeys=''; burnRetry(body, renderBurnGlobal); });
+}
+function burnChip(stale){
+  return stale
+    ?'<span class="chipmuted">stale</span>'
+    :'<span class="chipmuted" style="color:var(--grn);border-color:rgba(76,195,138,.5)">live</span>';
+}
+function paintBurn(rows, body){
+  if(!rows.length){ lastBurnKeys=''; body.innerHTML='<div class="hint">No usage yet. Flow: sbxd config init → sbxd sync NAME → sandbox calls go through the proxy → rows appear here.</div>'; return; }
+  var todaySum=0,allSum=0,live=0,staleUnseen=0,staleTotal=0;
+  rows.forEach(function(r){
+    todaySum+=r.today_usd||0; allSum+=r.total_usd||0;
+    if(r.exists){ live++; } else { staleTotal++; if(!r.pinned) staleUnseen++; }
+  });
+  // STRUCTURE of the table: which rows exist, pinned flags, the unpinned
+  // stale count (purge label) and the show-stale toggle. If it did not
+  // change, only cell values are patched in place (no flicker, no focus
+  // loss); anything structural falls back to a full rebuild.
+  var keys=rows.map(function(r){ return [r.sandbox,!!r.exists,!!r.pinned].join(':'); }).join('|')+'#'+staleUnseen+'*'+(burnShowStale?1:0);
+  if(lastBurnKeys && keys===lastBurnKeys && body.querySelector('#burntbl') && body.querySelector('.burnbar')){
+    patchBurn(rows, body, todaySum, allSum, live, staleUnseen);
+    return;
+  }
+  lastBurnKeys=keys;
+  var bar='<div class="burnbar">'+
+    '<div class="bstat"><div class="v" id="bb-today">$'+todaySum.toFixed(4)+'</div><div class="k">burn today</div></div>'+
+    '<div class="bstat"><div class="v" id="bb-all">$'+allSum.toFixed(4)+'</div><div class="k">burn all-time</div></div>'+
+    '<div class="bstat"><div class="v" id="bb-live">'+live+'</div><div class="k">live sandboxes</div></div>'+
+    '<div class="bstat" id="bb-stalecard"><div class="v" id="bb-stale">'+staleUnseen+'</div><div class="k">stale history rows</div></div>'+
+    '</div>'+
+    '<div class="burntools">'+
+      '<label><input type="checkbox" id="burn-show-stale"'+(burnShowStale?' checked':'')+'> show stale rows</label>'+
+      '<button class="tool" id="burn-purge">🗑 purge stale history'+(staleUnseen?' ('+staleUnseen+')':'')+'</button>'+
+      '<span class="hint">stale = sandbox deleted · ★ pinned histories stay visible and survive the bulk purge</span>'+
+    '</div>';
+  var tbl='<table class="tbl" id="burntbl"><thead><tr><th></th><th>sandbox</th><th>state</th><th>today $</th><th>total $</th><th>calls</th><th>tok today</th><th>budget $</th><th>budget tok</th><th></th></tr></thead><tbody>';
+  rows.forEach(function(r){
+    var stale=!r.exists;
+    var hidden=stale&&!r.pinned&&!burnShowStale;
+    var dim=stale?' class="rowdim"':'';
+    var pin='<button class="starpin'+(r.pinned?' on':'')+' tpin" data-sbx="'+esc(r.sandbox)+'" data-p="'+(r.pinned?1:0)+'" title="'+(r.pinned?'unpin':'pin burn history')+'">'+(r.pinned?'★':'☆')+'</button>';
+    var bud;
+    if(stale){
+      bud='<td>-</td><td>-</td>';
+    }else{
+      bud='<td><input class="money" data-sbx="'+esc(r.sandbox)+'" value="'+(r.budget_usd>0? r.budget_usd : '')+'"></td>'+
+          '<td><input class="money" data-tok="'+esc(r.sandbox)+'" value="'+(r.budget_tokens>0? r.budget_tokens : '')+'"></td>';
     }
-    Array.prototype.forEach.call(body.querySelectorAll('.tpin'),function(b){
-      b.addEventListener('click',function(){
-        var name=b.getAttribute('data-sbx'); var to=b.getAttribute('data-p')==='1'?false:true;
-        fetch('/api/usage/pin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,pinned:to})})
-          .then(function(r){return r.json();}).then(function(res){
-            if(res.error){ toast('pin: '+res.error,'err'); }
-            else { toast((res.pinned?'pinned ':'unpinned ')+name,'ok'); renderBurnGlobal(); }
-          });
-      });
-    });
-    Array.prototype.forEach.call(body.querySelectorAll('.trowdel'),function(b){
-      b.addEventListener('click',function(){
-        var name=b.getAttribute('data-sbx');
+    var acts;
+    if(stale){
+      acts='<button class="tool trowdel" data-sbx="'+esc(r.sandbox)+'">delete records</button>';
+    }else{
+      acts='<button class="tool tbud" data-sbx="'+esc(r.sandbox)+'">set</button>'+
+           '<button class="tool tdrill" data-sbx="'+esc(r.sandbox)+'">detail</button>'+
+           '<button class="tool tsync" data-sbx="'+esc(r.sandbox)+'">sync</button>';
+    }
+    tbl+='<tr'+dim+(hidden?' data-hidden="1"':'')+' data-sbx="'+esc(r.sandbox)+'"><td>'+pin+'</td><td>'+esc(r.sandbox)+'&nbsp;&nbsp;'+burnChip(stale)+'</td>'+
+      '<td>$'+(r.today_usd||0).toFixed(4)+'</td><td>$'+(r.total_usd||0).toFixed(4)+'</td><td>'+(r.calls||0)+'</td><td>'+fmtTok(r.tokens_today)+'</td>'+
+      bud+'<td class="actions">'+acts+'</td></tr>'+
+      (stale?'':'<tr class="drillrow" data-sbx="'+esc(r.sandbox)+'" hidden><td colspan="10" id="drill-'+esc(r.sandbox)+'"></td></tr>');
+  });
+  tbl+='</tbody></table>';
+  body.innerHTML=bar+tbl;
+  var chk=body.querySelector('#burn-show-stale');
+  if(chk){ chk.addEventListener('change',function(){ burnShowStale=chk.checked; renderBurnGlobal(); }); }
+  var pp=body.querySelector('#burn-purge');
+  if(pp){
+    pp.disabled=staleUnseen===0;
+    if(staleUnseen>0){
+      pp.addEventListener('click',function(){
         askConfirm({
-          title:'Delete burn records?',
-          body:'Delete the burn records of <span class="mono">'+esc(name)+'</span>?',
-          confirmLabel:'Delete records',
+          title:'Purge stale burn history?',
+          body:'Delete the burn history of <b>'+staleUnseen+'</b> stale (unpinned) sandbox row(s)? Pinned <b>★</b> histories are kept.',
+          confirmLabel:'Purge '+staleUnseen,
           danger:true,
-          attrs:['Its sandbox no longer exists - the history lives only in <span class="mono">usage.jsonl</span>.']
+          attrs:['Permanently removes their journal rows from <span class="mono">usage.jsonl</span>. This cannot be undone.']
         },function(ok){
           if(!ok){ return; }
-          fetch('/api/usage/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sandboxes:[name]})})
-            .then(function(r){return r.json();}).then(function(res){
-              if(res.error){ toast('purge: '+res.error,'err'); }
-              else { toast('deleted records for '+name+' ('+(res.rows||0)+' rows)','ok'); renderBurnGlobal(); }
-            });
+          askConfirm({
+            title:'Second confirm',
+            body:'This <b>permanently</b> deletes the stale history. Proceed?',
+            confirmLabel:'Delete forever',
+            danger:true
+          },function(ok2){
+            if(!ok2){ return; }
+            fetch('/api/usage/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stale_only:true})})
+              .then(function(r){return r.json();}).then(function(res){
+                if(res.error){ toast('purge: '+res.error,'err'); }
+                else { toast('purged '+(res.purged||[]).length+' stale record set(s), '+(res.rows||0)+' rows dropped','ok'); lastBurnKeys=''; renderBurnGlobal(); }
+              });
+          });
         });
       });
+    }
+  }
+  Array.prototype.forEach.call(body.querySelectorAll('.tpin'),function(b){
+    b.addEventListener('click',function(){
+      var name=b.getAttribute('data-sbx'); var to=b.getAttribute('data-p')==='1'?false:true;
+      fetch('/api/usage/pin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,pinned:to})})
+        .then(function(r){return r.json();}).then(function(res){
+          if(res.error){ toast('pin: '+res.error,'err'); }
+          else { toast((res.pinned?'pinned ':'unpinned ')+name,'ok'); lastBurnKeys=''; renderBurnGlobal(); }
+        });
     });
-    Array.prototype.forEach.call(body.querySelectorAll('.tbud'),function(b){
-      b.addEventListener('click',function(){
-        var name=b.getAttribute('data-sbx');
-        var inp=body.querySelector('input.money[data-sbx="'+name+'"]');
-        var tok=body.querySelector('input.money[data-tok="'+name+'"]');
-        var usd=(inp.value==='')?null:(parseFloat(inp.value)||0);
-        var toks=(tok.value==='')?null:(parseInt(tok.value,10)||0);
-        fetch('/api/usage/budget',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({name:name,usd:usd,tokens:toks})}).then(function(r){return r.json();})
-          .then(function(res){ if(res.error) toast('budget: '+res.error,'err'); else toast('wallets set for '+name,'ok'); });
+  });
+  Array.prototype.forEach.call(body.querySelectorAll('.trowdel'),function(b){
+    b.addEventListener('click',function(){
+      var name=b.getAttribute('data-sbx');
+      askConfirm({
+        title:'Delete burn records?',
+        body:'Delete the burn records of <span class="mono">'+esc(name)+'</span>?',
+        confirmLabel:'Delete records',
+        danger:true,
+        attrs:['Its sandbox no longer exists - the history lives only in <span class="mono">usage.jsonl</span>.']
+      },function(ok){
+        if(!ok){ return; }
+        fetch('/api/usage/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sandboxes:[name]})})
+          .then(function(r){return r.json();}).then(function(res){
+            if(res.error){ toast('purge: '+res.error,'err'); }
+            else { toast('deleted records for '+name+' ('+(res.rows||0)+' rows)','ok'); lastBurnKeys=''; renderBurnGlobal(); }
+          });
       });
     });
-    Array.prototype.forEach.call(body.querySelectorAll('.tdrill'),function(b){
-      b.addEventListener('click',function(){ drillToggle(b.getAttribute('data-sbx')); });
+  });
+  Array.prototype.forEach.call(body.querySelectorAll('.tbud'),function(b){
+    b.addEventListener('click',function(){
+      var name=b.getAttribute('data-sbx');
+      var inp=body.querySelector('input.money[data-sbx="'+name+'"]');
+      var tok=body.querySelector('input.money[data-tok="'+name+'"]');
+      var usd=(inp.value==='')?null:(parseFloat(inp.value)||0);
+      var toks=(tok.value==='')?null:(parseInt(tok.value,10)||0);
+      fetch('/api/usage/budget',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({name:name,usd:usd,tokens:toks})}).then(function(r){return r.json();})
+        .then(function(res){ if(res.error) toast('budget: '+res.error,'err'); else toast('wallets set for '+name,'ok'); });
     });
-    Array.prototype.forEach.call(body.querySelectorAll('.tsync'),function(b){
-      b.addEventListener('click',function(){
-        var name=b.getAttribute('data-sbx'); var kind=kindFor(name);
-        fetch('/api/sandboxes/'+kind+'/'+encodeURIComponent(name)+'/sync',{
-          method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
-          .then(function(r){return r.json();})
-          .then(function(res){ if(res.error){ toast('sync: '+res.error,'err'); } else { toast(name+' synced to proxy ('+(res.target.key_masked||'')+')','ok'); } });
-      });
+  });
+  Array.prototype.forEach.call(body.querySelectorAll('.tdrill'),function(b){
+    b.addEventListener('click',function(){ drillToggle(b.getAttribute('data-sbx')); });
+  });
+  Array.prototype.forEach.call(body.querySelectorAll('.tsync'),function(b){
+    b.addEventListener('click',function(){
+      var name=b.getAttribute('data-sbx'); var kind=kindFor(name);
+      fetch('/api/sandboxes/'+kind+'/'+encodeURIComponent(name)+'/sync',{
+        method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
+        .then(function(r){return r.json();})
+        .then(function(res){ if(res.error){ toast('sync: '+res.error,'err'); } else { toast(name+' synced to proxy ('+(res.target.key_masked||'')+')','ok'); } });
     });
-    finish();
-  }).catch(function(){ burnRetry(body, renderBurnGlobal); });
+  });
 }
+/* value-only burn tick: patch stat cards + row cells in place. */
+function patchBurn(rows, body, todaySum, allSum, live, staleUnseen){
+  var setv=function(id,v){ var el=body.querySelector('#'+id); if(el){ el.textContent=v; } };
+  setv('bb-today','$'+todaySum.toFixed(4));
+  setv('bb-all','$'+allSum.toFixed(4));
+  setv('bb-live',String(live));
+  setv('bb-stale',String(staleUnseen));
+  var sc=body.querySelector('#bb-stalecard'); if(sc){ sc.classList.toggle('warn',staleUnseen>0); }
+  Array.prototype.forEach.call(body.querySelectorAll('#burntbl tbody tr[data-sbx]:not(.drillrow)'),function(tr){
+    var name=tr.getAttribute('data-sbx');
+    var r=null;
+    for(var i=0;i<rows.length;i++){ if(rows[i].sandbox===name){ r=rows[i]; break; } }
+    if(!r){ return; }
+    var stale=!r.exists;
+    tr.classList.toggle('rowdim',stale);
+    var cells=(stale || tr.querySelectorAll('td').length>=9) ? tr.querySelectorAll('td') : null;
+    if(!cells || cells.length<9){ return; }
+    cells[2].textContent='$'+(r.today_usd||0).toFixed(4);
+    cells[3].textContent='$'+(r.total_usd||0).toFixed(4);
+    cells[4].textContent=String(r.calls||0);
+    cells[5].textContent=fmtTok(r.tokens_today);
+    if(stale){ return; }
+    var u=tr.querySelector('input.money[data-sbx]');
+    var t=tr.querySelector('input.money[data-tok]');
+    var uv=(r.budget_usd>0? String(r.budget_usd) : '');
+    var tv=(r.budget_tokens>0? String(r.budget_tokens) : '');
+    if(u && u.value!==uv){ u.value=uv; }
+    if(t && t.value!==tv){ t.value=tv; }
+  });
+}
+
 
 /* ---------- create wizard (POST /api/create) ---------- */
 var icoDir='<svg class="fi" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M1.5 3.2C1.5 2.5 2 2 2.7 2h3.2c.4 0 .8.2 1 .5l.9 1h5.5c.7 0 1.2.5 1.2 1.2v7.1c0 .7-.5 1.2-1.2 1.2H2.7c-.7 0-1.2-.5-1.2-1.2V3.2Z"/></svg>';
@@ -1458,6 +1510,7 @@ function select(sb){
   // machines with the burn pane open must swap the data, not just the name
   if(activeTab==='burn'){ renderBurnTab(sb); }
   if(activeTab==='logs'){ openLogs(sb); }
+  saveView();
 }
 function renderOverview(sb){
   var stat=function(v){return {v:v};};
@@ -1656,6 +1709,8 @@ function openEvents(){
       if(cur){
         updateButtons(cur);
         if(activeTab==='overview') renderOverview(cur);
+        if(activeTab==='conn') renderConn(cur);
+        if(activeTab==='burn') renderBurnTab(cur);
       }
     }
   });
@@ -1681,6 +1736,7 @@ function initTabs(){
   Array.prototype.forEach.call(document.querySelectorAll('.tab'),function(t){
     t.addEventListener('click',function(){
       activeTab=t.getAttribute('data-tab');
+      saveView();
       Array.prototype.forEach.call(document.querySelectorAll('.tab'),function(x){x.classList.toggle('active',x===t);});
       ['overview','logs','conn','burn'].forEach(function(id){ $('tab-'+id).hidden=(id!==activeTab); });
       if(activeTab==='logs' && state.sel){ var sb=currentSB(); if(sb) openLogs(sb); }
@@ -1695,6 +1751,27 @@ function currentSB(){
 }
 
 /* ---------- wiring ---------- */
+/* boot restore: a page reload should land on the view the user left
+   (global view, or a sandbox detail even). Unknown sel -> overview. */
+function restoreBoot(){
+  var st=null;
+  try{ st=JSON.parse(localStorage.getItem('sbx-view')||'null'); }catch(e){}
+  if(st && st.view==='sandbox' && typeof st.sel==='string' && st.sel.indexOf('/')>0){
+    var i=st.sel.indexOf('/');
+    var sb=state.list.find(function(x){return keyOf(x)===st.sel;});
+    if(sb){ select(sb); }
+    else { select({kind:st.sel.slice(0,i), name:st.sel.slice(i+1)}); } // header now; snapshot fills the rest
+    if(st.tab && document.querySelector('.tab[data-tab="'+st.tab+'"]')){
+      document.querySelector('.tab[data-tab="'+st.tab+'"]').click();
+    }
+    return;
+  }
+  if(st && st.view && typeof st.view==='string' && st.view!=='sandbox'){
+    showGlobal(st.view);
+    return;
+  }
+  showGlobal('overview'); // default: host overview
+}
 function init(){
   initTabs(); refreshHealth(); openEvents();
   renderList(); // paint the loading spinner right away - the first snapshot may take seconds
@@ -1734,7 +1811,7 @@ function init(){
     el.addEventListener('click', function(ev){ ev.preventDefault(); showGlobal('create'); });
   });
   $('lnk-config').addEventListener('click', function(ev){ ev.preventDefault(); showGlobal('config'); });
-  showGlobal('overview'); // the start page: host metrics + live inventory
+  restoreBoot(); // start page: whatever the user left open (fallback: overview)
 }
 document.addEventListener('DOMContentLoaded', init);
 `
