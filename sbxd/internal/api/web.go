@@ -744,7 +744,7 @@ function renderCreator(){
       '<div class="field"><label for="cw-vmcpu">vCPUs</label><select id="cw-vmcpu"><option>1</option><option selected>2</option><option>4</option><option>8</option></select><div class="fm">1–16</div></div>'+
       '<div class="field"><label for="cw-vmmem">Memory (MB)</label><select id="cw-vmmem"><option>2048</option><option selected>4096</option><option>6144</option><option>8192</option></select><div class="fm">512–65536</div></div>'+
       '<div class="field"><label for="cw-vmdisk">Disk (GB)</label><input id="cw-vmdisk" class="money big" value="20" inputmode="numeric"><div class="fm">growable qcow2, 10–512</div></div>'+
-      '<div class="field"><label for="cw-vmshare">Share directory (host)</label><input id="cw-vmshare" placeholder="optional — e.g. ~/projects/myapp" spellcheck="false"><div class="fm">mounted at /workspace in the guest — empty = VM-local workspace</div></div>'+
+      '<div class="field"><label for="cw-vmshare">Share directory (host)</label><div class="mwrap"><input id="cw-vmshare" placeholder="optional — e.g. ~/projects/myapp" spellcheck="false"><button type="button" class="browse" id="cw-vmshare-browse">Browse…</button></div><div class="fm">folder-picker as on container mounts — mounted at /workspace in the guest, empty = VM-local workspace</div></div>'+
     '</div>'+
     '<div class="fm">the guest gets its root user + dev user with your uid inside; opencode connects through the sbx proxy — models wire up automatically at first boot-end (manual fallback: the sync button on the Burn overview).</div>'+
     '</div>'+
@@ -765,6 +765,11 @@ function renderCreator(){
   $('cw-addport').addEventListener('click',function(){ portRow($('cw-ports')); });
   $('cw-addenv').addEventListener('click',function(){ envRow($('cw-envrows')); });
   $('cw-addmount').addEventListener('click',function(){ mountRow($('cw-mounts')); });
+  // VM shares use the same folder browser as container mounts — one picker,
+  // all three sandbox kinds (libvirt + docker-backed VMs share cw-vmshare).
+  $('cw-vmshare-browse').addEventListener('click',function(){
+    openFS(function(p){ $('cw-vmshare').value=p; });
+  });
   nameDupCheck();
   Array.prototype.forEach.call(document.querySelectorAll('input[name="cwkind"]'),function(rd){
     rd.addEventListener('change',updateCreatorKind);

@@ -329,6 +329,14 @@ curl -s --max-time 2 "http://127.0.0.1:$PORT/" | grep -q 'SBX Desktop' \
     && pass "dashboard index served" || fail "dashboard index served"
 curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/static/app.js" \
     && pass "dashboard app.js served" || fail "dashboard app.js served"
+# unify the folder picker across sandbox kinds: the served app.js must wire
+# the VM share field to the same browser the container mount rows use.
+APPJS="$(curl -s --max-time 3 "http://127.0.0.1:$PORT/static/app.js")"
+if grep -q 'cw-vmshare-browse' <<<"$APPJS" && grep -q 'function openFS' <<<"$APPJS"; then
+    pass "dashboard: VM share uses the same folder picker as container mounts"
+else
+    fail "dashboard: VM share folder picker missing"
+fi
 rm -rf "$scratch" 2>/dev/null || true
 
 hdr "vm boot registration (kit scheme probe)"
