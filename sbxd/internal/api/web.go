@@ -315,6 +315,15 @@ textarea#cfg-editor{width:100%;min-height:54vh;background:var(--well);color:var(
 .burntools label{display:inline-flex;gap:.4rem;align-items:center;color:var(--dim);font-size:.76rem;cursor:pointer;user-select:none}
 tr.rowdim td{opacity:.42}
 tr.rowdim td:first-child{opacity:.95}
+#burntbl tr[data-hidden]{display:none}
+/* iOS-style toggle switch (appearance of #burn-show-stale) */
+.ios-toggle{position:relative;display:inline-block;width:38px;height:22px;vertical-align:-5px;margin-right:.45rem}
+.ios-toggle input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;z-index:2}
+.ios-toggle .track{position:absolute;inset:0;background:rgba(255,255,255,.10);border:1px solid var(--line2);border-radius:999px;transition:background .16s ease,border-color .16s ease}
+.ios-toggle .knob{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--faint);box-shadow:0 1px 3px rgba(0,0,0,.4);transition:left .16s ease,background .16s ease}
+.ios-toggle input:checked ~ .track{background:rgba(76,195,138,.28);border-color:rgba(76,195,138,.55)}
+.ios-toggle input:checked ~ .knob{left:18px;background:var(--grn)}
+.ios-toggle input:checked:hover ~ .track{background:rgba(76,195,138,.4)}
 .chipmuted{font-size:.6rem;color:var(--yel);border:1px solid rgba(231,164,59,.5);border-radius:999px;padding:.05rem .45rem;margin-left:.4rem;text-transform:uppercase;letter-spacing:.05em;vertical-align:middle}
 .starpin{background:none;border:none;color:var(--faint);cursor:pointer;font-size:1rem;padding:0 .15rem;line-height:1}
 .starpin:hover{color:var(--yel)}
@@ -812,7 +821,7 @@ function paintBurn(rows, body){
     '<div class="bstat" id="bb-stalecard"><div class="v" id="bb-stale">'+staleUnseen+'</div><div class="k">stale history rows</div></div>'+
     '</div>'+
     '<div class="burntools">'+
-      '<label><input type="checkbox" id="burn-show-stale"'+(burnShowStale?' checked':'')+'> show stale rows</label>'+
+      '<label><span class="ios-toggle"><input type="checkbox" id="burn-show-stale"'+(burnShowStale?' checked':'')+'><span class="track"></span><span class="knob"></span></span>show stale rows</label>'+
       '<button class="tool" id="burn-purge">🗑 purge stale history'+(staleUnseen?' ('+staleUnseen+')':'')+'</button>'+
       '<span class="hint">stale = sandbox deleted · ★ pinned histories stay visible and survive the bulk purge</span>'+
     '</div>';
@@ -837,7 +846,7 @@ function paintBurn(rows, body){
            '<button class="tool tdrill" data-sbx="'+esc(r.sandbox)+'">detail</button>'+
            '<button class="tool tsync" data-sbx="'+esc(r.sandbox)+'">sync</button>';
     }
-    tbl+='<tr'+dim+(hidden?' data-hidden="1"':'')+' data-sbx="'+esc(r.sandbox)+'"><td>'+pin+'</td><td>'+esc(r.sandbox)+'&nbsp;&nbsp;'+burnChip(stale)+'</td>'+
+    tbl+='<tr'+dim+(hidden?' data-hidden="1" hidden':'')+' data-sbx="'+esc(r.sandbox)+'"><td>'+pin+'</td><td>'+esc(r.sandbox)+'&nbsp;&nbsp;'+burnChip(stale)+'</td>'+
       '<td>$'+(r.today_usd||0).toFixed(4)+'</td><td>$'+(r.total_usd||0).toFixed(4)+'</td><td>'+(r.calls||0)+'</td><td>'+fmtTok(r.tokens_today)+'</td>'+
       bud+'<td class="actions">'+acts+'</td></tr>'+
       (stale?'':'<tr class="drillrow" data-sbx="'+esc(r.sandbox)+'" hidden><td colspan="10" id="drill-'+esc(r.sandbox)+'"></td></tr>');
