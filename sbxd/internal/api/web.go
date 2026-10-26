@@ -7,13 +7,13 @@ const indexHTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SBX Desktop — OpenCode Sandboxes</title>
+<title>SBX Desktop - OpenCode Sandboxes</title>
 <link rel="stylesheet" href="/static/style.css">
 <script>document.documentElement.setAttribute('data-theme',localStorage.getItem('sbx-theme')||'dark');</script>
 </head>
 <body>
 <header id="topbar">
-  <div id="brand"><span class="logo">SBX</span><span class="brandname">Desktop</span><span id="ver"></span></div>
+  <div id="brand" title="Overview - host &amp; sandboxes"><span class="logo">SBX</span><span class="brandname">Desktop</span><span id="ver"></span></div>
   <div id="health">
     <span class="hbadge" id="h-docker">docker</span>
     <span class="hbadge" id="h-libvirt">libvirt</span>
@@ -32,8 +32,7 @@ const indexHTML = `<!doctype html>
     <div class="side-h">VMs · docker (sbxvmd) <span class="cnt" id="cnt-vd"></span></div>
     <div class="items" id="items-vd"></div>
     <div id="sidebar-foot">
-      <a href="#" id="lnk-overview">Overview — host &amp; sandboxes</a>
-      <a href="#" id="lnk-burn">Burn — tokens &amp; budget</a>
+      <a href="#" id="lnk-burn">Burn - tokens &amp; budget</a>
       <a href="#" id="lnk-config">OpenCode config</a>
       <a href="#" id="lnk-help">Help &amp; CLI</a>
     </div>
@@ -108,7 +107,7 @@ const indexHTML = `<!doctype html>
 </html>
 `
 
-const styleCSS = `/* SBX Desktop design system — hand-rolled, no framework */
+const styleCSS = `/* SBX Desktop design system - hand-rolled, no framework */
 :root{
   --bg:#0d1015; --bg2:#131722; --bg3:#1a2230; --bg4:#222c3d;
   --fg:#e7ecf3; --dim:#8d99ab; --faint:#5d6b7e;
@@ -188,7 +187,22 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13.5px/1.5 var(--sans);d
 
 /* ---------- overview (host & sandboxes start page) ---------- */
 .ov-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:var(--s4)}
+/* the four host metric cards keep one row on wide screens;
+   narrow windows fall back to the auto-fill grid */
+.ov-grid.ov-row{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media (max-width:1100px){ .ov-grid.ov-row{grid-template-columns:repeat(auto-fill,minmax(290px,1fr))} }
 .ov-card{background:var(--bg2);border:1px solid var(--line);border-radius:var(--r2);padding:var(--s4) var(--s4) var(--s4) var(--s4)}
+/* slim per-mount disk strip under the metric row */
+.ov-disks{display:flex;flex-wrap:wrap;gap:var(--s4);margin-top:var(--s4)}
+.ov-disk{flex:1 1 220px;display:flex;align-items:center;gap:var(--s3);background:var(--bg2);
+  border:1px solid var(--line);border-radius:var(--r2);padding:.55rem .8rem}
+.ov-disk .mnt{color:var(--dim);font-size:.74rem;white-space:nowrap;text-transform:uppercase;letter-spacing:.05em;max-width:9rem;overflow:hidden;text-overflow:ellipsis}
+.ov-disk .pct{color:var(--dim);font-size:.74rem;flex:none;min-width:2.6rem;text-align:right}
+.ov-disk .ov-bar{flex:1;margin-top:0}
+/* clickable per-sandbox cards */
+.ovsbx{cursor:pointer;transition:border-color .15s, transform .15s}
+.ovsbx:hover{border-color:var(--acc);transform:translateY(-1px)}
+#brand{cursor:pointer}
 .ov-h{display:flex;justify-content:space-between;align-items:baseline;color:var(--dim);font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;margin-bottom:var(--s3)}
 .ov-h b{color:var(--fg);font-size:1.35rem;letter-spacing:0;text-transform:none}
 .ov-bar{height:7px;border-radius:4px;background:var(--bg3);overflow:hidden;margin-top:var(--s3)}
@@ -225,7 +239,7 @@ button:hover{border-color:var(--acc);background:var(--bg4)}
 button.primary{background:linear-gradient(135deg,var(--acc),#6d79ff);border-color:transparent;color:#fff;font-weight:600}
 button.primary:hover{filter:brightness(1.08)}
 /* in-flight state: the create wizard's submit (and any button given .busy)
-   cannot be re-triggered while busy — the spinner ring says "working". */
+   cannot be re-triggered while busy - the spinner ring says "working". */
 button.busy{opacity:.72;pointer-events:none;cursor:progress}
 button.busy::after{content:"";display:inline-block;width:.85em;height:.85em;margin-left:.5em;border:2px solid rgba(255,255,255,.45);border-top-color:currentColor;border-radius:50%;vertical-align:-.12em;animation:sbxspin .8s linear infinite}
 button.danger:hover{border-color:var(--red);color:var(--red);background:rgba(229,72,77,.08)}
@@ -395,7 +409,7 @@ button.browse{padding:.3rem .6rem;font-size:.72rem;color:var(--acc2);background:
 `
 
 const appJS = `'use strict';
-/* SBX Desktop dashboard — vanilla JS, SSE-driven. No build step. */
+/* SBX Desktop dashboard - vanilla JS, SSE-driven. No build step. */
 var state = { list: [], sel: null, es: null, esLogs: null, health: null, view: 'overview', firstData: false, pending: {} };
 
 function $(id){ return document.getElementById(id); }
@@ -414,7 +428,7 @@ function copy(text){
   }else{ legacyCopy(text); }
 }
 // browsers only grant navigator.clipboard on secure contexts (https, or
-// localhost) — over plain http on a LAN box, execCommand('copy') still works;
+// localhost) - over plain http on a LAN box, execCommand('copy') still works;
 // when even that fails the toast names the actual cure (SBXD_TLS / https).
 function legacyCopy(text){
   var ta=document.createElement('textarea'); ta.value=text;
@@ -423,7 +437,7 @@ function legacyCopy(text){
   var okc=false; try{ okc=document.execCommand('copy'); }catch(e){}
   document.body.removeChild(ta);
   if(okc){ toast('Copied to clipboard','ok'); }
-  else{ toast('Clipboard needs a secure context — open via https:// (SBXD_TLS=1) or localhost','err'); }
+  else{ toast('Clipboard needs a secure context - open via https:// (SBXD_TLS=1) or localhost','err'); }
 }
 
 /* ---------- list rendering ---------- */
@@ -492,14 +506,14 @@ function showGlobal(kind){
   state.view=kind; state.sel=null; closeLogs();
   renderList();
   $('pane').hidden=true; $('empty').hidden=true; $('global').hidden=false;
-  var titles={overview:'Overview — host & sandboxes', burn:'Burn — token & dollar ledger', create:'Create sandbox', config:'Config — global OpenCode settings'};
+  var titles={overview:'Overview - host & sandboxes', burn:'Burn - token & dollar ledger', create:'Create sandbox', config:'Config - global OpenCode settings'};
   var subs={
     overview:'Machine stats and every sandbox on this host. Updates every 5 seconds.',
     burn:'Proxy traffic per sandbox and in total. Provider keys stay on the host.',
     create:'Runs through the daemon. Mounts and ports are fixed at creation.',
     config:'Providers, proxy and prices. Stored in ~/.config/sbxd/config.json'
   };
-  $('glob-title').textContent = titles[kind] || 'Config — global OpenCode settings';
+  $('glob-title').textContent = titles[kind] || 'Config - global OpenCode settings';
   $('glob-sub').textContent = subs[kind] || subs.config;
   $('glob-actions').innerHTML='';
   $('glob-body').innerHTML='';
@@ -555,14 +569,6 @@ function renderHostOverview(){
       ovKV('available', esc(humanBytes(m.available)))+
       ovKV('swap', esc(humanBytes(m.swap_used)+' of '+humanBytes(m.swap_total)))+
       '</div></div>';
-    var diskCards=(discs.length?discs:[{mount:'/',percent:0}]).map(function(d){
-      return '<div class="ov-card"><div class="ov-h">Disk '+esc(d.mount==='/'?'(root)':d.mount)+' <b>'+(Number(d.percent)||0).toFixed(1)+'%</b></div>'+ovBar(d.percent)+
-        '<div style="margin-top:var(--s3)">'+
-        ovKV('total', esc(humanBytes(d.total)))+
-        ovKV('used', esc(humanBytes(d.used)))+
-        ovKV('free', esc(humanBytes(d.available)))+
-        '</div></div>';
-    }).join('');
     function grp(t,g){ return ovKV(t, esc(((g||{}).running!=null?g.running:'–')+' running · '+((g||{}).total!=null?g.total:'–')+' known')); }
     var sbxCard='<div class="ov-card"><div class="ov-h">Sandboxes <b>'+(sbx.containers?sbx.containers.total:0)+(sbx.vms_libvirt?sbx.vms_libvirt.total:0)+(sbx.vms_docker?sbx.vms_docker.total:0)+'</b></div>'+
       '<div style="margin-top:var(--s3)">'+
@@ -581,8 +587,17 @@ function renderHostOverview(){
       ovKV('daemon', 'sbxd '+esc(j.version||''))+
       ovKV('uptime', esc(humanDur(hs.uptime_seconds)))+
       '</div></div>';
-    body.innerHTML='<div class="ov-grid">'+
-      cpuCard+memCard+sbxCard+sysCard+diskCards+'</div>';
+    // one row of metric cards, then a slim disk strip, then per-sandbox cards
+    var diskStrip=discs.length?'<div class="ov-disks">'+discs.map(function(d){
+      return '<div class="ov-disk" title="'+esc(humanBytes(d.used))+' used · '+esc(humanBytes(d.available))+' free">'+
+        '<span class="mnt">'+esc(d.mount==='/'?'root':d.mount)+'</span>'+ovBar(d.percent)+
+        '<span class="pct">'+(Number(d.percent)||0).toFixed(0)+'%</span></div>';
+    }).join('')+'</div>':'';
+    body.innerHTML='<div class="ov-grid ov-row">'+cpuCard+memCard+sbxCard+sysCard+'</div>'+
+      diskStrip+
+      '<div class="ov-h" style="margin:var(--s4) 0 0 0">Running sandboxes</div>'+
+      '<div id="ov-sbxs"></div>';
+    paintOvSandboxes($('ov-sbxs'));
   }
   body.innerHTML='<div class="hint" style="display:flex;align-items:center;gap:8px"><span class="spin"></span>reading host metrics…</div>';
   var tick=function(){
@@ -593,6 +608,53 @@ function renderHostOverview(){
   tick();
   hostTimer=setInterval(tick,5000);
 }
+/* overview sub-section: one clickable card per sandbox, with live meters.
+   Metric truth comes from the inventory snapshot (cpu/mem/state) plus the
+   burn ledger (today's burn + call counts). */
+function paintOvSandboxes(box){
+  if(!box) return;
+  Promise.all([
+    fetch('/api/sandboxes').then(function(r){ return r.json(); }),
+    fetch('/api/usage').then(function(r){ return r.json(); }).catch(function(){ return {}; })
+  ]).then(function(res){
+    if(state.view!=='overview'||!box.isConnected) return; // view switch mid-flight
+    var list=res[0].sandboxes||[];
+    var burn={};
+    (res[1].rows||[]).forEach(function(r){ burn[r.sandbox]=r; });
+    if(!list.length){
+      box.innerHTML='<div class="hint">no sandboxes yet - create one with the + button in the sidebar</div>';
+      return;
+    }
+    var cards=list.map(function(sb){
+      var u=burn[sb.name]||{};
+      var pills='<span class="pill '+esc((sb.state||'').replace(/[\s-]+/g,''))+'">'+esc(sb.state||'unknown')+'</span>'+
+        '<span class="chipmuted">'+esc(sb.kind)+(sb.backend?' · '+esc(sb.backend):'')+'</span>';
+      if(sb.cpuPercent!=null&&sb.cpuPercent>0.005) pills+='<span class="chipmuted">'+sb.cpuPercent.toFixed(1)+'% cpu</span>';
+      if(sb.memUsage) pills+='<span class="chipmuted">'+esc(sb.memUsage)+' mem</span>';
+      if(u.calls) pills+='<span class="chipmuted">'+(u.calls||0)+' calls</span>';
+      return '<div class="ov-card ovsbx" data-kind="'+esc(sb.kind)+'" data-name="'+esc(sb.name)+'" title="open '+esc(sb.name)+'">'+
+        '<div class="ov-h"><b>'+esc(sb.name)+'</b>'+
+        (u.today_usd? ' <b style="color:var(--acc)">$'+(Number(u.today_usd)||0).toFixed(4)+'</b>' : '')+
+        '</div><div style="margin-top:var(--s2)">'+pills+'</div></div>';
+    });
+    box.innerHTML='<div class="ov-grid">'+cards.join('')+'</div>';
+    Array.prototype.forEach.call(box.querySelectorAll('.ovsbx'), function(card){
+      card.addEventListener('click', function(){ openFromOverview(card.dataset.kind, card.dataset.name); });
+    });
+  }).catch(function(){ /* overview repaints every 5s; a failed round trip is not worth a toast */ });
+}
+function openFromOverview(kind, name){
+  function find(sbList){
+    return sbList.filter(function(x){ return x.name===name && x.kind===kind; })[0];
+  }
+  var sb=find(state.list);
+  if(sb){ select(sb); return; }
+  fetch('/api/sandboxes').then(function(r){ return r.json(); }).then(function(d){
+    var sb2=find(d.sandboxes||[]);
+    if(sb2){ select(sb2); } else { toast(name+' is not in the inventory (just deleted?)','err'); }
+  }).catch(function(){ toast('could not open '+name,'err'); });
+}
+
 function addTool(bar,label,fn){
   var b=h('button',{class:'tool'},esc(label));
   b.addEventListener('click',fn); bar.appendChild(b); return b;
@@ -629,7 +691,7 @@ function renderBurnGlobal(){
       var pin='<button class="starpin'+(r.pinned?' on':'')+' tpin" data-sbx="'+esc(r.sandbox)+'" data-p="'+(r.pinned?1:0)+'" title="'+(r.pinned?'unpin':'pin burn history')+'">'+(r.pinned?'★':'☆')+'</button>';
       var bud;
       if(stale){
-        bud='<td>—</td><td>—</td>';
+        bud='<td>-</td><td>-</td>';
       }else{
         bud='<td><input class="money" data-sbx="'+esc(r.sandbox)+'" value="'+(r.budget_usd>0? r.budget_usd : '')+'"></td>'+
             '<td><input class="money" data-tok="'+esc(r.sandbox)+'" value="'+(r.budget_tokens>0? r.budget_tokens : '')+'"></td>';
@@ -722,7 +784,7 @@ function renderCreator(){
   var body=$('glob-body');
   var stackOpts=['go','node','python','rust','base'].map(function(s){return '<option'+(s==='go'?' selected':'')+'>'+s+'</option>';}).join('');
   body.innerHTML=
-    '<div class="hint">Containers run on this host\'s Docker with the kit\'s labels, mounts and auth setup. <b>VMs</b> boot a full Debian guest (libvirt or Docker-backed QEMU): creation returns at spawn and the guest finishes booting in the background — models arrive automatically once the guest is up. First VM on this host needs the master image once (<code>sbxvm fetch-image</code>).</div>'+
+    '<div class="hint">Containers run on this host\'s Docker with the kit\'s labels, mounts and auth setup. <b>VMs</b> boot a full Debian guest (libvirt or Docker-backed QEMU): creation returns at spawn and the guest finishes booting in the background - models arrive automatically once the guest is up. First VM on this host needs the master image once (<code>sbxvm fetch-image</code>).</div>'+
     '<div class="cw">'+
     '<div class="cw-card">'+
     '<div class="cw-sec"><div class="cw-sec-t">Sandbox kind</div>'+
@@ -735,13 +797,13 @@ function renderCreator(){
     '</div>'+
     '<div class="cw-sec"><div class="cw-sec-t">Basics</div><div class="cw-grid two">'+
       '<div class="field"><label for="cw-name">Name</label><input id="cw-name" placeholder="myproj" autocomplete="off" spellcheck="false" maxlength="40"><div class="fm" id="cw-namemsg"></div></div>'+
-      '<div class="field" id="cw-stack-field"><label for="cw-stack">Stack image</label><select id="cw-stack">'+stackOpts+'</select><div class="fm">needs the kit image — sbx build &lt;stack&gt; builds it once</div></div>'+
+      '<div class="field" id="cw-stack-field"><label for="cw-stack">Stack image</label><select id="cw-stack">'+stackOpts+'</select><div class="fm">needs the kit image - sbx build &lt;stack&gt; builds it once</div></div>'+
     '</div></div>'+
     '<div id="cw-cont-fields">'+
     '<div class="cw-sec"><div class="cw-sec-t">Network</div><div class="cw-grid two">'+
       '<div class="field"><label for="cw-egress">Egress</label><select id="cw-egress"><option>allow</option><option>proxy-only</option><option>none</option></select><div class="fm">outbound fence; re-apply after recreates</div></div>'+
     '</div>'+
-    '<div class="rows-t">Published ports — host → container</div>'+
+    '<div class="rows-t">Published ports - host → container</div>'+
     '<div class="rows" id="cw-ports"></div>'+
     '<button type="button" class="addrow" id="cw-addport">＋ add port</button></div>'+
     '<div class="cw-sec"><div class="cw-sec-t">Environment</div>'+
@@ -758,7 +820,7 @@ function renderCreator(){
       '<div class="field"><label for="cw-vmcpu">vCPUs</label><select id="cw-vmcpu"><option>1</option><option selected>2</option><option>4</option><option>8</option></select><div class="fm">1–16</div></div>'+
       '<div class="field"><label for="cw-vmmem">Memory (MB)</label><select id="cw-vmmem"><option>2048</option><option selected>4096</option><option>6144</option><option>8192</option></select><div class="fm">512–65536</div></div>'+
       '<div class="field"><label for="cw-vmdisk">Disk (GB)</label><input id="cw-vmdisk" class="money big" value="20" inputmode="numeric"><div class="fm">growable qcow2, 10–512</div></div>'+
-      '<div class="field"><label for="cw-vmshare">Share directory (host)</label><div class="mwrap"><input id="cw-vmshare" placeholder="optional — e.g. ~/projects/myapp" spellcheck="false"><button type="button" class="browse" id="cw-vmshare-browse">Browse…</button></div><div class="fm">folder-picker as on container mounts — mounted at /workspace in the guest, empty = VM-local workspace</div></div>'+
+      '<div class="field"><label for="cw-vmshare">Share directory (host)</label><div class="mwrap"><input id="cw-vmshare" placeholder="optional - e.g. ~/projects/myapp" spellcheck="false"><button type="button" class="browse" id="cw-vmshare-browse">Browse…</button></div><div class="fm">folder-picker as on container mounts - mounted at /workspace in the guest, empty = VM-local workspace</div></div>'+
     '</div>'+
     '<div class="fm">The guest logs in with your uid; opencode talks to the host proxy. Models arrive automatically at boot end (fallback: the sync button under Burn).</div>'+
     '</div>'+
@@ -779,7 +841,7 @@ function renderCreator(){
   $('cw-addport').addEventListener('click',function(){ portRow($('cw-ports')); });
   $('cw-addenv').addEventListener('click',function(){ envRow($('cw-envrows')); });
   $('cw-addmount').addEventListener('click',function(){ mountRow($('cw-mounts')); });
-  // VM shares use the same folder browser as container mounts — one picker,
+  // VM shares use the same folder browser as container mounts - one picker,
   // all three sandbox kinds (libvirt + docker-backed VMs share cw-vmshare).
   $('cw-vmshare-browse').addEventListener('click',function(){
     openFS(function(p){ $('cw-vmshare').value=p; });
@@ -800,7 +862,7 @@ function renderCreator(){
     msg.textContent='';
     if(!name){ msg.textContent='name required'; return; }
     // busy guard + spinner: while an in-flight create is running the button
-    // is disabled (and pointer-events killed via .busy) — a second press
+    // is disabled (and pointer-events killed via .busy) - a second press
     // cannot fire a second POST /api/create for any of the three kinds.
     var btn=$('cw-go');
     if(btn.disabled) return;
@@ -809,7 +871,7 @@ function renderCreator(){
     var kindSel=(document.querySelector('input[name="cwkind"]:checked')||{}).value||'container';
     if(kindSel!=='container'){
       cwBusy(kindSel==='vm-libvirt'?'Spawning VM…':'Spawning sbxvmd…');
-      msg.textContent='provisioning VM — returns the moment the machine spawns; the guest finishes booting in the background…';
+      msg.textContent='provisioning VM - returns the moment the machine spawns; the guest finishes booting in the background…';
       var payload={
         kind:'vm', name:name,
         vm_backend: kindSel==='vm-libvirt'?'libvirt':'docker',
@@ -829,7 +891,7 @@ function renderCreator(){
           toast('created VM '+res.vm,'ok');
           jumpToCreated('vm', res.vm, 'created VM '+res.vm+' ('+res.backend+' backend)'+w);
         })
-        .catch(function(){ cwIdle(); msg.textContent='create failed (network) — the VM may still be provisioned by an earlier attempt; check sbxd ps'; });
+        .catch(function(){ cwIdle(); msg.textContent='create failed (network) - the VM may still be provisioned by an earlier attempt; check sbxd ps'; });
       return;
     }
     var ports=[], env={}, mounts=[], bad=[];
@@ -859,7 +921,7 @@ function renderCreator(){
     if($('cw-usd').value!==''){ payload.budget_usd=parseFloat($('cw-usd').value)||0; }
     if($('cw-tok').value!==''){ payload.budget_tokens=parseInt($('cw-tok').value,10)||0; }
     cwBusy('Creating…');
-    msg.textContent='creating… (the first create per stack builds its kit image — cached afterwards)';
+    msg.textContent='creating… (the first create per stack builds its kit image - cached afterwards)';
     fetch('/api/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
       .then(function(r){return r.json();})
       .then(function(res){
@@ -885,8 +947,8 @@ function updateCreatorKind(){
   var nm=document.getElementById('cw-namemsg');
   if(km){
     km.textContent = k==='container' ? 'Same kernel as the host. Spawns in seconds; mounts and ports are fixed at creation.' :
-      k==='vm-libvirt' ? 'libvirt VM on the host (sbxvm-<name>) — needs qemu:///system; strongest isolation.' :
-      'docker-backend VM (sbxvmd-<name>) — QEMU in a container; works where libvirt is unavailable (e.g. Docker Desktop).';
+      k==='vm-libvirt' ? 'libvirt VM on the host (sbxvm-<name>) - needs qemu:///system; strongest isolation.' :
+      'docker-backend VM (sbxvmd-<name>) - QEMU in a container; works where libvirt is unavailable (e.g. Docker Desktop).';
   }
   if(nm){ nm.textContent=''; }
 }
@@ -898,8 +960,8 @@ function nameDupCheck(){
     var m=$('cw-namemsg');
     var k=((document.querySelector('input[name="cwkind"]:checked')||{}).value)||'container';
     var dup=n && state.list.some(function(sb){ return sb.name===n || (k==='container' && sb.name==='sbx-'+n); });
-    m.textContent=dup ? '"'+n+'" already exists — pick another name' :
-      (k==='container' ? 'container becomes sbx-<name> — a–z, 0–9, -' : 'VM keeps this name (sbxvm-<name> / sbxvmd-<name>) — letters, digits, . _ -');
+    m.textContent=dup ? '"'+n+'" already exists - pick another name' :
+      (k==='container' ? 'container becomes sbx-<name> - a–z, 0–9, -' : 'VM keeps this name (sbxvm-<name> / sbxvmd-<name>) - letters, digits, . _ -');
     m.className='fm'+(dup?' iserr':'');
   });
 }
@@ -1057,7 +1119,7 @@ function drillToggle(name){
     fetch('/api/sandboxes/'+kindFor(name)+'/'+encodeURIComponent(name)).then(function(r){return r.json();}).then(function(dj){
       var p=dj.proxy||{};
       var px=$('px-'+name);
-      if(px){ px.innerHTML='proxy: <code>'+esc(p.base_url||'—')+'</code> — key '+(p.key_masked ? esc(p.key_masked)+' ('+esc(p.provider||'?')+')' : 'not synced yet'); }
+      if(px){ px.innerHTML='proxy: <code>'+esc(p.base_url||'-')+'</code> - key '+(p.key_masked ? esc(p.key_masked)+' ('+esc(p.provider||'?')+')' : 'not synced yet'); }
     }).catch(function(){});
   }).catch(function(){ host.innerHTML='<div class="subwrap hint">detail unavailable</div>'; });
 }
@@ -1110,7 +1172,7 @@ function renderConfigGlobal(){
     void j;
     fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:raw})
       .then(function(r){return r.json();})
-      .then(function(res){ if(res.error){ $('cfg-warn').textContent=res.error; } else { $('cfg-warn').textContent=''; toast('config saved — proxy picks it up live','ok'); } });
+      .then(function(res){ if(res.error){ $('cfg-warn').textContent=res.error; } else { $('cfg-warn').textContent=''; toast('config saved - proxy picks it up live','ok'); } });
   });
   void save;
   var imp=addTool($('glob-actions'),'Import host opencode.json',function(){
@@ -1141,7 +1203,7 @@ function jumpToCreated(kind, name, warnTxt){
       var sb=(d.sandboxes||[]).filter(function(x){return x.name===name&&x.kind===kind;})[0];
       if(sb){ if(warnTxt){ toast(warnTxt,'ok'); } select(sb); return; }
       if(++tries<20){ setTimeout(attempt,500); return; }
-      finish(); toast('created '+name+' — still surfacing in the sidebar','ok');
+      finish(); toast('created '+name+' - still surfacing in the sidebar','ok');
     }).catch(function(){
       if(++tries<20){ setTimeout(attempt,500); return; }
       finish(); toast('created '+name,'ok');
@@ -1169,14 +1231,14 @@ function renderOverview(sb){
   var stat=function(v){return {v:v};};
   var cards=[
     {t:'state', v:pillFor(sb)+' '+esc(sb.status||''), cls:'stat'},
-    {t:'image', v:sb.image?esc(sb.image):'<span class="dim">—</span>'},
-    {t:'cpu', v: sb.cpuPercent!=null? sb.cpuPercent.toFixed(2)+'%':'—', cls:'stat'},
-    {t:'memory', v: sb.memUsage||'—', cls:'stat'},
+    {t:'image', v:sb.image?esc(sb.image):'<span class="dim">-</span>'},
+    {t:'cpu', v: sb.cpuPercent!=null? sb.cpuPercent.toFixed(2)+'%':'-', cls:'stat'},
+    {t:'memory', v: sb.memUsage||'-', cls:'stat'},
   ];
   var extra=[];
   cardrowRender($('ov-stats'), cards);
   if(sb.ports && sb.ports.length) extra.push({t:'ports',v:sb.ports.map(esc).join(', ')});
-  extra.push({t:'created',v:esc(sb.uptime||sb.createdAt||'—')});
+  extra.push({t:'created',v:esc(sb.uptime||sb.createdAt||'-')});
   if(sb.netIO) extra.push({t:'net i/o',v:esc(sb.netIO)});
   if(sb.blockIO) extra.push({t:'disk i/o',v:esc(sb.blockIO)});
   cardrowRender($('ov-cards'), extra);
@@ -1185,7 +1247,7 @@ function renderOverview(sb){
 function cardrowRender(host, cards){
   host.innerHTML='';
   cards.forEach(function(c){
-    var el=h('div',{class:'card'+(c.cls?' '+c.cls:'')},'<h4>'+esc(c.t)+'</h4><div class="v">'+(c.v==null?'—':c.v)+'</div>');
+    var el=h('div',{class:'card'+(c.cls?' '+c.cls:'')},'<h4>'+esc(c.t)+'</h4><div class="v">'+(c.v==null?'-':c.v)+'</div>');
     host.appendChild(el);
   });
 }
@@ -1199,7 +1261,7 @@ var s={FetchDetail:function(sb){
         return '<li>'+esc(s.tag)+(s.info?' <span class="small">'+esc(s.info)+'</span>':'')+'</li>'; }).join('')+'</ul>'+
         '<div class="hint small">save/restore via CLI: sbxvm snapshot '+esc(sb.name)+' save (stops the VM briefly) · sbxvm snapshot '+esc(sb.name)+' list</div>'});
     } else if(sb.kind==='vm'){
-      extras.push({t:'snapshot timeline',v:'<div class="hint small">no snapshots yet — sbxvm snapshot '+esc(sb.name)+' save takes one (offline: the VM stops for the save, then reboots)</div>'});
+      extras.push({t:'snapshot timeline',v:'<div class="hint small">no snapshots yet - sbxvm snapshot '+esc(sb.name)+' save takes one (offline: the VM stops for the save, then reboots)</div>'});
     }
     if(d.mounts && d.mounts.length){
       extras.push({t:'mounts',v:'<ul>'+d.mounts.map(function(m){
@@ -1267,9 +1329,9 @@ function appendLog(line){
 function act(kind,name,what){
   var pkey=kind+':'+name;
   // optimistic UX: the daemon round-trip can take a while (docker's stop
-  // grace period, VM ACPI shutdowns) — reflect the intent immediately
+  // grace period, VM ACPI shutdowns) - reflect the intent immediately
   state.pending[pkey]=what;
-  var pend=toast((what==='stop'?'stopping ':'starting ')+name+' — waiting for the daemon (stop waits out the grace period; VMs shut down gracefully)…','pend');
+  var pend=toast((what==='stop'?'stopping ':'starting ')+name+' - waiting for the daemon (stop waits out the grace period; VMs shut down gracefully)…','pend');
   renderList();
   updateButtons(currentSB());
   return fetch('/api/actions/'+what,{method:'POST',headers:{'Content-Type':'application/json'},
@@ -1277,13 +1339,13 @@ function act(kind,name,what){
       if(pend) pend.remove();
       delete state.pending[pkey];
       if(j.error){ toast((what==='stop'?'stop':'start')+': '+j.error,'err'); }
-      else { toast((what==='start'?'started ':'stopped ')+name+' — daemon confirmed','ok'); }
+      else { toast((what==='start'?'started ':'stopped ')+name+' - daemon confirmed','ok'); }
       updateButtons(currentSB());
       renderList();
     }).catch(function(){
       if(pend) pend.remove();
       delete state.pending[pkey];
-      toast(what+' request failed (network) — check daemon connection','err');
+      toast(what+' request failed (network) - check daemon connection','err');
       updateButtons(currentSB());
       renderList();
     });
@@ -1292,7 +1354,7 @@ function delSB(sb){
   if(!sb) return;
   if(!confirm('Delete sandbox '+sb.name+'? Its container/VM, proxy keys, wallets and sync target are removed.')) return;
   var isVM = sb.kind === 'vm';
-  if(isVM && !confirm('Fully delete the VM '+sb.name+'? This wipes the VM disk AND snapshots — irrevocable.')) return;
+  if(isVM && !confirm('Fully delete the VM '+sb.name+'? This wipes the VM disk AND snapshots - irrevocable.')) return;
   return fetch('/api/actions/delete',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({kind:sb.kind,name:sb.name,confirm:isVM})}).then(function(r){return r.json();}).then(function(j){
       if(j.error) toast('delete: '+j.error,'err'); else toast('deleted '+sb.name,'ok');
@@ -1300,7 +1362,7 @@ function delSB(sb){
 }
 function attachGo(sb, mode, spawn){
   if((sb.state||'').toLowerCase()==='booting'){
-    toast(sb.name+' is still booting (kit self-registration) — the terminal opens right after the guest finishes booting','err');
+    toast(sb.name+' is still booting (kit self-registration) - the terminal opens right after the guest finishes booting','err');
     return;
   }
   return fetch('/api/sandboxes/'+sb.kind+'/'+sb.name+'/attach',{
@@ -1310,9 +1372,9 @@ function attachGo(sb, mode, spawn){
    .then(function(j){
      if(j.error){ toast('attach: '+j.error,'err'); return; }
      var c=j.conn||{};
-     if(c.spawnError){ toast('terminal: '+c.spawnError+' — connection copied instead','err'); copy(c.tmuxAttach||c.wtCommand||c.shellCmd||''); return; }
+     if(c.spawnError){ toast('terminal: '+c.spawnError+' - connection copied instead','err'); copy(c.tmuxAttach||c.wtCommand||c.shellCmd||''); return; }
      if(spawn){ toast('Opening Windows Terminal… attach with: '+(c.tmuxAttach||''),'ok'); copy(c.tmuxAttach||''); }
-     else { toast('tmux session "'+c.tmuxSession+'" ready — attach: '+(c.tmuxAttach||''),'ok'); copy(c.tmuxAttach||''); }
+     else { toast('tmux session "'+c.tmuxSession+'" ready - attach: '+(c.tmuxAttach||''),'ok'); copy(c.tmuxAttach||''); }
    });
 }
 
@@ -1332,7 +1394,7 @@ function openEvents(){
   state.es=es;
   es.addEventListener('snapshot', function(ev){
     // contract: ev.data is a bare array. Older daemons shipped null or a
-    // wrapped {sandboxes:…} object — normalize all three to an array so
+    // wrapped {sandboxes:…} object - normalize all three to an array so
     // renderList can never see anything but an array.
     try{
       var d=JSON.parse(ev.data);
@@ -1351,7 +1413,7 @@ function openEvents(){
   es.onerror=function(){ /* EventSource auto-reconnects */
     if(!state.firstData){
       Array.prototype.forEach.call(document.querySelectorAll('.fspin-msg'),function(m){
-        m.textContent='connection hiccup — retrying…';
+        m.textContent='connection hiccup - retrying…';
       });
     }
   };
@@ -1386,7 +1448,7 @@ function currentSB(){
 /* ---------- wiring ---------- */
 function init(){
   initTabs(); refreshHealth(); openEvents();
-  renderList(); // paint the loading spinner right away — the first snapshot may take seconds
+  renderList(); // paint the loading spinner right away - the first snapshot may take seconds
   setInterval(refreshHealth, 12000);
   $('theme-toggle').addEventListener('click', function(){
     var next=document.documentElement.getAttribute('data-theme')==='light'?'dark':'light';
@@ -1397,7 +1459,7 @@ function init(){
   setTimeout(function(){
     if(!state.firstData){
       Array.prototype.forEach.call(document.querySelectorAll('.fspin-msg'),function(m){
-        m.textContent='still looking — initial docker/virsh scans can take a moment…';
+        m.textContent='still looking - initial docker/virsh scans can take a moment…';
       });
     }
   }, 20000);
@@ -1413,7 +1475,8 @@ function init(){
   $('btn-stop').addEventListener('click', function(){ var sb=currentSB(); if(sb) act(sb.kind,sb.name,'stop'); });
   $('btn-del').addEventListener('click', function(){ var sb=currentSB(); if(sb) delSB(sb); });
   $('lnk-help').addEventListener('click', function(ev){ ev.preventDefault(); toast('CLI: sbxd ps | sbxd attach NAME | sbxd logs NAME | sbxd start/stop NAME | sbxd usage [NAME] | sbxd key mint NAME | sbxd sync NAME','ok'); });
-  $('lnk-overview').addEventListener('click', function(ev){ ev.preventDefault(); showGlobal('overview'); });
+  // the brand does the old bottom-entry job: click it for the Overview
+  $('brand').addEventListener('click', function(){ showGlobal('overview'); });
   $('lnk-burn').addEventListener('click', function(ev){ ev.preventDefault(); showGlobal('burn'); });
   var lc=$('lnk-create');
   if(lc){ lc.addEventListener('click', function(ev){ ev.preventDefault(); showGlobal('create'); }); }

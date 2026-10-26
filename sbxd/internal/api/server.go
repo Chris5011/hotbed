@@ -374,7 +374,7 @@ func (s *Server) logsSSE(w http.ResponseWriter, r *http.Request, sb sandbox.Sand
 		for ctx.Err() == nil {
 			_ = engine.VMJournalStream(ctx, sb.Backend, sb.Name, hyg)
 			if first && ctx.Err() == nil {
-				sendCmd("(guest journal via ssh — streams once the guest answers; auto-retrying every few seconds while it boots)")
+				sendCmd("(guest journal via ssh - streams once the guest answers; auto-retrying every few seconds while it boots)")
 				first = false
 			}
 			select {
@@ -498,7 +498,7 @@ func (s *Server) actionDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if sb.Kind == sandbox.KindVM && !in.Confirm {
-		httpError(w, 400, "refusing to delete VM "+sb.Name+" without {\"confirm\":true} — fully wipes the VM including disk and snapshots")
+		httpError(w, 400, "refusing to delete VM "+sb.Name+" without {\"confirm\":true} - fully wipes the VM including disk and snapshots")
 		return
 	}
 
@@ -607,7 +607,7 @@ func (s *Server) syncSandbox(sb sandbox.Sandbox, provider string) (cfgsync.Targe
 	// can never produce a working target, and the probe side-effect would
 	// otherwise spawn an in-engine relay that exits again instantly.
 	if len(s.Cfg.Opencode.Providers) == 0 {
-		return cfgsync.Target{}, "", fmt.Errorf("no providers configured — run `sbxd config init` first")
+		return cfgsync.Target{}, "", fmt.Errorf("no providers configured - run `sbxd config init` first")
 	}
 	port := s.Cfg.Proxy.Port
 	tr, path, err := attach.WriteTransport(sb, port)
@@ -749,11 +749,11 @@ func (s *Server) usagePurge(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if pinned[n] && !in.Force {
-				httpError(w, 403, "sandbox "+n+" is pinned — unpin it first (pins survive bulk purge)")
+				httpError(w, 403, "sandbox "+n+" is pinned - unpin it first (pins survive bulk purge)")
 				return
 			}
 			if live[n] && !in.Force {
-				httpError(w, 400, "refusing to purge records for existing sandbox "+n+" — write-off history belongs to living sandboxes")
+				httpError(w, 400, "refusing to purge records for existing sandbox "+n+" - write-off history belongs to living sandboxes")
 				return
 			}
 			target[n] = true
@@ -1005,7 +1005,7 @@ func (s *Server) createVM(w http.ResponseWriter, in createReq) {
 		return
 	}
 	if backend == "libvirt" && !engine.LibvirtUp() {
-		httpError(w, 503, "libvirt (qemu:///system) not reachable on this host — use vm_backend:\"docker\" (sbxvmd)")
+		httpError(w, 503, "libvirt (qemu:///system) not reachable on this host - use vm_backend:\"docker\" (sbxvmd)")
 		return
 	}
 	if backend == "docker" && !engine.DockerUp() {
