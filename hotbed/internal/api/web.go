@@ -168,12 +168,13 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13.5px/1.5 var(--sans);d
 .side-h:first-of-type{margin-top:var(--s4)}
 .cnt{color:var(--acc);font-weight:700;min-width:.5rem}
 .items{display:flex;flex-direction:column;gap:2px}
-.item{padding:.5rem .6rem;border-radius:var(--r2);cursor:pointer;display:flex;align-items:center;gap:var(--s2);border:1px solid transparent}
+.item{padding:.5rem .6rem;border-radius:var(--r2);cursor:pointer;display:flex;flex-direction:column;gap:.3rem;border:1px solid transparent}
 .item:hover{background:var(--bg3)}
 .item.sel{background:var(--acc-soft);border-color:rgba(91,140,255,.35);box-shadow:inset 2px 0 0 var(--acc)}
-.item .nm{flex:1;min-width:0}
-.item .nm b{display:block;font-weight:600;font-size:.84rem;overflow-wrap:anywhere;word-break:break-word}
-.item .nm small{color:var(--faint);display:block;font-size:.7rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .nmrow{display:flex;align-items:center;gap:var(--s2)}
+.item .nmrow b{flex:1;min-width:0;font-weight:600;font-size:.84rem;line-height:1.25;overflow-wrap:break-word;word-break:break-word}
+.item .subrow{display:flex;align-items:center;gap:var(--s2)}
+.item .subrow small{flex:1;min-width:0;color:var(--faint);font-size:.7rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .item .meters{font-size:.66rem;color:var(--faint);text-align:right;line-height:1.3;flex:none}
 .pill{font-size:.62rem;border-radius:999px;padding:.1rem .42rem;font-weight:700;color:var(--dim);background:var(--bg4);border:1px solid var(--line2);text-transform:uppercase;letter-spacing:.03em;align-self:center}
 .pill.running{background:rgba(76,195,138,.12);color:var(--grn);border-color:rgba(76,195,138,.4)}
@@ -496,8 +497,8 @@ function renderItem(sb){
   el.title=sb.name; // hover reveals the full name even when the item wraps
   var sub=sb.kind==='container' ? (sb.stack||'container')+' · '+short(sb.project||sb.image||'')
         : (sb.backend==='docker'?'hotbedvmd':sb.backend)+(sb.ports&&sb.ports.length?' · '+sb.ports[0]:'');
-  el.innerHTML='<div class="nm"><b>'+esc(sb.name)+'</b><small>'+esc(sub)+'</small></div>'+
-    '<div class="meters">'+meters(sb)+'</div>'+pillFor(sb);
+  el.innerHTML='<div class="nmrow"><b>'+esc(sb.name)+'</b>'+pillFor(sb)+'</div>'+
+    '<div class="subrow"><small>'+esc(sub)+'</small><div class="meters">'+meters(sb)+'</div></div>';
   el.addEventListener('click', function(){ select(sb); });
   return el;
 }
