@@ -16,8 +16,10 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"hotbed/internal/dnsfence"
@@ -115,24 +117,25 @@ func trimEgressEvents(size int64) {
 var applied = map[string]bool{}
 
 // SnapshotSandboxIPs writes the fence's {ip: sandbox-name} attribution
-// snapshot for all running kit sandboxes (best-effort; the fence fails
-// closed for sources missing from it).
+// snapshot for all running containers (best-effort; the fence fails
+// closed for sources missing from it). Relay containers join engine
+// netns (--network host, empty IP) and drop out naturally.
 func SnapshotSandboxIPs() error {
-	rows, err := ListSandboxContainers()
+	out, err := RunTO(10*time.Second, "docker", "ps", "--format", "{{.Names}}")
 	if err != nil {
 		return err
 	}
 	m := map[string]string{}
-	for _, r := range rows {
-		name := trimName(r.Names)
-		if name == "" || r.State != "running" {
+	for _, name := range strings.Split(strings.TrimSpace(out), "\n") {
+		name = strings.TrimPrefix(strings.TrimSpace(name), "/")
+		if name == "" {
 			continue
 		}
 		if ip, e := ContainerIP(name); e == nil && ip != "" {
 			m[ip] = name
 		}
 	}
-	out, err := json.Marshal(ipSnapshotFile{IPs: m})
+	b, err := json.Marshal(ipSnapshotFile{IPs: m})
 	if err != nil {
 		return err
 	}
@@ -141,17 +144,24 @@ func SnapshotSandboxIPs() error {
 		return err
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, out, 0o600); err != nil {
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)
 }
 
-// ContainerIP returns the container's IPv4 on its default network.
+// ContainerIP returns the container's first valid IPv4 across its bridge
+// networks (host-netns containers print template junk like "invalid IP"
+// and yield "").
 func ContainerIP(name string) (string, error) {
 	out, err := RunTO(8*time.Second, "docker", "inspect", "--format",
-		"{{.NetworkSettings.IPAddress}}", name)
-	return trimName(out), err
+		"{{range $k, $v := .NetworkSettings.Networks}}{{$v.IPAddress}} {{end}}", name)
+	for _, f := range strings.Fields(out) {
+		if ip := net.ParseIP(f); ip != nil && ip.To4() != nil {
+			return f, nil
+		}
+	}
+	return "", err
 }
 
 // trimName strips container-name prefixes (/) and inspect whitespace.

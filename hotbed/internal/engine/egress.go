@@ -108,8 +108,8 @@ func egressScript(preset string) string {
 func egressDNATScript() string {
 	return fmt.Sprintf(
 		"iptables -t nat -N %s 2>/dev/null; iptables -t nat -F %s 2>/dev/null; "+
-			"iptables -t nat -A %s -p udp --dport 53 -j DNAT --to-destination %s%s; "+
-			"iptables -t nat -A %s -p tcp --dport 53 -j DNAT --to-destination %s%s; "+
+			"iptables -t nat -A %s -p udp --dport 53 -j DNAT --to-destination %s:%s; "+
+			"iptables -t nat -A %s -p tcp --dport 53 -j DNAT --to-destination %s:%s; "+
 			"iptables -t nat -D OUTPUT -j %s 2>/dev/null; iptables -t nat -I OUTPUT 1 -j %s",
 		egressNatChain, egressNatChain,
 		egressNatChain, dnsFenceGW(), dnsFencePort(),
