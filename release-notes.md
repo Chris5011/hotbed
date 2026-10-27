@@ -1,3 +1,44 @@
+# Hotbed v0.6.1 — the fence polish release
+
+Three user-reported fixes around the v0.6.0 fences and one sure-footed
+dashboard touch-up. No behavioral surprises: everything below was
+verified live (throwaway sandboxes, then deleted).
+
+## What's new
+
+- **Allowlist keeps the LLM proxy reachable** - the allowlist chain used
+  to accept only the DNS fence listener on the bridge gateway, so a
+  synced opencode inside an allowlist sandbox could never reach the
+  hosted proxy (the connection silently hung). The proxy is
+  kit-internal and bearer-key gated, not "internet": the chain now also
+  accepts `gw:7775` (`HOTBEDD_PROXY_PORT` override for custom proxy
+  configs), in both the preset script and the keeper re-apply script.
+  Sandboxes fenced before this fix need one re-apply
+  (`hotbedd egress NAME allowlist ...`) to pick the rule up.
+- **Create wizard: allowed-domains input explains itself** - the
+  allowlist input (shown when the `allowlist` preset is selected) now
+  carries a hover tooltip and a helper-line pointer noting that synced
+  opencode needs `opencode.ai` on the list for login/model-list/update
+  calls, otherwise chat fails early (`EAI_AGAIN`). Preset order reflects
+  the fence ladder: `allow, allowlist, proxy-only, none`.
+- **Sidebar names readable again** - the name-owns-a-full-row layout:
+  the sandbox name wraps only at natural separators (`-`, `_`) with the
+  state pill beside it; stack/image subtitle and cpu/mem meters sit on
+  a second row. The v0.6.0 `overflow-wrap: anywhere` attempt let the
+  flex track collapse names to two characters per line.
+- **Gate suite grew to 141 checks** - allowlist keeps the LLM proxy
+  reachable (plus the wizard-tooltip and sidebar-layout regressions in
+  earlier commits all green).
+
+## Upgrade from v0.6.0
+
+```bash
+cd ~/hotbed
+scripts/update.sh --yes
+```
+
+---
+
 # Hotbed v0.6.0 — the egress allowlist release
 
 The outbound-fence story completes: sandboxes can now be pinned to an
