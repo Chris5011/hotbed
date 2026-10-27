@@ -109,8 +109,10 @@ CONFIG & BURN (P2)
                             declarative sandboxes (hbd.yaml): print+validate plans,
                             up spawns the container (needs a built kit image) then
                             applies wallets, egress and opencode sync from the file
-  hotbedd egress NAME [allow|proxy-only|none]
-                            outbound fence via iptables inside the sandbox (show: omit preset)
+  hotbedd egress NAME [allow|proxy-only|none|allowlist DOMAINS...]
+                            outbound fence via iptables inside the sandbox
+                            (show: omit preset); allowlist keeps DNS through
+                            the fence and only listed domains reachable
   hotbedd audit [N]            last N control-plane actions (start/stop, keys, wallets, mounts, egress)
   hotbedd version|help
 

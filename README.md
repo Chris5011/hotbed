@@ -971,10 +971,31 @@ refuse live recreation with an explanation.
 `hotbedd egress NAME proxy-only` fences public addresses out of the sandbox
 netns (iptables OUTPUT chain HBD_EGRESS; loopback, established flows, RFC1918
 and DNS stay open) so LLM traffic must ride the hbd proxy on the host.
-`hotbedd egress NAME none` keeps only loopback+established; `allow` resets to
-the Docker default. Needs no restart: rules live in the netns, so re-apply
+`hotbedd egress NAME none` is stricter: only loopback+established stay —
+no DNS, no private ranges, everything else drops. `allow` resets to the
+Docker default. Needs no restart: rules live in the netns, so re-apply
 after any recreate. Containers that already run iptables get it via plain
 exec; everything else uses a tiny auto-built helper image (`hotbedd-egress-helper:1`, built once on first use).
+
+Their difference in one sentence: **none** cuts a sandbox off everything
+except its own loopback (even DNS), while **proxy-only** additionally
+leaves the private/docker-internal network and plain DNS reachable so the
+host-side burn-ledger proxy works while the public internet still drops.
+
+**Domain allowlist** (`allowlist` preset, host-based egress firewall):
+`hotbedd egress NAME allowlist api.openai.com example.org` stores the
+sandbox's domain list in `config.json` (`egress_allowlist`) and installs
+a stricter fence: all of the sandbox's DNS is DNAT'ed into the fence
+listener inside the docker engine netns (`gw:15353`, part of the daemon /
+proxy relay — no extra container), which only answers names on the
+sandbox's list. Every IPv4 the fence answers is installed as an ACCEPT in
+the sandbox's netns (domains are pre-resolved at install time, then kept
+fresh by the daemon's egress keeper); everything not on the list gets a
+synthesized REFUSED and stays dropped. Unknown sandbox sources and DNS
+bypasses fail closed. DoH/DoT workarounds (unlisted hosts on port 443)
+drop with everything else. Recreates wipe netns rules, so re-apply.
+Dashboard create wizard offers it, plus `hbd` recipes via
+`egress: allowlist` + `egress_allowlist` in config.
 
 **Audit trail** — `state/audit.jsonl` records the control plane: sandbox
 start/stop/spawn, key mint/revoke, wallet changes, mount recreates, egress

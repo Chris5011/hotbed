@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"hotbed/internal/config"
+	"hotbed/internal/dnsfence"
 	"hotbed/internal/env"
 	"hotbed/internal/keys"
 	"hotbed/internal/ledger"
@@ -38,6 +39,19 @@ func proxyCmd(_ []string) error {
 	}
 	px := proxy.New(cfg, ks, ledger.Open(cfg.Prices))
 	httpSrv := &http.Server{Addr: px.Addr(), Handler: px, IdleTimeout: 90 * time.Second, ReadHeaderTimeout: 15 * time.Second}
+
+	// dns fence (egress allowlist): runs in the engine netns here — relay
+	// containers CAN bind the bridge-facing port that fenced sandboxes DNAT
+	// into. A busy port means another state set's fence already listens;
+	// skip with a log line, the feature is single-winner by design.
+	go func() {
+		if env.DNSFenceDisabled() {
+			return
+		}
+		if err := dnsfence.Run("0.0.0.0", cfg.Proxy.DNSPort); err != nil {
+			fmt.Fprintf(os.Stderr, "\033[33;1mhotbedd proxy:\033[0m dns fence not started: %v\n", err)
+		}
+	}()
 
 	go func() {
 		sig := make(chan os.Signal, 1)

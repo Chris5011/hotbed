@@ -981,7 +981,13 @@ func (s *Server) createRoute(w http.ResponseWriter, r *http.Request) {
 		warn = "wallets: " + err.Error()
 	}
 	if in.Egress != "" && in.Egress != "allow" {
-		if e := engine.ApplyEgressContainer(cn, in.Egress); e != nil {
+		var e error
+		if in.Egress == "allowlist" {
+			_, e = engine.ApplyEgressFence(cn, in.Egress, s.Cfg.EgressAllowlist[cn])
+		} else {
+			e = engine.ApplyEgressContainer(cn, in.Egress)
+		}
+		if e != nil {
 			if warn != "" {
 				warn += "; "
 			}

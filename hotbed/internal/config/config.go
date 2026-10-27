@@ -29,6 +29,10 @@ type Proxy struct {
 	DefaultBudgetUSD    *float64 `json:"default_budget_usd,omitempty"`    // nil = 0 = unlimited
 	DefaultBudgetTokens *int     `json:"default_budget_tokens,omitempty"` // nil = 0 = unlimited
 	Bind                string   `json:"bind,omitempty"`                  // default 0.0.0.0 (sandboxes must reach it)
+	// DNSPort is the port of the DNS fence inside the docker engine netns
+	// (the relay / main daemon listener DNAT'ed container :53 traffic to).
+	// Empty = default. The fence answers egress-allowlist DNS.
+	DNSPort string `json:"dns_port,omitempty"`
 }
 
 type OC struct {
@@ -49,6 +53,10 @@ type Config struct {
 	Pinned []string `json:"pinned_sandboxes,omitempty"`
 	// Sweeper auto-stops idle kit sandboxes (P3 item E); nil = disabled.
 	Sweeper *Sweeper `json:"sweeper,omitempty"`
+	// EgressAllowlist maps sandbox name -> domains its egress-allowlist
+	// fence may reach (everything else drops). Installed via
+	// `hotbedd egress NAME allowlist DOMAINS...` (list only = show).
+	EgressAllowlist map[string][]string `json:"egress_allowlist,omitempty"`
 }
 
 // Sweeper auto-stops idle kit sandboxes (containers with the dev.hotbed label,
@@ -106,8 +114,14 @@ func (c *Config) sane() {
 	if c.Proxy.Port == "" {
 		c.Proxy.Port = env.DefaultProxyPort
 	}
+	if c.Proxy.DNSPort == "" {
+		c.Proxy.DNSPort = env.DefaultDNSPort
+	}
 	if c.Proxy.Bind == "" {
 		c.Proxy.Bind = "0.0.0.0"
+	}
+	if c.EgressAllowlist == nil {
+		c.EgressAllowlist = map[string][]string{}
 	}
 	if c.Proxy.DefaultBudgetUSD != nil && *c.Proxy.DefaultBudgetUSD < 0 {
 		zero := 0.0

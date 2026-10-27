@@ -685,6 +685,30 @@ if docker info >/dev/null 2>&1 && docker image inspect hotbedd-egress-helper:1 >
             || pass "egress allow removes the chain"
         docker exec "$ECON" wget -T 5 -q -O /dev/null http://1.1.1.1/ 2>/dev/null \
             && pass "egress allow restores outbound" || fail "egress allow restores outbound"
+
+        # allowlist: bogus domains must still fence (fail closed, nat side DNATs
+        # every :53 lookup into gw:15353 where the fence refuses them)
+        "${p2env[@]}" "$HOTBEDD" egress "$ECON" allowlist \
+            nonexistent-domain.invalid also-bogus.invalid >/dev/null 2>&1
+        show="$("${p2env[@]}" "$HOTBEDD" egress "$ECON" 2>&1)"
+        echo "$show" | grep -q 'HBD_EGRESS' \
+            && pass "egress allowlist installs the chain (bogus domains)" \
+            || fail "egress allowlist installs the chain (got: $show)"
+        echo "$show" | grep -q 'HBD_DNS' \
+            && pass "egress allowlist installs the nat side (HBD_DNS)" \
+            || fail "egress allowlist installs the nat side (got: $show)"
+        echo "$show" | grep -q 'DROP' \
+            && pass "egress allowlist ends in DROP" \
+            || fail "egress allowlist ends in DROP (got: $show)"
+        if docker exec "$ECON" wget -T 4 -q -O /dev/null http://1.1.1.1/ 2>/dev/null; then
+            fail "egress allowlist blocks public outbound"
+        else
+            pass "egress allowlist blocks public outbound"
+        fi
+        "${p2env[@]}" "$HOTBEDD" egress "$ECON" allow >/dev/null 2>&1
+        show="$("${p2env[@]}" "$HOTBEDD" egress "$ECON" 2>&1)"
+        echo "$show" | grep -q 'HBD_DNS' && fail "egress allow cleans the nat chain" \
+            || pass "egress allow cleans the nat chain"
     else
         pass "egress checks skipped (container outbound unreachable in this env)"
     fi

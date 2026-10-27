@@ -29,6 +29,11 @@ const (
 	// (per-sandbox bearer keys gate it).
 	DefaultProxyPort = "7775"
 
+	// DefaultDNSPort for the egress-allowlist DNS fence: the iptables DNAT
+	// inside fenced sandboxes rewrites their :53 queries to gw:DNSPort,
+	// where the fence listener (relay / main daemon) answers.
+	DefaultDNSPort = "15353"
+
 	// ContainerLabel marks hotbed-managed docker sandboxes (set by bin/hbd).
 	ContainerLabel = "dev.hotbed"
 
@@ -207,6 +212,10 @@ func StateDir() string {
 // RelayDisabled opts out of the in-engine proxy relay (tests/hermetic
 // suites, air-gapped boxes, manual setups). HOTBEDD_RELAY_DISABLE=1.
 func RelayDisabled() bool { return getenv("HOTBEDD_RELAY_DISABLE", "") == "1" }
+
+// DNSFenceDisabled opts out of the egress-allowlist DNS fence listener
+// (same use cases as RelayDisabled). HOTBEDD_DNS_FENCE_DISABLE=1.
+func DNSFenceDisabled() bool { return getenv("HOTBEDD_DNS_FENCE_DISABLE", "") == "1" }
 
 // OwnerLabelKey is the container label stamping WHICH hotbedd daemon spawned a
 // sandbox. Idle sweepers and other management verbs skip foreign-owner

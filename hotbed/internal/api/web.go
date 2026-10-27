@@ -997,7 +997,7 @@ function renderCreator(){
     '</div></div>'+
     '<div id="cw-cont-fields">'+
     '<div class="cw-sec"><div class="cw-sec-t">Network</div><div class="cw-grid two">'+
-      '<div class="field"><label for="cw-egress">Egress</label><select id="cw-egress"><option>allow</option><option>proxy-only</option><option>none</option></select><div class="fm">outbound fence; re-apply after recreates</div></div>'+
+      '<div class="field"><label for="cw-egress">Egress</label><select id="cw-egress"><option>allow</option><option>proxy-only</option><option>none</option><option>allowlist</option></select><div class="fm">outbound fence; allowlist needs domains in config egress_allowlist, re-apply after recreates</div></div>'+
     '</div>'+
     '<div class="rows-t">Published ports - host → container</div>'+
     '<div class="rows" id="cw-ports"></div>'+
@@ -1381,6 +1381,7 @@ function renderHelp(){
     '<div style="font-size:.82rem;color:var(--dim);line-height:1.55;max-width:70ch">'+
     '<p><b>hbd</b> makes a disposable Docker container per project dir - your project is bind-mounted at <span class="mono">/workspace</span>, the only host path the agent can touch. <b>hotbedvm</b> is the VM escape hatch (libvirt, or docker-in-docker "hotbedvmd"): snapshots, ssh, full disk. <b>hotbedd</b> is this daemon and dashboard: OpenCode config, the proxy (burn ledger), wallets, egress fences, kits.</p>'+
     '<p>Provider API keys stay on the host in hotbedd only - sandboxes get per-sandbox minted proxy keys, the UI shows them masked everywhere.</p>'+
+    '<p><b>Egress fences</b>: <span class="mono">none</span> keeps only loopback+established (everything else drops, DNS included). <span class="mono">proxy-only</span> additionally keeps private ranges and DNS open so the host-side proxy works while public addresses drop. <span class="mono">allowlist</span> routes all DNS through the fence and only lets the sandbox reach domains from its configured list.</p>'+
     '</div>'+
     hsec('LLM disclosure')+
     '<div style="font-size:.82rem;color:var(--dim);line-height:1.55;max-width:70ch">'+

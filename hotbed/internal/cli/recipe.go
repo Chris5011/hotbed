@@ -224,10 +224,29 @@ func recipeUp(args []string) error {
 	}
 	// egress
 	if r.Egress != "" {
-		if e := engine.ApplyEgressContainer(cn, r.Egress); e != nil {
+		var e error
+		var done string
+		switch {
+		case r.Egress == "allowlist":
+			if list := configAllowlist(cn); len(list) == 0 {
+				e = fmt.Errorf("no domains in config egress_allowlist for %s", cn)
+			} else {
+				var n int
+				if n, e = engine.ApplyEgressFence(cn, r.Egress, list); e == nil {
+					done = fmt.Sprintf("allowlist (%d domains, %d ips)", len(list), n)
+				}
+			}
+		default:
+			if e = engine.ApplyEgressContainer(cn, r.Egress); e == nil && r.Egress == "allow" {
+				done = "allow (reset)"
+			} else if e == nil {
+				done = r.Egress
+			}
+		}
+		if e != nil {
 			fmt.Fprintf(os.Stderr, "\033[33;1mhotbedd:\033[0m egress %s failed: %v\n", r.Egress, e)
 		} else {
-			fmt.Printf("egress:  %s\n", r.Egress)
+			fmt.Printf("egress:  %s\n", done)
 		}
 	}
 	// opencode config sync (needs a minted key; reuses the P2 flow)

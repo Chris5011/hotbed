@@ -12,7 +12,7 @@
 //	  - /tmp/cache:/cache:ro
 //	budget: 5                     # USD wallet (0 = unlimited)
 //	budget_tokens: 500000         # token wallet (0 = unlimited)
-//	egress: proxy-only            # allow | proxy-only | none
+//	egress: proxy-only            # allow | proxy-only | none | allowlist (via $ egress_allowlist)
 //	sync: true                    # push proxy-backed opencode config after spawn
 //	provider: openwebui
 //	model: openwebui/glm-4.7
@@ -313,7 +313,7 @@ func (r *Recipe) Validate() error {
 	switch r.Egress {
 	case "", "allow", "proxy-only", "none":
 	default:
-		return fmt.Errorf("egress %q: use allow | proxy-only | none", r.Egress)
+		return fmt.Errorf("egress %q: use allow | proxy-only | none | allowlist", r.Egress)
 	}
 	targets := map[string]bool{}
 	for _, m := range r.Mounts {

@@ -22,6 +22,7 @@ import (
 	"hotbed/internal/audit"
 	"hotbed/internal/cfgsync"
 	"hotbed/internal/config"
+	"hotbed/internal/dnsfence"
 	"hotbed/internal/engine"
 	"hotbed/internal/env"
 	"hotbed/internal/keys"
@@ -147,6 +148,23 @@ func serve(args []string) error {
 		}
 		if _, err := engine.EnsureRelay(cfg.Proxy.Port); err != nil {
 			fmt.Fprintf(os.Stderr, "\033[33;1mhotbedd:\033[0m proxy relay not restored at boot: %v\n", err)
+		}
+	}()
+
+	// egress keeper: installs per-IP ACCEPTs for fresh allowlist-fence DNS
+	// answers and refreshes the fence's ip→sandbox attribution snapshot.
+	engine.StartEgressKeeper()
+
+	// dns fence listener (allowlist egress). On Docker Desktop the real
+	// fence runs inside the engine's relay container — a host listener
+	// cannot be reached by sandboxes — but we still serve one for native
+	// engines and for loopback testing; a busy port just logs and moves on.
+	go func() {
+		if env.DNSFenceDisabled() {
+			return
+		}
+		if err := dnsfence.Run("", cfg.Proxy.DNSPort); err != nil {
+			fmt.Fprintf(os.Stderr, "\033[33;1mhotbedd:\033[0m dns fence not started here: %v\n", err)
 		}
 	}()
 
