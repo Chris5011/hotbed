@@ -254,7 +254,19 @@ func (l *Ledger) Summarize(sandbox string) Summary {
 	for _, m := range mm {
 		s.Models = append(s.Models, *m)
 	}
-	sort.Slice(s.Models, func(i, j int) bool { return s.Models[i].Cost > s.Models[j].Cost })
+	// Deterministic order: by token usage (in+out) desc, cost desc as
+	// tiebreak, then model name asc. Without the final key, sort.Slice
+	// shuffles zero-cost rows (unstable sort over map iteration order).
+	sort.Slice(s.Models, func(i, j int) bool {
+		a, b := s.Models[i], s.Models[j]
+		if ta, tb := a.In+a.Out, b.In+b.Out; ta != tb {
+			return ta > tb
+		}
+		if a.Cost != b.Cost {
+			return a.Cost > b.Cost
+		}
+		return a.Model < b.Model
+	})
 	all := l.scan()
 	for i := len(all) - 1; i >= 0 && len(s.Calls25) < 25; i-- {
 		if sandbox == "" || all[i].Sandbox == sandbox {
