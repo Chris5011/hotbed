@@ -168,9 +168,28 @@ func legacyRelayCleanup() {
 	// honest waitRelay error below
 }
 
+// relayOwnsEnv reads the HOTBEDD_VERSION env of a relay container (empty
+// when absent — pre-0.6 relays never carried it).
+func relayOwnsVersion(name string) string {
+	out, err := RunTO(8*time.Second, "docker", "inspect", "--format",
+		"{{range .Config.Env}}{{println .}}{{end}}", name)
+	if err != nil {
+		return ""
+	}
+	for _, l := range strings.Split(out, "\n") {
+		if v, ok := strings.CutPrefix(l, "HOTBEDD_VERSION="); ok {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
 // EnsureRelay makes sure this state set's relay container exists and is
 // running; returns the gateway IP the sandboxes should dial. Idempotent:
-// an already-running relay of ours is reused, a stopped one is started.
+// an already-running relay of ours is reused — unless its binary predates
+// the running daemon (version stamp mismatch), in which case it respawns
+// so freshly-shipped engine-side features (e.g. the egress DNS fence)
+// actually land in the engine netns.
 func EnsureRelay(proxyPort string) (string, error) {
 	gw := BridgeGateway()
 	if gw == "" {
@@ -179,6 +198,14 @@ func EnsureRelay(proxyPort string) (string, error) {
 	legacyRelayCleanup()
 	name := RelayContainer()
 	exists, running := relayRunning(name)
+	staleRelay := exists && running && relayOwns(name) && relayOwnsVersion(name) != env.Version
+	if staleRelay {
+		_, _ = RunTO(30*time.Second, "docker", "rm", "-f", name)
+		audit.Record("relay.refresh", name,
+			fmt.Sprintf("relay binary predates the daemon (%s → %s)", relayOwnsVersion(name), env.Version))
+		fmt.Printf("\033[36;1mhotbedd:\033[0m relay respawned for the new daemon build (%s)\n", name)
+		exists = false
+	}
 	if exists && running && relayOwns(name) {
 		return gw, nil
 	}
@@ -218,6 +245,7 @@ func EnsureRelay(proxyPort string) (string, error) {
 		"-e", "HOTBEDD_CONFIG_DIR=/etc/hotbedd",
 		"-e", "HOTBEDD_DATA_DIR=/keys",
 		"-e", "HOTBEDD_STATE_DIR=/state", // usage receipts shared with the dashboard
+		"-e", "HOTBEDD_VERSION=" + env.Version, // upgrade detection: stale relays respawn
 		"-v", env.ConfigDir() + ":/etc/hotbedd:ro",
 		"-v", env.DataDir() + ":/keys:ro",
 		"-v", env.StateDir() + ":/state",

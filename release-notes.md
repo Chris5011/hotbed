@@ -1,3 +1,75 @@
+# Hotbed v0.6.0 — the egress allowlist release
+
+The outbound-fence story completes: sandboxes can now be pinned to an
+**explicit domain whitelist** (host-based egress firewall), and two rough
+edges from v0.5.0 are fixed.
+
+## What's new
+
+- **Domain allowlist egress preset** — `hotbedd egress NAME allowlist
+  example.com api.provider.net` installs a real content fence in the
+  sandbox's netns: everything drops (loopback + established stay), all of
+  the sandbox's DNS is routed through the fence listener inside the docker
+  engine, and only the listed domains resolve and connect. Every IPv4 the
+  fence answers is installed as an ACCEPT moments later (domains are
+  pre-resolved at install so the fence is complete at minute zero); the
+  daemon keeps it fresh as CDNs rotate addresses. Non-listed domains get a
+  synthesized `REFUSED` — dashboards and agents fail fast instead of
+  hanging. Domains live in `config.json` under `egress_allowlist` and also
+  work from `hbd.yaml` recipes (`egress: allowlist`) and the dashboard
+  create wizard. The fence is fail-closed: an unknown source or a missing
+  attribution answer answers nothing.
+- **The four presets at a glance**
+  | preset | open to the sandbox |
+  |---|---|
+  | `allow` | everything (docker default) |
+  | `proxy-only` | loopback, established, private ranges, DNS — public **drops**; LLM traffic rides the hosted proxy |
+  | `none` | loopback + established only; even DNS drops |
+  | `allowlist` | like `none`, plus the listed domains (DNS goes through the fence) |
+- **Burn tab rows stop jumping** — model rows ordered by token usage
+  (desc), cost as tiebreak, model name as the final deterministic key; the
+  zero-cost shuffling from v0.5.0's cost-only sort is gone.
+- **Proxy streams oversized bodies** — the 8 MiB response-buffer
+  truncation is gone: bodies stream through untruncated (a 9 MB model
+  payload arrives intact; regression-checked in the suite). Provider
+  context windows (GLM's 1,048,576-token one confirmed live) surface
+  correctly in the burn row.
+- **Terminal spawn works from the resident daemon** — under a systemd
+  user service (minimal PATH) `SpawnTerminal` used to fall through to
+  wt.exe/cmd.exe failure; it now probes the WindowsApps glob and System32
+  paths explicitly. Also: `HOTBED_ROOT` self-location dereferences
+  symlinks, and hermetic test daemons can never adopt legacy sandboxes.
+- **Relay upgrades transparently** — the engine-side relay is version
+  stamped; a daemon upgrade respawns it once so engine-VM features (the
+  DNS fence) land without manual container surgery.
+- **Docs** — LLM development disclosure on README, both CLI helps and the
+  dashboard; naming-notes corrections (hotbed.dev is registered — no
+  domain is claimed).
+
+## Try the fence
+
+```bash
+hotbedd egress NAME allowlist api.openai.com   # pin a sandbox to one domain
+hotbedd egress NAME                            # show rules + configured list
+hotbedd egress NAME allow                      # reset to the docker default
+```
+
+Needs docker; same convenience-fence disclaimer as before (it is
+re-apply-after-recreate, not a security boundary). The gate suite grew to
+**140 checks** (allowlist chain, nat side, fail-closed DROP, reset cleanup).
+
+## Upgrade from v0.5.0
+
+```bash
+cd ~/hotbed
+scripts/update.sh --yes
+```
+
+The daemon restart respawns its relay (version-stamped) — sandboxes keep
+running through it.
+
+---
+
 # Hotbed v0.5.0 — the rename release
 
 The project (formerly **OpenCode-SBX**, daemon **sbxd**, CLI **sbx**) is now
