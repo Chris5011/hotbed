@@ -25,7 +25,10 @@ import (
 //	             from the sandbox's config allowlist; every resolved IP it
 //	             answers is ACCEPT'ed in the sandbox netns (on install the
 //	             domains are pre-resolved so the fence is complete at
-//	             minute zero), everything else keeps dropping
+//	             minute zero), everything else keeps dropping. The hosted
+//	             LLM proxy (gw:proxy_port) is kit-internal, bearer-key
+//	             gated and always accepted here, so a synced opencode
+//	             works without listing its provider domain.
 //
 // Applied via `docker exec … iptables` when the sandbox can run iptables
 // (has the binary and NET_ADMIN); otherwise through a privileged helper
@@ -80,12 +83,16 @@ func egressScript(preset string) string {
 			"-p udp --dport 53 -j ACCEPT",
 			"-p tcp --dport 53 -j ACCEPT")
 	case "allowlist":
-		// only the fence listener on the bridge gateway is reachable
-		// (the nat side DNATs all :53 traffic there); resolved allowlist
+		// the fence listener + the hosted LLM proxy on the bridge gateway
+		// stay reachable (DNS is DNAT'ed into the fence via the nat side;
+		// the proxy is kit-internal, bearer-key gated and not "internet" —
+		// synced opencode must reach it, else a synced allowlist sandbox
+		// could never use its provider); resolved allowlist
 		// IPs are appended by the caller
 		rules = append(rules,
 			"-d "+dnsFenceGW()+" -p udp --dport "+dnsFencePort()+" -j ACCEPT",
-			"-d "+dnsFenceGW()+" -p tcp --dport "+dnsFencePort()+" -j ACCEPT")
+			"-d "+dnsFenceGW()+" -p tcp --dport "+dnsFencePort()+" -j ACCEPT",
+			"-d "+dnsFenceGW()+" -p tcp --dport "+proxyFencePort()+" -j ACCEPT")
 	}
 	rules = append(rules, "-j DROP")
 
@@ -156,6 +163,7 @@ func egressAllowlistScript(ips []string) string {
 	}
 	fmt.Fprintf(&b, "iptables -A %s -d %s -p udp --dport %s -j ACCEPT; ", egressChain, dnsFenceGW(), dnsFencePort())
 	fmt.Fprintf(&b, "iptables -A %s -d %s -p tcp --dport %s -j ACCEPT; ", egressChain, dnsFenceGW(), dnsFencePort())
+	fmt.Fprintf(&b, "iptables -A %s -d %s -p tcp --dport %s -j ACCEPT; ", egressChain, dnsFenceGW(), proxyFencePort())
 	fmt.Fprintf(&b, "iptables -A %s -j DROP; ", egressChain)
 	fmt.Fprintf(&b, "iptables -D OUTPUT -j %s 2>/dev/null; iptables -I OUTPUT 1 -j %s; ", egressChain, egressChain)
 	b.WriteString(egressDNATScript())
@@ -185,6 +193,17 @@ func dnsFencePort() string {
 		return v
 	}
 	return env.DefaultDNSPort
+}
+
+// proxyFencePort is the hosted LLM proxy's listen port, accepted alongside
+// the fence listener in the allowlist preset. Same reasoning as the DNS
+// port: HOTBEDD_PROXY_PORT overrides for non-default config proxy.port
+// setups (advanced knob; must match the actual proxy listener).
+func proxyFencePort() string {
+	if v := strings.TrimSpace(os.Getenv("HOTBEDD_PROXY_PORT")); v != "" {
+		return v
+	}
+	return env.DefaultProxyPort
 }
 
 // ApplyEgressFence installs/removes outbound rules inside a container,

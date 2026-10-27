@@ -700,6 +700,9 @@ if docker info >/dev/null 2>&1 && docker image inspect hotbedd-egress-helper:1 >
         echo "$show" | grep -q 'DROP' \
             && pass "egress allowlist ends in DROP" \
             || fail "egress allowlist ends in DROP (got: $show)"
+        echo "$show" | grep -q -- '--dport 7775' \
+            && pass "egress allowlist keeps the LLM proxy reachable" \
+            || fail "egress allowlist keeps the LLM proxy reachable (got: $show)"
         if docker exec "$ECON" wget -T 4 -q -O /dev/null http://1.1.1.1/ 2>/dev/null; then
             fail "egress allowlist blocks public outbound"
         else
