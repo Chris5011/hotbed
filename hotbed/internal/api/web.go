@@ -1000,7 +1000,7 @@ function renderCreator(){
     '<div id="cw-cont-fields">'+
     '<div class="cw-sec"><div class="cw-sec-t">Network</div><div class="cw-grid two">'+
       '<div class="field"><label for="cw-egress">Egress</label><select id="cw-egress"><option>allow</option><option>proxy-only</option><option>none</option><option>allowlist</option></select><div class="fm">outbound fence; re-apply after recreates</div></div>'+
-      '<div class="field" id="cw-egdom-row" style="display:none"><label for="cw-eg-dom">Allowed domains</label><input id="cw-eg-dom" style="width:100%" placeholder="api.openai.com, example.org" autocomplete="off"><div class="fm">comma/space separated; suffix match covers subdomains; DNS goes through the fence, everything else drops — re-applies after recreates</div></div>'+
+      '<div class="field" id="cw-egdom-row" style="display:none"><label for="cw-eg-dom">Allowed domains</label><input id="cw-eg-dom" style="width:100%" placeholder="api.openai.com, example.org" autocomplete="off" title="opencode.ai is needed to converse with models: opencode authenticates and fetches its model list from api.opencode.ai, and this entry already covers it via suffix match; without it, opencode fails early (EAI_AGAIN) instead of chatting. Update checks also phone home there."><div class="fm">comma/space separated; suffix match covers subdomains; DNS goes through the fence, everything else drops; re-applies after recreates. Include opencode.ai: synchronized opencode uses it for login and the model list, so without it chatting fails</div></div>'+
     '</div>'+
     '<div class="rows-t">Published ports - host → container</div>'+
     '<div class="rows" id="cw-ports"></div>'+
