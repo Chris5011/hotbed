@@ -204,8 +204,17 @@ func (p *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// read body once (we need the model for pricing; size-capped)
-	body, _ := io.ReadAll(io.LimitReader(r.Body, 8<<20))
+	// read body once (we need the model for pricing). Bodies up to 8 MiB are
+	// buffered; bigger ones MUST NOT be truncated - a truncated JSON body
+	// turns into an opaque upstream "Invalid request payload". For oversized
+	// requests we stream the original body through unmodified and skip model
+	// parsing in the ledger (the est is then partial; documented behaviour).
+	// The reader caps at maxBuffered+1 on purpose: reading more than cap
+	// alone proves overflow, and (unlike http.MaxBytesReader) a LimitReader
+	// never consumes bytes from the original body beyond the cap it reports.
+	const maxBuffered = 8 << 20
+	body, _ := io.ReadAll(io.LimitReader(r.Body, maxBuffered+1))
+	overflow := int64(len(body)) == maxBuffered+1
 	model := ""
 	var reqMeta struct {
 		Model string `json:"model"`
@@ -219,7 +228,17 @@ func (p *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		dst += "?" + r.URL.RawQuery
 	}
 
-	up, err := http.NewRequest(r.Method, dst, bytes.NewReader(body))
+	var up *http.Request
+	if overflow {
+		// replay the full original body: everything read so far, then the rest
+		up, err = http.NewRequest(r.Method, dst,
+			io.MultiReader(bytes.NewReader(body), r.Body))
+		if err == nil && r.ContentLength > 0 {
+			up.ContentLength = r.ContentLength
+		}
+	} else {
+		up, err = http.NewRequest(r.Method, dst, bytes.NewReader(body))
+	}
 	if err != nil {
 		writeErr(w, 502, "hotbedd proxy: "+err.Error())
 		return

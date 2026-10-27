@@ -412,6 +412,15 @@ class H(BaseHTTPRequestHandler):
         self.send_header("Content-Length",str(len(b))); self.end_headers(); self.wfile.write(b)
     def do_POST(self):
         n=int(self.headers.get("Content-Length") or 0); raw=self.rfile.read(n)
+        try:
+            m=(json.loads(raw[:1000000]) or {}).get("model") if raw[:1] == b"{" else "?"
+        except Exception: m="parsefail"
+        _log=os.environ.get("MOCK_LOG")
+        if _log:
+            open(_log,"a").write(
+                "post cl=%s te=%s rawlen=%d model=%s\n" % (
+                self.headers.get("Content-Length"), self.headers.get("Transfer-Encoding"),
+                len(raw), m))
         try: req=json.loads(raw or b"{}")
         except Exception: req={}
         if self.headers.get("Authorization") != "Bearer mock-uk": self._bad(); return
@@ -433,6 +442,9 @@ class H(BaseHTTPRequestHandler):
                          "usage":{"prompt_tokens":42,"completion_tokens":17}}).encode()
         if req.get("model") == "est-model":
             body=json.dumps({"id":"1","choices":[{"message":{"content":"no usage"}}]}).encode()
+        if req.get("model") == "big-body":
+            body=json.dumps({"id":"1","choices":[{"message":{"content":"len=%d"%len(raw)}}],
+                             "usage":{"prompt_tokens":9,"completion_tokens":9}}).encode()
         self.send_response(200); self.send_header("Content-Type","application/json")
         self.send_header("Content-Length",str(len(body))); self.end_headers(); self.wfile.write(body)
 HTTPServer(("127.0.0.1",int(os.environ.get("MOCK_PORT") or 8787)),H).serve_forever()
@@ -504,6 +516,25 @@ grep -q '"in":42' "$uj" && grep -q '"out":7' "$uj" && grep -q '"est":true' "$uj"
     && pass "ledger: upstream usage + est rows recorded" || fail "ledger: upstream usage + est rows recorded"
 us="$("${p2env[@]}" "$HOTBEDD" usage tester 2>&1)"
 echo "$us" | grep -q 'tokens in/out 66/24' && pass "usage CLI sums counted + est tokens (66/24)" || fail "usage CLI sums counted + est tokens (got: $(echo "$us" | head -2 | tail -1))"
+# 5b. regression: bodies bigger than the proxy's 8 MiB ledger buffer must
+# reach upstream intact (a truncated JSON body used to surface as an
+# opaque upstream "Invalid request payload").
+PYBIG=$(cat <<'PYBIG'
+import json, sys
+inner={'role':'user','content':'x'*9_000_000}
+req={'model':'big-body','stream':False,
+     'messages':[{'role':'user','content':'pad'}, inner]}
+open(sys.argv[1]+'/big.json','w').write(json.dumps(req))
+PYBIG
+)
+/usr/bin/python3 -c "$PYBIG" "$P2"
+bigsize=$(stat -c %s "$P2/big.json" 2>/dev/null)
+big=$(curl -s --max-time 20 -XPOST "http://127.0.0.1:$DPROTO/v1/chat/completions" \
+    -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' \
+    --data-binary @"$P2/big.json" 2>/dev/null)
+echo "$big" | grep -q "len=$bigsize" \
+    && pass "proxy: >8 MiB body streams through untruncated ($bigsize bytes)" \
+    || fail "proxy: >8 MiB body streams through untruncated (sent $bigsize, got: $(echo "$big" | head -c 120))"
 # 6. budgets trip BEFORE forwarding
 "${p2env[@]}" "$HOTBEDD" budget tester 0.000001 >/dev/null 2>&1
 c3=$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 -XPOST "http://127.0.0.1:$DPROTO/v1/chat/completions" \
