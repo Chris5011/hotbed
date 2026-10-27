@@ -252,9 +252,18 @@ func SpawnTerminal(inside string) error {
 	if r := runtime.GOOS; r != "linux" {
 		return fmt.Errorf("terminal spawn only supported on WSL (goos=%s)", r)
 	}
-	// wt.exe is on PATH via WSL interop; fall back to cmd start
+	// wt.exe is on PATH via WSL interop — but the resident daemon runs from a
+	// systemd unit whose PATH is minimal, and wt.exe is a per-user WindowsApps
+	// shim anyway (not in System32). Probe absolute locations before giving
+	// up: cmd.exe is always /mnt/c/Windows/System32/cmd.exe, wt.exe follows
+	// the /mnt/c/Users/*/AppData/Local/Microsoft/WindowsApps layout.
 	if engine.LookPath("wt.exe") {
 		cmd := exec.Command("wt.exe", "new-tab", "--title", "hbd", "--",
+			"wsl.exe", "-d", distro, "--", "bash", "-lc", inside)
+		return cmd.Start()
+	}
+	for _, wt := range windowsAppsWT() {
+		cmd := exec.Command(wt, "new-tab", "--title", "hbd", "--",
 			"wsl.exe", "-d", distro, "--", "bash", "-lc", inside)
 		return cmd.Start()
 	}
@@ -262,7 +271,22 @@ func SpawnTerminal(inside string) error {
 		cmd := exec.Command("cmd.exe", "/C", "start", "", "wsl.exe", "-d", distro, "--", "bash", "-lc", inside)
 		return cmd.Start()
 	}
+	if _, err := os.Stat("/mnt/c/Windows/System32/cmd.exe"); err == nil {
+		cmd := exec.Command("/mnt/c/Windows/System32/cmd.exe", "/C", "start", "", "wsl.exe",
+			"-d", distro, "--", "bash", "-lc", inside)
+		return cmd.Start()
+	}
 	return fmt.Errorf("no wt.exe / cmd.exe interop available — use the copy-connection command instead")
+}
+
+// windowsAppsWT returns existing wt.exe paths for every Windows user profile
+// mounted under /mnt/c/Users (empty when astro-turfed: no Windows mount).
+func windowsAppsWT() []string {
+	out := []string{}
+	if m, _ := filepath.Glob("/mnt/c/Users/*/AppData/Local/Microsoft/WindowsApps/wt.exe"); m != nil {
+		out = append(out, m...)
+	}
+	return out
 }
 
 func shellQuote(s string) string {
