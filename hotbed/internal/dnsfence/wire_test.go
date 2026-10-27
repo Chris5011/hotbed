@@ -23,22 +23,21 @@ var qExampleA = []byte{
 }
 
 // upExampleA is an upstream response: 2 A answers, second name compressed.
-var upExampleA = append(
-	[]byte{
-		0x12, 0x34,
-		0x81, 0x80, // QR RD RA
-		0x00, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00,
-		7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0,
-		0, 1, 0, 1,
-		// answer 1: example.com A 93.184.216.34
-		0xC0, 0x0C, // compression pointer
-		0, 1, 0, 1, 0, 0, 0, 60, 0, 4,
-		93, 184, 216, 34,
-		// answer 2: www.example.com A 192.0.2.7 (pointer to 7th label offset)
-		3, 'w', 'w', 'w', 0xC0, 0x0C,
-		0, 1, 0, 1, 0, 0, 1, 4, 0, 4,
-		192, 0, 2, 7,
-	})
+var upExampleA = []byte{
+	0x12, 0x34,
+	0x81, 0x80, // QR RD RA
+	0x00, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00,
+	7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0,
+	0, 1, 0, 1,
+	// answer 1: example.com A 93.184.216.34
+	0xC0, 0x0C, // compression pointer
+	0, 1, 0, 1, 0, 0, 0, 60, 0, 4,
+	93, 184, 216, 34,
+	// answer 2: www.example.com A 192.0.2.7 (pointer to offset 12)
+	3, 'w', 'w', 'w', 0xC0, 0x0C,
+	0, 1, 0, 1, 0, 0, 1, 4, 0, 4,
+	192, 0, 2, 7,
+}
 
 func TestParseQuery(t *testing.T) {
 	q, ok := parseQuery(qExampleA)
