@@ -883,22 +883,23 @@ func (s *Server) budgetRoute(w http.ResponseWriter, r *http.Request) {
 // createReq is the create-wizard request (common fields + container and
 // VM specific ones; unused fields are ignored by each arm).
 type createReq struct {
-	Name         string            `json:"name"`
-	Stack        string            `json:"stack"`
-	Kind         string            `json:"kind"`       // "" | "container" | "vm"
-	VMBackend    string            `json:"vm_backend"` // vm only: libvirt | docker ("" = auto)
-	VMCPU        int               `json:"vm_cpu"`
-	VMMemMB      int               `json:"vm_mem_mb"`
-	VMDiskGB     int               `json:"vm_disk_gb"`
-	VMShare      string            `json:"vm_share"`
-	Mounts       []engine.Bind     `json:"mounts"`
-	Ports        []string          `json:"ports"`
-	Env          map[string]string `json:"env"`
-	Egress       string            `json:"egress"`
-	BudgetUSD    *float64          `json:"budget_usd"`
-	BudgetTokens *int              `json:"budget_tokens"`
-	Provider     string            `json:"provider"`
-	Sync         bool              `json:"sync"`
+	Name          string            `json:"name"`
+	Stack         string            `json:"stack"`
+	Kind          string            `json:"kind"`       // "" | "container" | "vm"
+	VMBackend     string            `json:"vm_backend"` // vm only: libvirt | docker ("" = auto)
+	VMCPU         int               `json:"vm_cpu"`
+	VMMemMB       int               `json:"vm_mem_mb"`
+	VMDiskGB      int               `json:"vm_disk_gb"`
+	VMShare       string            `json:"vm_share"`
+	Mounts        []engine.Bind     `json:"mounts"`
+	Ports         []string          `json:"ports"`
+	Env           map[string]string `json:"env"`
+	Egress        string            `json:"egress"`
+	EgressDomains []string          `json:"egress_domains,omitempty"` // allowlist preset only
+	BudgetUSD     *float64          `json:"budget_usd"`
+	BudgetTokens  *int              `json:"budget_tokens"`
+	Provider      string            `json:"provider"`
+	Sync          bool              `json:"sync"`
 }
 
 func (s *Server) createRoute(w http.ResponseWriter, r *http.Request) {
@@ -983,7 +984,17 @@ func (s *Server) createRoute(w http.ResponseWriter, r *http.Request) {
 	if in.Egress != "" && in.Egress != "allow" {
 		var e error
 		if in.Egress == "allowlist" {
-			_, e = engine.ApplyEgressFence(cn, in.Egress, s.Cfg.EgressAllowlist[cn])
+			// the wizard may bring fresh domains — persist them (they
+			// double as the fence's re-apply source and the fence edits)
+			if len(in.EgressDomains) > 0 {
+				s.Cfg.SetEgressAllowlist(cn, in.EgressDomains)
+			}
+			domains := s.Cfg.EgressAllowlistFor(cn)
+			if len(domains) == 0 {
+				e = fmt.Errorf("allowlist: no domains given")
+			} else {
+				_, e = engine.ApplyEgressFence(cn, in.Egress, domains)
+			}
 		} else {
 			e = engine.ApplyEgressContainer(cn, in.Egress)
 		}

@@ -172,7 +172,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13.5px/1.5 var(--sans);d
 .item:hover{background:var(--bg3)}
 .item.sel{background:var(--acc-soft);border-color:rgba(91,140,255,.35);box-shadow:inset 2px 0 0 var(--acc)}
 .item .nm{flex:1;min-width:0}
-.item .nm b{display:block;font-weight:600;font-size:.84rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .nm b{display:block;font-weight:600;font-size:.84rem;overflow-wrap:anywhere;word-break:break-word}
 .item .nm small{color:var(--faint);display:block;font-size:.7rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .item .meters{font-size:.66rem;color:var(--faint);text-align:right;line-height:1.3;flex:none}
 .pill{font-size:.62rem;border-radius:999px;padding:.1rem .42rem;font-weight:700;color:var(--dim);background:var(--bg4);border:1px solid var(--line2);text-transform:uppercase;letter-spacing:.03em;align-self:center}
@@ -493,6 +493,7 @@ function meters(sb){
 }
 function renderItem(sb){
   var el=h('div',{class:'item'+(state.sel===keyOf(sb)?' sel':''),'data-key':keyOf(sb)});
+  el.title=sb.name; // hover reveals the full name even when the item wraps
   var sub=sb.kind==='container' ? (sb.stack||'container')+' · '+short(sb.project||sb.image||'')
         : (sb.backend==='docker'?'hotbedvmd':sb.backend)+(sb.ports&&sb.ports.length?' · '+sb.ports[0]:'');
   el.innerHTML='<div class="nm"><b>'+esc(sb.name)+'</b><small>'+esc(sub)+'</small></div>'+
@@ -997,7 +998,8 @@ function renderCreator(){
     '</div></div>'+
     '<div id="cw-cont-fields">'+
     '<div class="cw-sec"><div class="cw-sec-t">Network</div><div class="cw-grid two">'+
-      '<div class="field"><label for="cw-egress">Egress</label><select id="cw-egress"><option>allow</option><option>proxy-only</option><option>none</option><option>allowlist</option></select><div class="fm">outbound fence; allowlist needs domains in config egress_allowlist, re-apply after recreates</div></div>'+
+      '<div class="field"><label for="cw-egress">Egress</label><select id="cw-egress"><option>allow</option><option>proxy-only</option><option>none</option><option>allowlist</option></select><div class="fm">outbound fence; re-apply after recreates</div></div>'+
+      '<div class="field" id="cw-egdom-row" style="display:none"><label for="cw-eg-dom">Allowed domains</label><input id="cw-eg-dom" style="width:100%" placeholder="api.openai.com, example.org" autocomplete="off"><div class="fm">comma/space separated; suffix match covers subdomains; DNS goes through the fence, everything else drops — re-applies after recreates</div></div>'+
     '</div>'+
     '<div class="rows-t">Published ports - host → container</div>'+
     '<div class="rows" id="cw-ports"></div>'+
@@ -1037,6 +1039,15 @@ function renderCreator(){
   $('cw-addport').addEventListener('click',function(){ portRow($('cw-ports')); });
   $('cw-addenv').addEventListener('click',function(){ envRow($('cw-envrows')); });
   $('cw-addmount').addEventListener('click',function(){ mountRow($('cw-mounts')); });
+  // egress allowlist: the domains input exists only while "allowlist" is
+  // selected — it keeps its value (documented) when the preset switches
+  // away and back, but is only applied on create when allowlist is active.
+  var egressDomUpdate=function(){
+    var row=$('cw-egdom-row');
+    row.style.display=($('cw-egress').value==='allowlist')?'':'none';
+  };
+  $('cw-egress').addEventListener('change',egressDomUpdate);
+  egressDomUpdate();
   // VM shares use the same folder browser as container mounts - one picker,
   // all three sandbox kinds (libvirt + docker-backed VMs share cw-vmshare).
   $('cw-vmshare-browse').addEventListener('click',function(){
@@ -1114,6 +1125,9 @@ function renderCreator(){
       env:env, egress:$('cw-egress').value,
       sync:$('cw-sync').checked, provider:($('cw-provider').value||'').trim()
     };
+    if(payload.egress==='allowlist'){
+      payload.egress_domains=($('cw-eg-dom').value||'').split(/[\s,]+/).filter(Boolean);
+    }
     if($('cw-usd').value!==''){ payload.budget_usd=parseFloat($('cw-usd').value)||0; }
     if($('cw-tok').value!==''){ payload.budget_tokens=parseInt($('cw-tok').value,10)||0; }
     cwBusy('Creating…');

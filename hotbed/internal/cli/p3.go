@@ -360,15 +360,13 @@ func egressCmd(args []string) error {
 			// no domains = show the configured list and current fence
 			return egressCmd([]string{name})
 		}
-		if err := setAllowlist(name, domains); err != nil {
-			return err
-		}
-		n, err := engine.ApplyEgressFence(name, preset, domains)
+		norm := configSetAllowlist(name, domains)
+		n, err := engine.ApplyEgressFence(name, preset, norm)
 		if err != nil {
 			return err
 		}
 		ok("egress %s → allowlist: %s (%d domain(s), %d ip(s) pre-resolved; DNS goes through the fence on gw, everything else drops — re-apply after recreation)\n",
-			name, strings.Join(domains, ", "), len(domains), n)
+			name, strings.Join(norm, ", "), len(norm), n)
 		return nil
 	}
 	if !engine.KnownEgressPreset(preset) {
@@ -402,33 +400,14 @@ func configAllowlist(name string) []string {
 	return c.Allowlist[name]
 }
 
-// setAllowlist persists the sandbox's allowlist into config.json.
-func setAllowlist(name string, domains []string) error {
+// configSetAllowlist persists the sandbox's allowlist into config.json.
+func configSetAllowlist(name string, domains []string) []string {
 	cfg, err := config.Open()
 	if err != nil {
-		return fmt.Errorf("config: %w", err)
+		// config unreadable: apply the fence with just this call's domains
+		return domains
 	}
-	norm := make([]string, 0, len(domains))
-	seen := map[string]bool{}
-	for _, d := range domains {
-		d = strings.ToLower(strings.TrimSpace(d))
-		d = strings.TrimSuffix(d, ".")
-		d = strings.TrimPrefix(d, "*.")
-		if d == "" || seen[d] {
-			continue
-		}
-		seen[d] = true
-		norm = append(norm, d)
-	}
-	if cfg.EgressAllowlist == nil {
-		cfg.EgressAllowlist = map[string][]string{}
-	}
-	cfg.EgressAllowlist[name] = norm
-	if err := cfg.Save(); err != nil {
-		return fmt.Errorf("saving allowlist: %w", err)
-	}
-	audit.Record("egress.allowlist", name, strings.Join(norm, ","))
-	return nil
+	return cfg.SetEgressAllowlist(name, domains)
 }
 
 // ----------------------------------------------------------------- audit ---

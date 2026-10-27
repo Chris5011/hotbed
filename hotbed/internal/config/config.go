@@ -77,6 +77,37 @@ func (c *Config) IdleStopMinutes() int {
 // Path returns the config file location.
 func Path() string { return filepath.Join(env.ConfigDir(), "config.json") }
 
+// SetEgressAllowlist normalizes and persists a sandbox's egress-allowlist
+// domains (suffix matches; leading "*." and trailing dots are stripped).
+// Callers apply the fence themselves (engine.ApplyEgressFence) — this only
+// owns the config side. Returns the normalized list.
+func (c *Config) SetEgressAllowlist(name string, domains []string) []string {
+	norm := make([]string, 0, len(domains))
+	seen := map[string]bool{}
+	for _, d := range domains {
+		d = strings.ToLower(strings.TrimSpace(d))
+		d = strings.TrimSuffix(d, ".")
+		d = strings.TrimPrefix(d, "*.")
+		if d == "" || seen[d] {
+			continue
+		}
+		seen[d] = true
+		norm = append(norm, d)
+	}
+	if c.EgressAllowlist == nil {
+		c.EgressAllowlist = map[string][]string{}
+	}
+	c.EgressAllowlist[name] = norm
+	_ = c.Save()
+	audit.Record("egress.allowlist", name, strings.Join(norm, ","))
+	return norm
+}
+
+// EgressAllowlistFor returns the configured domains of a sandbox.
+func (c *Config) EgressAllowlistFor(name string) []string {
+	return c.EgressAllowlist[name]
+}
+
 // HostOpenCodePath is the host-side opencode config (import source).
 func HostOpenCodePath() string {
 	home, _ := os.UserHomeDir()
