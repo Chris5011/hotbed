@@ -209,6 +209,22 @@ func SpawnRecipeContainer(s RecipeSpawn) (string, string, error) {
 	if err := StartContainer(cn); err != nil {
 		return cn, warn, fmt.Errorf("created but start failed: %w", err)
 	}
+	// nothing bind-mounted at /workspace: the image's root-owned directory
+	// must still be writable for the sandbox user (agents work there).
+	// Images built with the current entrypoint do this themselves; this
+	// covers the ones already on disk.
+	mounted := false
+	for _, m := range s.Mounts {
+		if strings.TrimRight(m.Target, "/") == "/workspace" {
+			mounted = true
+		}
+	}
+	if !mounted {
+		if out, err := RunTO(20*time.Second, "docker", "exec", "-u", "root", cn,
+			"chown", uid+":"+gid, "/workspace"); err != nil {
+			warn = strings.TrimPrefix(warn+"; /workspace not handed to the sandbox user: "+strings.TrimSpace(out), "; ")
+		}
+	}
 	audit.Record("sandbox.spawn", cn, "stack="+s.Stack)
 	return cn, warn, nil
 }

@@ -56,6 +56,11 @@ own_path() {
 }
 own_path "$HOME_DIR"
 own_path /usr/local/cargo/registry
+# no project bind-mounted (dashboard/recipe sandboxes without a mount): the
+# image's root-owned /workspace must still be the user's to write into
+if ! mountpoint -q /workspace 2>/dev/null; then
+    own_path /workspace
+fi
 
 # --- 4. drop privileges and exec --------------------------------------------
 export HOME="$HOME_DIR"
