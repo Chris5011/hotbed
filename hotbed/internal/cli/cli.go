@@ -56,6 +56,8 @@ func Dispatch(args []string) error {
 		return recipeCmd(args)
 	case "egress":
 		return egressCmd(args)
+	case "agents", "agent":
+		return agentsCmd(args)
 	case "audit":
 		return auditCmd(args)
 	case "sync":
@@ -116,6 +118,9 @@ CONFIG & BURN (P2)
   hotbedd egress NAME track on|off | seen | add|rm DOMAIN...
                             DNS tracking (allow/allowlist): see what a sandbox
                             looks up, allow forgotten domains afterwards
+  hotbedd agents [ls] | enable|disable ID | add SANDBOX ID
+                            coding-agent modules (agents/<id>/): toggle what
+                            the create wizard offers, install into a sandbox
   hotbedd audit [N]            last N control-plane actions (start/stop, keys, wallets, mounts, egress)
   hotbedd version|help
 

@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"hotbed/internal/agents"
 	"hotbed/internal/attach"
 	"hotbed/internal/audit"
 	"hotbed/internal/cfgsync"
@@ -106,6 +107,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/vm/boot", s.vmBootRoute)
 	mux.HandleFunc("/api/fs", s.fsRoute)
 	mux.HandleFunc("/api/config", s.configRoute)
+	mux.HandleFunc("/api/agents", s.agentsRoute)
 	mux.HandleFunc("/api/config/import", s.configImport)
 	mux.HandleFunc("/", s.index)
 	mux.HandleFunc("/static/", s.static)
@@ -213,6 +215,8 @@ func (s *Server) sandboxRoute(w http.ResponseWriter, r *http.Request) {
 		s.syncRoute(w, r, sb)
 	case "dns":
 		s.dnsRoute(w, r, sb)
+	case "agents":
+		s.sandboxAgentsRoute(w, r, sb)
 	case "start":
 		s.actStart(w, sb)
 	case "stop":
@@ -230,6 +234,7 @@ func (s *Server) detailRoute(w http.ResponseWriter, r *http.Request, sb sandbox.
 		if d, err := engine.InspectContainer(sb.Name); err == nil {
 			resp["detail"] = d
 		}
+
 	case sandbox.KindVM:
 		port := ""
 		if len(sb.Ports) > 0 {
@@ -241,6 +246,11 @@ func (s *Server) detailRoute(w http.ResponseWriter, r *http.Request, sb sandbox.
 			if rows, e := engine.VMSnapshots(sb.Name, sb.Backend); e == nil {
 				resp["snapshots"] = rows
 			}
+		}
+	}
+	if sb.State == "running" {
+		if box, err := attach.BoxFor(sb, sshPort(sb)); err == nil {
+			resp["agents"] = installedViews(box)
 		}
 	}
 	// proxy wiring info (masked) so the UI can show base_url/key state
@@ -303,7 +313,7 @@ func (s *Server) attachRoute(w http.ResponseWriter, r *http.Request, sb sandbox.
 			} else {
 				inside = ssh
 			}
-		} else if in.Mode == "opencode" {
+		} else if in.Mode == "opencode" || strings.HasPrefix(in.Mode, "agent:") {
 			inside = ci.BackendCmd
 		} else {
 			inside = ci.ShellCmd
@@ -523,10 +533,8 @@ func (s *Server) actionDelete(w http.ResponseWriter, r *http.Request) {
 		notes = append(notes, "sync target removal failed: "+err.Error())
 	}
 	attach.KillTunnel(sb.Name)
-	if sb.Kind == sandbox.KindContainer {
-		if err := egressctl.Forget(s.Cfg, sb.Name); err != nil {
-			notes = append(notes, "egress records removal failed: "+err.Error())
-		}
+	if err := egressctl.Forget(s.Cfg, sb.Name); err != nil {
+		notes = append(notes, "egress records removal failed: "+err.Error())
 	}
 
 	var err error
@@ -605,7 +613,14 @@ func (s *Server) syncRoute(w http.ResponseWriter, r *http.Request, sb sandbox.Sa
 	}
 	tg.Key = "" // never echo the raw key to the dashboard
 	tg.ConfigPath = path
-	okJSON(w, map[string]any{"ok": true, "target": tg})
+	resp := map[string]any{"ok": true, "target": tg}
+	if res, err := s.syncAgents(sb); err != nil {
+		resp["warn"] = err.Error()
+		resp["agents"] = res
+	} else if len(res) > 0 {
+		resp["agents"] = res
+	}
+	okJSON(w, resp)
 }
 
 // syncSandbox wires a sandbox's opencode config to the hbd proxy (mints the
@@ -905,6 +920,7 @@ type createReq struct {
 	Egress        string            `json:"egress"`
 	EgressDomains []string          `json:"egress_domains,omitempty"` // allowlist preset only
 	EgressTrack   bool              `json:"egress_track,omitempty"`   // record DNS lookups (allow/allowlist)
+	Agents        []string          `json:"agents,omitempty"`         // agent modules to install (containers)
 	BudgetUSD     *float64          `json:"budget_usd"`
 	BudgetTokens  *int              `json:"budget_tokens"`
 	Provider      string            `json:"provider"`
@@ -943,6 +959,11 @@ func (s *Server) createRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.Egress != "" && !engine.KnownEgressPreset(in.Egress) {
 		httpError(w, 400, "unknown egress preset "+in.Egress)
+		return
+	}
+	mods, err := s.resolveAgents(in.Agents)
+	if err != nil {
+		httpError(w, 400, err.Error())
 		return
 	}
 	seen := map[string]bool{}
@@ -990,22 +1011,21 @@ func (s *Server) createRoute(w http.ResponseWriter, r *http.Request) {
 	if err := s.Cfg.SetWallets(cn, in.BudgetUSD, in.BudgetTokens); err != nil {
 		warn = "wallets: " + err.Error()
 	}
+	// agents install BEFORE the egress fence: installers need the network
+	cnSB := sandbox.Sandbox{Kind: sandbox.KindContainer, Backend: "docker", Name: cn, State: "running"}
+	installed, aw := s.installAgents(cnSB, mods)
+	if aw != "" {
+		if warn != "" {
+			warn += "; "
+		}
+		warn += aw
+	}
 	if (in.Egress != "" && in.Egress != "allow") || in.EgressTrack {
-		if in.Egress == "" {
-			in.Egress = "allow"
-		}
-		if in.Egress == "allowlist" {
-			// the wizard may bring fresh domains — persist them (they
-			// double as the fence's re-apply source and the DNS tab's
-			// toggles). An empty list is fine: only the proxy stays
-			// reachable until domains get allowed from the DNS tab.
-			s.Cfg.SetEgressAllowlist(cn, in.EgressDomains)
-		}
-		if _, e := egressctl.Apply(s.Cfg, cn, in.Egress, in.EgressTrack); e != nil {
+		if e := s.applyCreateEgress(cn, in, installed); e != "" {
 			if warn != "" {
 				warn += "; "
 			}
-			warn += "egress: " + e.Error()
+			warn += e
 		}
 	}
 	if in.Sync {
@@ -1016,6 +1036,14 @@ func (s *Server) createRoute(w http.ResponseWriter, r *http.Request) {
 			}
 			warn += "sync: " + e.Error()
 		}
+		if len(installed) > 0 {
+			if _, e := s.syncAgents(sb, installed...); e != nil {
+				if warn != "" {
+					warn += "; "
+				}
+				warn += e.Error()
+			}
+		}
 	}
 	okJSON(w, map[string]any{
 		"ok":        true,
@@ -1024,6 +1052,7 @@ func (s *Server) createRoute(w http.ResponseWriter, r *http.Request) {
 		"mounts":    len(in.Mounts),
 		"warn":      warn,
 		"attach":    "hbd attach " + cn,
+		"agents":    installed,
 	})
 }
 
@@ -1071,6 +1100,15 @@ func (s *Server) createVM(w http.ResponseWriter, in createReq) {
 	name := strings.ToLower(strings.TrimSpace(in.Name))
 	if err := validSandboxName("vm", name); err != nil {
 		httpError(w, 400, err.Error())
+		return
+	}
+	mods, err := s.resolveAgents(in.Agents)
+	if err != nil {
+		httpError(w, 400, err.Error())
+		return
+	}
+	if in.Egress != "" && !engine.KnownEgressPreset(in.Egress) {
+		httpError(w, 400, "unknown egress preset "+in.Egress)
 		return
 	}
 	backend := strings.TrimSpace(in.VMBackend)
@@ -1151,6 +1189,7 @@ func (s *Server) createVM(w http.ResponseWriter, in createReq) {
 		"warn":    warn,
 		"attach":  "hotbedd attach " + name,
 		"booting": true,
+		"agents":  len(mods),
 		"sync":    "models wire up automatically once the guest finishes booting (manual fallback: the Burn overview sync button or POST /api/sandboxes/vm/" + name + "/sync)",
 	})
 	// Post-boot continues in the background: the kit's `postboot` verb
@@ -1168,8 +1207,72 @@ func (s *Server) createVM(w http.ResponseWriter, in createReq) {
 			return
 		}
 		sandbox.NoteBootEnd(name)
-		go s.restoreVMBootSync(name)
+		s.restoreVMBootSync(name)
+		var installed []string
+		if len(mods) > 0 {
+			installed = s.installVMAgents(name, mods)
+		}
+		// the fence goes up last: agent installers need the network
+		if (in.Egress != "" && in.Egress != "allow") || in.EgressTrack {
+			s.applyCreateEgress(name, in, installed)
+		}
 	}()
+}
+
+// applyCreateEgress applies the wizard's egress choice (containers right
+// after spawn + agents, VMs after post-boot + agents). Allowlists get the
+// domains the chosen agents' manifests ask for. Returns a warning or "".
+func (s *Server) applyCreateEgress(name string, in createReq, installed []string) string {
+	s.reloadCfg()
+	if in.Egress == "" {
+		in.Egress = "allow"
+	}
+	if in.Egress == "allowlist" {
+		all, _ := agents.Load()
+		for _, m := range all {
+			if m.Builtin && agents.Enabled(s.Cfg, m) || containsStr(installed, m.ID) {
+				in.EgressDomains = append(in.EgressDomains, m.EgressDomains...)
+			}
+		}
+		// the domains double as the fence's re-apply source and the DNS
+		// tab's toggles; an empty list is fine (only the proxy reachable)
+		s.Cfg.SetEgressAllowlist(name, in.EgressDomains)
+	}
+	if _, e := egressctl.Apply(s.Cfg, name, in.Egress, in.EgressTrack); e != nil {
+		audit.Record("egress.set", name, "create-time egress failed: "+e.Error())
+		return "egress: " + e.Error()
+	}
+	return ""
+}
+
+// installVMAgents runs after a VM's post-boot: installs the wizard's agent
+// choice over ssh and wires them to the proxy (the boot-end sync already
+// established the tunnel). Outcome lands in the audit trail; a daemon
+// restart mid-boot loses the queue (＋ Agent on the VM retries by hand).
+func (s *Server) installVMAgents(name string, mods []agents.Module) []string {
+	var sb sandbox.Sandbox
+	found := false
+	for i := 0; i < 12 && !found; i++ { // collector refreshes every ~5s
+		if sb, found = s.Collector.Find("", name); found && sb.State == "running" {
+			break
+		}
+		found = false
+		time.Sleep(5 * time.Second)
+	}
+	if !found {
+		audit.Record("agent.install", name, "skipped: VM not visible as running after post-boot")
+		return nil
+	}
+	installed, warn := s.installAgents(sb, mods)
+	if warn != "" {
+		audit.Record("agent.install", name, "warnings: "+warn)
+	}
+	if len(installed) > 0 && len(s.Cfg.Opencode.Providers) > 0 {
+		if _, err := s.syncAgents(sb, installed...); err != nil {
+			audit.Record("agent.sync", name, "failed: "+err.Error())
+		}
+	}
+	return installed
 }
 
 // vmBootRoute is the kit's self-registration callback: hotbedvm.sh curls
@@ -1499,6 +1602,34 @@ func libvirtSerialFile(name string) string {
 		return p
 	}
 	return ""
+}
+
+// resolveAgents validates the create wizard's agent choice.
+func (s *Server) resolveAgents(ids []string) ([]agents.Module, error) {
+	s.reloadCfg()
+	var mods []agents.Module
+	for _, id := range ids {
+		m, err := agents.Get(id)
+		if err != nil {
+			return nil, err
+		}
+		if !agents.Enabled(s.Cfg, m) {
+			return nil, fmt.Errorf("agent module %s is disabled - enable it on the Agent modules page first", id)
+		}
+		if !m.Builtin {
+			mods = append(mods, m)
+		}
+	}
+	return mods, nil
+}
+
+func containsStr(list []string, v string) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }
 
 func nowUnix() int64 { return time.Now().Unix() }

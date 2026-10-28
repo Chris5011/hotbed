@@ -1,0 +1,9 @@
+{
+  "name": "OpenCode",
+  "description": "The kit's default agent - baked into every stack image, wired to the hotbed proxy by `hotbedd sync` (works in VMs too).",
+  "homepage": "https://opencode.ai",
+  "command": "opencode",
+  "builtin": true,
+  "default_enabled": true,
+  "egress_domains": ["opencode.ai"]
+}

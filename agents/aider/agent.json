@@ -1,0 +1,17 @@
+{
+  "name": "Aider",
+  "description": "AI pair programming in the terminal (git-aware edits). Uses any openai-style provider through the hotbed proxy; analytics and update checks are off.",
+  "homepage": "https://aider.chat",
+  "command": "aider",
+  "proxy": {
+    "style": "openai",
+    "env": {
+      "OPENAI_API_BASE": "{{base}}",
+      "OPENAI_API_KEY": "{{key}}",
+      "AIDER_MODEL": "openai/{{model}}",
+      "AIDER_ANALYTICS_DISABLE": "true",
+      "AIDER_CHECK_UPDATE": "false",
+      "AIDER_SHOW_RELEASE_NOTES": "false"
+    }
+  }
+}

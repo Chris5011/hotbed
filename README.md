@@ -752,12 +752,20 @@ via `wsl.exe` if unreachable — Docker-Desktop-style. The webapp itself stays
 portable: any browser gets the identical UI at the same URL. Run instructions
 in `hotbed/desktop/README.md`.
 
-### P2 — the LLM proxy, wallets and one global OpenCode config
+### P2 — the LLM proxy, wallets and the LLM providers config
 
 P2 turns hotbedd into the **single money-aware gate** for every agent call a
 sandbox makes. The upstream provider key never leaves hotbedd; sandboxes hold
-only their own minted `hbk-…` bearer key, and each sandbox gets a budget
-(USD/day wallet) enforced *before* any request is forwarded.
+only minted `hbk-…` **virtual keys** — one per sandbox × agent × provider
+(`hbk-codex-openwebui-…`, `hbk-opencode-openwebui-…`) — which the proxy
+translates to the real provider key. Every call is booked to the key's
+sandbox *and* agent: the Burn views and `hotbedd usage NAME` split usage per
+agent, `hotbedd key ls` lists the keys with their agent. Wallets stay per
+sandbox (USD/day, tokens/day) and are enforced *before* any request is
+forwarded. Keys minted before per-agent keys (or with `hotbedd key mint`)
+show as "shared key"; a re-sync gives every agent its own. The providers
+themselves live on the dashboard's **LLM providers** page (formerly
+"OpenCode config").
 
 ```text
 sandbox (opencode TUI)                                   
@@ -836,7 +844,7 @@ What lives where (all local, all `chmod 600`, env-overridable for tests):
 | Path (default) | Contents |
 |---|---|
 | `~/.config/hotbedd/config.json` | providers (base_url + **upstream key**), default model, proxy port/bind, `prices` overrides |
-| `~/.local/share/hotbedd/keys.json` | per-sandbox `hbk-…` tokens + per-sandbox budgets |
+| `~/.local/share/hotbedd/keys.json` | virtual keys: one `hbk-<agent>-<provider>-…` token per sandbox × agent × provider |
 | `~/.local/share/hotbedd/synced/<name>.json` | what each sandbox was last synced with |
 | `~/.local/state/hotbedd/usage.jsonl` | one line per proxied call: tokens in/out, cost, est flag, dur, status |
 | `~/.local/state/hotbedd/tunnel-<name>.pid/.log` | the ssh -R tunnels keeping guest loopback on the proxy |
@@ -1039,6 +1047,21 @@ Tracking routes DNS to the fence's upstream (`HOTBEDD_DNS_UPSTREAM`,
 default `1.1.1.1:53`) instead of Docker's resolver — set it if your network
 requires its own DNS.
 
+**VMs get the same fences, tracking and DNS tab** (create wizard, DNS tab
+toggles, `hotbedd egress VMNAME …`). Where the rules live differs:
+
+| Sandbox | Rules in | Fence reached at | Notes |
+|---|---|---|---|
+| container | container netns | docker bridge gw (relay on Docker Desktop) | outside the sandbox's control |
+| VM · docker (`hotbedvmd`) | the VM's `hotbedvmd-<name>` container netns | docker bridge gw | qemu user-mode net: every guest packet leaves through that netns — outside the guest |
+| VM · libvirt (`hotbedvm`) | **inside the guest** (ssh + sudo) | guest's default gateway → the daemon's own fence listener | host iptables would need root; root in the guest can lift the fence |
+
+The proxy keeps working under every preset (VMs reach it through their
+ssh tunnel on guest loopback). Restarts/reboots wipe the rules; the daemon
+re-applies them (containers and docker VMs: StartedAt changes; libvirt:
+the guest's boot id). Docker inside a VM routes its containers via FORWARD,
+not OUTPUT — nested containers are not fenced.
+
 **Audit trail** — `state/audit.jsonl` records the control plane: sandbox
 start/stop/spawn, key mint/revoke, wallet changes, mount recreates, egress
 changes, sweeper stops. `hotbedd audit [N]` renders the last N as a table.
@@ -1052,6 +1075,88 @@ container shape. ENV is a dynamic key→value row editor (Portainer-style),
 ports are host→container rows, and mount sources can be picked via a real
 folder-browser pop-up (`GET /api/fs` lists directories under `$HOME` —
 loopback-only dashboard, traversal outside home is rejected).
+
+### Agent modules — other coding agents next to OpenCode
+
+Coding agents are drop-in folders: `agents/<id>/` in the kit (a folder with
+the same id under `~/.config/hotbedd/agents/` overrides it or adds your
+own). Shipped: **Aider**, **Claude Code**, **Codex CLI**, **Hermes
+Agent**, **OpenClaw**, **OpenCode** (built in, on by default). Toggle them
+on the dashboard's *Agent modules* page (or `hotbedd agents enable ID`);
+enabled ones appear as checkboxes in the create wizard — for containers
+and both VM backends. Every sandbox has an **Agents** tab: each module
+with its state there (installed / available / module off), *Install* for
+enabled ones, *Open in tmux* for installed ones (own tmux session per
+agent; the header also gets one "*Name* in tmux" button each) and a
+re-sync of the proxy wiring. CLI: `hotbedd agents add SANDBOX ID`.
+
+Where they run: containers via `docker exec` (installed right after the
+spawn, before the egress fence); VMs (`hotbedvm` libvirt and `hotbedvmd`
+docker backend) over the kit's ssh channel as the guest user `dev`,
+installed once post-boot has finished and wired to the proxy through the
+VM's ssh tunnel (`127.0.0.1:7775`).
+
+A module is two files:
+
+```jsonc
+// agents/<id>/agent.json
+{
+  "name": "Codex CLI",
+  "command": "codex",                       // what the launch runs
+  "proxy": {                                // optional: wire to the hotbed proxy
+    "style": "openai",                      // provider wire style to pick (openai|anthropic)
+    "env":   { "HOTBED_PROXY_KEY": "{{key}}" },
+    "files": { "~/.config/x/config.toml": "base_url = \"{{base}}\"\nmodel = \"{{model}}\"\n" },
+    "setup": "x config set base_url {{base}}"  // optional: runs as the sandbox user after
+                                              // env+files, values shell-quoted (Hermes, OpenClaw)
+  },
+  "egress_domains": []                      // added to allowlist sandboxes at create
+}
+```
+
+`install.sh` runs as root inside the sandbox, with `agents/_lib.sh` in
+front (`ensure_node [MIN]`, `npm_global`, `ensure_uv`, `as_user` for
+per-user installers like Hermes); in containers it runs **before** the
+egress fence goes up. The marker `/etc/hotbed/agents/<id>` records the
+install — it dies with the container. On sync, hotbedd picks a provider of
+the module's style, mints that sandbox's `hbk-` key for it and renders the
+templates (`{{base}}` = `…/v1`, `{{base_root}}`, `{{key}}`, `{{model}}`,
+`{{models_json}}` = every provider model as a JSON array (default first),
+`{{models_objects}}` = the same as `[{"id","name"}]`, `{{provider}}`,
+`{{home}}`; a template whose value is unknown is left out)
+into `~/.config/hotbed/agents/<id>.env` + the listed files — so every
+agent's calls land in the same burn ledger and wallets. Without a provider
+of the right style (e.g. Claude Code needs an `anthropic`-style one) the
+agent is still installed and can be used with its own login.
+
+**Local / self-hosted models.** All six shipped agents run against an
+OpenAI-style gateway in front of open models (tested: Bifrost → vLLM,
+Qwen3.8-27B). Claude Code needs an `anthropic`-style provider: point one at
+the gateway's Anthropic Messages route and switch on the proxy's compat
+rewrite for it —
+
+```jsonc
+"openwebui-anthropic": {
+  "base_url": "https://<gateway>/anthropic/v1", "api_key": "…", "style": "anthropic",
+  "models": ["vllm/Qwen3.8-27B-FP8", "…"],
+  "compat": ["anthropic-gateway"]   // system messages mid-conversation → top-level
+                                     // system; effort "high" → "xhigh" (open-model
+                                     // chat templates / gateway effort sets reject both)
+}
+```
+
+Every Claude model alias (Haiku/Sonnet/Opus) maps to the synced model.
+Upstream errors that report no usage are recorded as calls with zero
+tokens (no bytes/4 estimate), so a client retrying a 400 can't drain a
+wallet.
+
+Notes: current Codex only speaks the Responses API (`/v1/responses`) —
+the upstream must serve it. OpenClaw runs as `openclaw chat` (local
+embedded TUI, no gateway service) and needs Node 24 (provisioned). Hermes
+installs per user with its own pinned Python (~2 min) and asks a one-time
+telemetry question on first start (sharing is off by default either way).
+A VM created with agents installs them in the background after boot — a
+daemon restart in that window drops the queue (use `＋ Agent`).
 
 ### House rules & security posture (P2 included)
 

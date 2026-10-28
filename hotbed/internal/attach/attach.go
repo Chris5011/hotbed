@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"hotbed/internal/agents"
 	"hotbed/internal/audit"
 	"hotbed/internal/cfgsync"
 	"hotbed/internal/engine"
@@ -70,6 +71,12 @@ func EnsureSession(sb sandbox.Sandbox, mode string, port string) (string, error)
 	if !TmuxPresent() {
 		return "", fmt.Errorf("tmux not found (sudo apt install tmux)")
 	}
+	if id, ok := strings.CutPrefix(mode, "agent:"); ok {
+		if id != "opencode" {
+			return ensureAgentSession(sb, id)
+		}
+		mode = "opencode" // the builtin module keeps its classic wiring (VMs too)
+	}
 	sess := SessionName(sb.Name)
 	if HasSession(sess) {
 		// still alive? if the pane died the session dies with it — trust tmux.
@@ -126,6 +133,50 @@ func EnsureSession(sb sandbox.Sandbox, mode string, port string) (string, error)
 		return "", fmt.Errorf("tmux new-session: %v (%s)", err, strings.TrimSpace(out))
 	}
 	markSession(sess, sb.Name)
+	return sess, nil
+}
+
+// AgentSessionName is the tmux session of one agent module in a sandbox —
+// separate from the shell/opencode session so agents run side by side.
+func AgentSessionName(name, id string) string { return SessionName(name) + "-" + id }
+
+// agentCommand is the docker exec line launching an agent module.
+func agentCommand(sb sandbox.Sandbox, id string) (string, error) {
+	m, err := agents.Get(id)
+	if err != nil {
+		return "", err
+	}
+	switch sb.Kind {
+	case sandbox.KindContainer:
+		uid, gid := hostID()
+		home := engine.ContainerHome(sb.Name)
+		return fmt.Sprintf("docker exec -it -u %s:%s -w /workspace -e TERM=xterm-256color %s bash -lc %s",
+			uid, gid, sb.Name, shellQuote(agents.LaunchScript(home, m))), nil
+	case sandbox.KindVM:
+		ssh := SSHCommand(sb, "")
+		if ssh == "" {
+			return "", fmt.Errorf("no ssh endpoint known for %s yet (wait for the lease/port)", sb.Name)
+		}
+		// -t: the agent is a TUI; ssh would not allocate a pty for a command
+		return strings.Replace(ssh, "ssh ", "ssh -t ", 1) + " -- " +
+			shellQuote("bash -lc "+shellQuote(agents.LaunchScript(vmHome, m))), nil
+	}
+	return "", fmt.Errorf("unknown sandbox kind %q", sb.Kind)
+}
+
+// ensureAgentSession starts (or reuses) the tmux session running an agent.
+func ensureAgentSession(sb sandbox.Sandbox, id string) (string, error) {
+	inner, err := agentCommand(sb, id)
+	if err != nil {
+		return "", err
+	}
+	sess := AgentSessionName(sb.Name, id)
+	if HasSession(sess) {
+		return sess, nil
+	}
+	if out, err := engine.Run("tmux", "new-session", "-d", "-s", sess, "bash", "-c", inner); err != nil {
+		return "", fmt.Errorf("tmux new-session: %v (%s)", err, strings.TrimSpace(out))
+	}
 	return sess, nil
 }
 
@@ -192,6 +243,19 @@ func SSHCommand(sb sandbox.Sandbox, portOverride string) string {
 
 // ConnInfo rolls every connection variant for the UI/CLI.
 func ConnInfo(sb sandbox.Sandbox, mode string, port string) sandbox.ConnInfo {
+	if id, ok := strings.CutPrefix(mode, "agent:"); ok {
+		if id != "opencode" {
+			ci := sandbox.ConnInfo{AttachHTTP: "/api/sandboxes/" + sb.Kind + "/" + sb.Name + "/attach"}
+			if inner, err := agentCommand(sb, id); err == nil {
+				ci.TmuxSession = AgentSessionName(sb.Name, id)
+				ci.TmuxAttach = "tmux attach -t " + ci.TmuxSession
+				ci.BackendCmd = inner
+				ci.WTCommand = WTCommand(inner)
+			}
+			return ci
+		}
+		mode = "opencode"
+	}
 	ci := sandbox.ConnInfo{}
 	uid, gid := hostID()
 	sess := SessionName(sb.Name)

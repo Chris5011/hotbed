@@ -34,7 +34,8 @@ const indexHTML = `<!doctype html>
     <div class="items" id="items-vd"></div>
     <div id="sidebar-foot">
       <a href="#" id="lnk-burn">Burn - tokens &amp; budget</a>
-      <a href="#" id="lnk-config">OpenCode config</a>
+      <a href="#" id="lnk-config">LLM providers</a>
+      <a href="#" id="lnk-modules">Agent modules</a>
       <a href="#" id="lnk-help">Help &amp; CLI</a>
     </div>
   </aside>
@@ -56,6 +57,7 @@ const indexHTML = `<!doctype html>
         <div id="d-actions">
           <button id="btn-attach" class="primary">Open Terminal</button>
           <button id="btn-oc">OpenCode in tmux</button>
+          <span id="d-agentbtns" class="agentbtns"></span>
           <button id="btn-copy">Copy Connection</button>
           <button id="btn-start">Start</button>
           <button id="btn-stop" class="danger">Stop</button>
@@ -68,6 +70,7 @@ const indexHTML = `<!doctype html>
         <button class="tab" data-tab="logs">Logs</button>
         <button class="tab" data-tab="conn">Connection</button>
         <button class="tab" data-tab="burn">Burn</button>
+        <button class="tab" data-tab="agents">Agents</button>
         <button class="tab" data-tab="dns" id="tabbtn-dns">DNS</button>
       </div>
 
@@ -89,10 +92,14 @@ const indexHTML = `<!doctype html>
 
       <div id="tab-burn" class="tabpane">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--s2)">
-          <div class="hint" style="flex:1">Per-sandbox token ledger from the proxy. Upstream-reported usage where the provider gives it; a bytes/4 estimate (marked est) where it doesn't. Auto-updates every 5 s.</div>
+          <div class="hint" style="flex:1">Per-sandbox token ledger from the proxy, split per agent (each agent calls with its own virtual key). Upstream-reported usage where the provider gives it; a bytes/4 estimate (marked est) where it doesn't. Auto-updates every 5 s.</div>
           <button class="tool" id="burn-reload" title="re-read the burn ledger now">&#8635; reload</button>
         </div>
         <div id="burn-hbd"></div>
+      </div>
+
+      <div id="tab-agents" class="tabpane" hidden>
+        <div id="agents-body"></div>
       </div>
 
       <div id="tab-dns" class="tabpane" hidden>
@@ -242,6 +249,43 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13.5px/1.5 var(--sans);d
 #pane-head h2{margin:0;font-size:1.2rem;font-weight:650;letter-spacing:-.01em}
 #d-sub,.dsub{color:var(--faint);font-size:.78rem;margin-top:.25rem}
 #d-actions{display:flex;gap:var(--s2);flex-wrap:wrap;justify-content:flex-end}
+.agentbtns{display:contents}
+/* agent modules page */
+.modgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:var(--s3)}
+.modcard{border:1px solid var(--line);border-radius:var(--r2);background:var(--bg2);padding:.85rem 1rem;display:flex;flex-direction:column;gap:.45rem}
+.modcard.off{opacity:.62}
+.modcard .mh{display:flex;align-items:center;gap:.5rem}
+.modcard .mh b{font-size:.92rem;flex:1}
+.modcard .md{color:var(--dim);font-size:.78rem;line-height:1.45}
+.modcard .mk{color:var(--faint);font-size:.7rem;font-family:var(--mono)}
+.modcard .mk a{color:var(--acc2)}
+#cw-agents{display:flex;flex-wrap:wrap;gap:var(--s3) var(--s4)}
+/* create wizard: kind cards, size presets */
+.kcards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:var(--s3)}
+.kcard{position:relative;display:flex;flex-direction:column;gap:.25rem;padding:.8rem .95rem;border:1px solid var(--line2);border-radius:var(--r2);background:var(--bg2);cursor:pointer;transition:border-color .12s,background .12s}
+.kcard:hover{border-color:var(--acc)}
+.kcard input{position:absolute;opacity:0;pointer-events:none}
+.kcard:has(input:checked){border-color:var(--acc);background:var(--acc-soft);box-shadow:0 0 0 1px var(--acc) inset}
+.kcard:has(input:focus-visible){outline:2px solid var(--acc);outline-offset:2px}
+.kc-t{font-weight:700;font-size:.9rem}
+.kc-s{font:.7rem var(--mono);color:var(--acc2)}
+.kc-d{color:var(--dim);font-size:.76rem;line-height:1.4}
+.cw-grid.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media (max-width:720px){.cw-grid.three{grid-template-columns:1fr}}
+.cw-grid .field.wide{grid-column:1/-1}
+.cw-static{font-size:.8rem;color:var(--fg);padding:.45rem 0}
+.presets{display:flex;flex-wrap:wrap;gap:var(--s2);margin-bottom:var(--s3)}
+.preset{display:flex;flex-direction:column;align-items:flex-start;gap:.1rem;padding:.45rem .8rem;border:1px solid var(--line2);border-radius:var(--r1);background:var(--bg2);font-weight:600;font-size:.8rem}
+.preset span{font:400 .68rem var(--mono);color:var(--faint)}
+.preset.on{border-color:var(--acc);background:var(--acc-soft)}
+/* agents tab */
+.agrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:var(--s3)}
+.acard{border:1px solid var(--line);border-radius:var(--r2);background:var(--bg2);padding:.8rem .95rem;display:flex;flex-direction:column;gap:.4rem}
+.acard .ah{display:flex;align-items:center;gap:.5rem}
+.acard .ah b{flex:1;font-size:.9rem}
+.acard .ad{color:var(--dim);font-size:.76rem;line-height:1.4;flex:1}
+.acard .aa{display:flex;gap:var(--s2);flex-wrap:wrap;align-items:center}
+.acard.na{opacity:.75}
 
 /* ---------- controls ---------- */
 button{background:var(--bg3);color:var(--fg);border:1px solid var(--line2);border-radius:var(--r1);padding:.45rem .8rem;font-size:.78rem;font-weight:500;cursor:pointer;font-family:var(--sans);transition:border-color .12s,background .12s}
@@ -258,7 +302,7 @@ button.tool{background:var(--bg3);border:1px solid var(--line2);border-radius:va
 .iconbtn{background:none;border:none;color:var(--faint);font-size:.8rem;padding:.3rem .5rem;border-radius:var(--r1);line-height:1}
 .iconbtn:hover{color:var(--red);background:rgba(229,72,77,.1);border:none}
 input,select,textarea{font-family:var(--sans)}
-input[type=text],input:not([type]),select,textarea{background:var(--field);border:1px solid var(--line2);color:var(--fg);border-radius:var(--r1);padding:.4rem .6rem;font-size:.8rem;height:32px}
+input[type=text],input[type=search],input:not([type]),select,textarea{background:var(--field);border:1px solid var(--line2);color:var(--fg);border-radius:var(--r1);padding:.4rem .6rem;font-size:.8rem;height:32px}
 input:focus,select:focus,textarea:focus{border-color:var(--acc);outline:none;box-shadow:0 0 0 3px var(--acc-soft)}
 input::placeholder,textarea::placeholder{color:var(--faint)}
 select{appearance:none;-webkit-appearance:none;padding-right:1.6rem;background-image:url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238d99ab' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right .55rem center;cursor:pointer}
@@ -579,15 +623,16 @@ function showGlobal(kind){
   state.view=kind; state.sel=null; closeLogs();
   renderList();
   $('pane').hidden=true; $('empty').hidden=true; $('global').hidden=false;
-  var titles={overview:'Overview - host & sandboxes', burn:'Burn - token & dollar ledger', create:'Create sandbox', config:'Config - global OpenCode settings', help:'Help - quick start & CLI reference'};
+  var titles={modules:'Agent modules - coding agents for new sandboxes', overview:'Overview - host & sandboxes', burn:'Burn - token & dollar ledger', create:'Create sandbox', config:'LLM providers - upstream endpoints for every agent', help:'Help - quick start & CLI reference'};
   var subs={
+    modules:'Switch a module on to offer it in the create wizard. Modules are folders under agents/ - add your own without touching the daemon.',
     overview:'Machine stats and every sandbox on this host. Updates every 5 seconds.',
     burn:'Proxy traffic per sandbox and in total. Provider keys stay on the host.',
     create:'Runs through the daemon. Mounts and ports are fixed at creation.',
-    config:'Providers, proxy and prices. Stored in ~/.config/hotbed/config.json',
+    config:'Providers (OpenAI- or Anthropic-style), proxy, prices and wallets - one config for every agent. Stored in ~/.config/hotbedd/config.json',
     help:'The three CLIs (hbd, hotbedvm, hotbedd), the burn ledger mechanics and troubleshooting tips.'
   };
-  $('glob-title').textContent = titles[kind] || 'Config - global OpenCode settings';
+  $('glob-title').textContent = titles[kind] || titles.config;
   $('glob-sub').textContent = subs[kind] || subs.config;
   $('glob-actions').innerHTML='';
   $('glob-body').innerHTML='';
@@ -595,6 +640,7 @@ function showGlobal(kind){
   else if(kind==='create'){ renderCreator(); }
   else if(kind==='overview'){ renderHostOverview(); }
   else if(kind==='help'){ renderHelp(); }
+  else if(kind==='modules'){ renderModules(); }
   else { renderConfigGlobal(); }
   saveView();
 }
@@ -1004,44 +1050,67 @@ function renderCreator(){
     '<div class="cw">'+
     '<div class="cw-card">'+
     '<div class="cw-sec"><div class="cw-sec-t">Sandbox kind</div>'+
-      '<div class="cw-kind">'+
-        '<label class="check"><input type="radio" name="cwkind" value="container" checked><span class="box"></span> container (hbd)</label>'+
-        '<label class="check"><input type="radio" name="cwkind" value="vm-libvirt"><span class="box"></span> VM · libvirt (hotbedvm)</label>'+
-        '<label class="check"><input type="radio" name="cwkind" value="vm-docker"><span class="box"></span> VM · docker (hotbedvmd)</label>'+
+      '<div class="kcards">'+
+        '<label class="kcard"><input type="radio" name="cwkind" value="container" checked>'+
+          '<span class="kc-t">Container</span><span class="kc-s">hbd · docker</span>'+
+          '<span class="kc-d">Spawns in seconds, same kernel as the host. Mounts, ports and env fixed at creation.</span></label>'+
+        '<label class="kcard"><input type="radio" name="cwkind" value="vm-libvirt">'+
+          '<span class="kc-t">VM · libvirt</span><span class="kc-s">hotbedvm · qemu/kvm</span>'+
+          '<span class="kc-d">Full Debian guest: systemd, nested Docker, own kernel. Strongest isolation; needs qemu:///system.</span></label>'+
+        '<label class="kcard"><input type="radio" name="cwkind" value="vm-docker">'+
+          '<span class="kc-t">VM · docker</span><span class="kc-s">hotbedvmd · qemu in a container</span>'+
+          '<span class="kc-d">The same Debian guest, run by Docker - for hosts without libvirt (e.g. Docker Desktop).</span></label>'+
       '</div>'+
-      '<div class="fm" id="cw-kindmsg">Same kernel as the host. Spawns in seconds; mounts and ports are fixed at creation.</div>'+
     '</div>'+
     '<div class="cw-sec"><div class="cw-sec-t">Basics</div><div class="cw-grid two">'+
       '<div class="field"><label for="cw-name">Name</label><input id="cw-name" placeholder="myproj" autocomplete="off" spellcheck="false" maxlength="40"><div class="fm" id="cw-namemsg"></div></div>'+
       '<div class="field" id="cw-stack-field"><label for="cw-stack">Stack image</label><select id="cw-stack">'+stackOpts+'</select><div class="fm">needs the kit image - hbd build &lt;stack&gt; builds it once</div></div>'+
+      '<div class="field" id="cw-guest-field" hidden><label>Guest</label><div class="cw-static">Debian 13 · user <span class="mono">dev</span> · docker + build toolchain + OpenCode</div><div class="fm">first VM on this host needs the master image once (hotbedvm fetch-image)</div></div>'+
     '</div></div>'+
-    '<div id="cw-cont-fields">'+
-    '<div class="cw-sec"><div class="cw-sec-t">Network</div><div class="cw-grid two">'+
-      '<div class="field"><label for="cw-egress">Egress</label><select id="cw-egress"><option>allow</option><option>allowlist</option><option>proxy-only</option><option>none</option></select><div class="fm">outbound fence; re-apply after recreates</div></div>'+
-      '<div class="field" id="cw-egdom-row" style="display:none"><label for="cw-eg-dom">Allowed domains</label><input id="cw-eg-dom" style="width:100%" placeholder="api.openai.com, example.org" autocomplete="off" title="opencode.ai is needed to converse with models: opencode authenticates and fetches its model list from api.opencode.ai, and this entry already covers it via suffix match; without it, opencode fails early (EAI_AGAIN) instead of chatting. Update checks also phone home there."><div class="fm">comma/space separated; suffix match covers subdomains; DNS goes through the fence, everything else drops. May stay empty with tracking on: allow what the DNS tab shows later. Include opencode.ai: synchronized opencode uses it for login and the model list, so without it chatting fails</div></div>'+
-      '<div class="field" id="cw-egtrack-row"><label>DNS tracking</label><label class="check"><input type="checkbox" id="cw-eg-track" checked><span class="box"></span>record lookups</label><div class="fm">see every domain the sandbox resolves in its DNS tab, allow forgotten ones there afterwards</div></div>'+
+    '<div id="cw-vm-fields" hidden>'+
+    '<div class="cw-sec"><div class="cw-sec-t">Resources</div>'+
+      '<div class="presets" id="cw-vmpresets">'+
+        '<button type="button" class="preset" data-cpu="1" data-mem="2048" data-disk="10">Small<span>1 vCPU · 2 GB · 10 GB</span></button>'+
+        '<button type="button" class="preset on" data-cpu="2" data-mem="4096" data-disk="20">Medium<span>2 vCPU · 4 GB · 20 GB</span></button>'+
+        '<button type="button" class="preset" data-cpu="4" data-mem="8192" data-disk="40">Large<span>4 vCPU · 8 GB · 40 GB</span></button>'+
+      '</div>'+
+      '<div class="cw-grid three">'+
+      '<div class="field"><label for="cw-vmcpu">vCPUs</label><select id="cw-vmcpu"><option>1</option><option selected>2</option><option>4</option><option>8</option><option>16</option></select><div class="fm">1–16</div></div>'+
+      '<div class="field"><label for="cw-vmmem">Memory</label><select id="cw-vmmem"><option value="2048">2 GB</option><option value="4096" selected>4 GB</option><option value="6144">6 GB</option><option value="8192">8 GB</option><option value="16384">16 GB</option></select><div class="fm">guest RAM, only while running</div></div>'+
+      '<div class="field"><label for="cw-vmdisk">Disk (GB)</label><input id="cw-vmdisk" class="money big" value="20" inputmode="numeric"><div class="fm">growable qcow2, 10–512</div></div>'+
+      '</div>'+
     '</div>'+
-    '<div class="rows-t">Published ports - host → container</div>'+
-    '<div class="rows" id="cw-ports"></div>'+
-    '<button type="button" class="addrow" id="cw-addport">＋ add port</button></div>'+
-    '<div class="cw-sec"><div class="cw-sec-t">Environment</div>'+
-    '<div class="rows" id="cw-envrows"></div>'+
-    '<button type="button" class="addrow" id="cw-addenv">＋ add variable</button>'+
-    '<div class="fm">key → value pairs passed to the container at start</div></div>'+
+    '<div class="cw-sec"><div class="cw-sec-t">Workspace</div>'+
+      '<div class="rows"><div class="drow"><div class="mwrap"><input id="cw-vmshare" class="msrc" placeholder="host folder - optional, e.g. ~/projects/myapp" spellcheck="false"><button type="button" class="browse" id="cw-vmshare-browse">Browse…</button></div>'+
+      '<span class="dsep">→</span><input class="mtgt" value="/workspace" disabled title="9p share target in the guest"></div></div>'+
+      '<div class="fm">shared into the guest over 9p at /workspace; empty = VM-local workspace (lives on the VM disk)</div>'+
+    '</div>'+
+    '</div>'+  /* end VM-only fields */
+    '<div id="cw-cont-mounts">'+
     '<div class="cw-sec"><div class="cw-sec-t">Mounts</div>'+
     '<div class="rows" id="cw-mounts"></div>'+
     '<button type="button" class="addrow" id="cw-addmount">＋ add mount</button>'+
     '<div class="fm">host folders shared into the sandbox (read-only recommended)</div></div>'+
-    '</div>'+  /* end container-only fields */
-    '<div id="cw-vm-fields" hidden>'+
-    '<div class="cw-sec"><div class="cw-sec-t">VM sizing</div><div class="cw-grid two">'+
-      '<div class="field"><label for="cw-vmcpu">vCPUs</label><select id="cw-vmcpu"><option>1</option><option selected>2</option><option>4</option><option>8</option></select><div class="fm">1–16</div></div>'+
-      '<div class="field"><label for="cw-vmmem">Memory (MB)</label><select id="cw-vmmem"><option>2048</option><option selected>4096</option><option>6144</option><option>8192</option></select><div class="fm">512–65536</div></div>'+
-      '<div class="field"><label for="cw-vmdisk">Disk (GB)</label><input id="cw-vmdisk" class="money big" value="20" inputmode="numeric"><div class="fm">growable qcow2, 10–512</div></div>'+
-      '<div class="field"><label for="cw-vmshare">Share directory (host)</label><div class="mwrap"><input id="cw-vmshare" placeholder="optional - e.g. ~/projects/myapp" spellcheck="false"><button type="button" class="browse" id="cw-vmshare-browse">Browse…</button></div><div class="fm">folder-picker as on container mounts - mounted at /workspace in the guest, empty = VM-local workspace</div></div>'+
     '</div>'+
-    '<div class="fm">The guest logs in with your uid; opencode talks to the host proxy. Models arrive automatically at boot end (fallback: the sync button under Burn).</div>'+
+    '<div class="cw-sec"><div class="cw-sec-t">Network</div><div class="cw-grid two">'+
+      '<div class="field"><label for="cw-egress">Egress</label><select id="cw-egress"><option>allow</option><option>allowlist</option><option>proxy-only</option><option>none</option></select><div class="fm" id="cw-egress-fm">outbound fence, re-applied by the daemon after restarts</div></div>'+
+      '<div class="field" id="cw-egtrack-row"><label>DNS tracking</label><label class="check"><input type="checkbox" id="cw-eg-track" checked><span class="box"></span>record lookups</label><div class="fm">every domain the sandbox resolves shows up in its DNS tab - allow forgotten ones there afterwards</div></div>'+
+      '<div class="field wide" id="cw-egdom-row" style="display:none"><label for="cw-eg-dom">Allowed domains</label><input id="cw-eg-dom" style="width:100%" placeholder="api.openai.com, example.org" autocomplete="off" title="opencode.ai is needed to converse with models: opencode authenticates and fetches its model list from api.opencode.ai; selected agents add their own domains automatically."><div class="fm">comma/space separated; suffix match covers subdomains; DNS goes through the fence, everything else drops. May stay empty with tracking on - allow what the DNS tab shows later. Selected agents add the domains they need.</div></div>'+
     '</div>'+
+    '<div id="cw-ports-block">'+
+    '<div class="rows-t">Published ports - host → container</div>'+
+    '<div class="rows" id="cw-ports"></div>'+
+    '<button type="button" class="addrow" id="cw-addport">＋ add port</button></div>'+
+    '</div>'+
+    '<div id="cw-cont-env">'+
+    '<div class="cw-sec"><div class="cw-sec-t">Environment</div>'+
+    '<div class="rows" id="cw-envrows"></div>'+
+    '<button type="button" class="addrow" id="cw-addenv">＋ add variable</button>'+
+    '<div class="fm">key → value pairs passed to the container at start</div></div>'+
+    '</div>'+
+    '<div class="cw-sec"><div class="cw-sec-t">Coding agents</div>'+
+    '<div id="cw-agents"><span class="hint">loading modules…</span></div>'+
+    '<div class="fm" id="cw-agents-fm">enabled modules (Agent modules page), alphabetical. Containers: installed before the egress fence, ~0.5-2 min each. VMs: installed right after the guest finished booting.</div></div>'+
     '<div class="cw-sec"><div class="cw-sec-t">OpenCode</div><div class="cw-grid two">'+
       '<div class="field"><label>Sync to hbd proxy</label><label class="check"><input type="checkbox" id="cw-sync" checked><span class="box"></span>mint sandbox key &amp; write transport</label><div class="fm">provider keys never enter the sandbox</div></div>'+
       '<div class="field"><label for="cw-provider">Provider</label><input id="cw-provider" placeholder="default provider" spellcheck="false"><div class="fm">empty = the default provider in config.json</div></div>'+
@@ -1070,11 +1139,36 @@ function renderCreator(){
   };
   $('cw-egress').addEventListener('change',egressDomUpdate);
   egressDomUpdate();
+  // VM size presets fill the three fields; editing a field un-highlights
+  Array.prototype.forEach.call(document.querySelectorAll('#cw-vmpresets .preset'),function(b){
+    b.addEventListener('click',function(){
+      $('cw-vmcpu').value=b.getAttribute('data-cpu');
+      $('cw-vmmem').value=b.getAttribute('data-mem');
+      $('cw-vmdisk').value=b.getAttribute('data-disk');
+      Array.prototype.forEach.call(document.querySelectorAll('#cw-vmpresets .preset'),function(x){ x.classList.toggle('on',x===b); });
+    });
+  });
+  ['cw-vmcpu','cw-vmmem','cw-vmdisk'].forEach(function(id){
+    $(id).addEventListener('change',function(){
+      Array.prototype.forEach.call(document.querySelectorAll('#cw-vmpresets .preset'),function(x){
+        x.classList.toggle('on', x.getAttribute('data-cpu')===$('cw-vmcpu').value && x.getAttribute('data-mem')===$('cw-vmmem').value && x.getAttribute('data-disk')===$('cw-vmdisk').value);
+      });
+    });
+  });
   // VM shares use the same folder browser as container mounts - one picker,
   // all three sandbox kinds (libvirt + docker-backed VMs share cw-vmshare).
   $('cw-vmshare-browse').addEventListener('click',function(){
     openFS(function(p){ $('cw-vmshare').value=p; });
   });
+  fetch('/api/agents').then(function(r){return r.json();}).then(function(j){
+    var host=$('cw-agents'); if(!host) return;
+    var on=(j.agents||[]).filter(function(m){ return m.enabled; });
+    if(!on.length){ host.innerHTML='<span class="hint">no agent modules enabled</span>'; return; }
+    host.innerHTML=on.map(function(m){
+      return '<label class="check" title="'+esc(m.wired)+'"><input type="checkbox" data-agent="'+esc(m.id)+'"'+
+        (m.builtin?' checked disabled':'')+'><span class="box"></span>'+esc(m.name)+(m.builtin?' <span class="dim">(built in)</span>':'')+'</label>';
+    }).join('');
+  }).catch(function(){ var host=$('cw-agents'); if(host) host.innerHTML='<span class="hint">modules unavailable</span>'; });
   nameDupCheck();
   Array.prototype.forEach.call(document.querySelectorAll('input[name="cwkind"]'),function(rd){
     rd.addEventListener('change',updateCreatorKind);
@@ -1107,8 +1201,13 @@ function renderCreator(){
         vm_cpu: parseInt($('cw-vmcpu').value,10)||2,
         vm_mem_mb: parseInt($('cw-vmmem').value,10)||4096,
         vm_disk_gb: parseInt($('cw-vmdisk').value,10)||20,
-        vm_share: ($('cw-vmshare').value||'').trim()
+        vm_share: ($('cw-vmshare').value||'').trim(),
+        agents: Array.prototype.map.call(document.querySelectorAll('#cw-agents input[data-agent]:checked:not(:disabled)'),
+          function(x){ return x.getAttribute('data-agent'); }),
+        egress: $('cw-egress').value
       };
+      if(payload.egress==='allowlist'){ payload.egress_domains=($('cw-eg-dom').value||'').split(/[\s,]+/).filter(Boolean); }
+      if(payload.egress==='allow'||payload.egress==='allowlist'){ payload.egress_track=$('cw-eg-track').checked; }
       if($('cw-usd').value!==''){ payload.budget_usd=parseFloat($('cw-usd').value)||0; }
       if($('cw-tok').value!==''){ payload.budget_tokens=parseInt($('cw-tok').value,10)||0; }
       fetch('/api/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
@@ -1153,6 +1252,8 @@ function renderCreator(){
     if(payload.egress==='allow'||payload.egress==='allowlist'){
       payload.egress_track=$('cw-eg-track').checked;
     }
+    payload.agents=Array.prototype.map.call(document.querySelectorAll('#cw-agents input[data-agent]:checked:not(:disabled)'),
+      function(x){ return x.getAttribute('data-agent'); });
     if($('cw-usd').value!==''){ payload.budget_usd=parseFloat($('cw-usd').value)||0; }
     if($('cw-tok').value!==''){ payload.budget_tokens=parseInt($('cw-tok').value,10)||0; }
     cwBusy('Creating…');
@@ -1172,20 +1273,16 @@ function renderCreator(){
 function updateCreatorKind(){
   var k=((document.querySelector('input[name="cwkind"]:checked')||{}).value)||'container';
   var isVM=k.indexOf('vm-')===0;
-  var cf=document.getElementById('cw-cont-fields');
-  var vf=document.getElementById('cw-vm-fields');
-  var sf=document.getElementById('cw-stack-field');
-  if(cf){ cf.hidden=isVM; }
-  if(vf){ vf.hidden=!isVM; }
-  if(sf){ sf.hidden=isVM; }
-  var km=document.getElementById('cw-kindmsg');
-  var nm=document.getElementById('cw-namemsg');
-  if(km){
-    km.textContent = k==='container' ? 'Same kernel as the host. Spawns in seconds; mounts and ports are fixed at creation.' :
-      k==='vm-libvirt' ? 'libvirt VM on the host (hotbedvm-<name>) - needs qemu:///system; strongest isolation.' :
-      'docker-backend VM (hotbedvmd-<name>) - QEMU in a container; works where libvirt is unavailable (e.g. Docker Desktop).';
+  ['cw-cont-mounts','cw-cont-env','cw-ports-block','cw-stack-field'].forEach(function(id){ var el=$(id); if(el) el.hidden=isVM; });
+  ['cw-vm-fields','cw-guest-field'].forEach(function(id){ var el=$(id); if(el) el.hidden=!isVM; });
+  var ef=$('cw-egress-fm');
+  if(ef){
+    ef.textContent = k==='vm-libvirt' ? 'outbound fence inside the guest (root in the guest can lift it), re-applied after reboots' :
+      k==='vm-docker' ? 'outbound fence on the VM\'s container - outside the guest, re-applied after restarts' :
+      'outbound fence, re-applied by the daemon after restarts';
   }
-  if(nm){ nm.textContent=''; }
+  var nm=$('cw-namemsg');
+  if(nm){ nm.textContent=''; nm.className='fm'; }
 }
 function nameDupCheck(){
   var inp=$('cw-name');
@@ -1335,6 +1432,13 @@ function drillToggle(name){
   fetch('/api/usage?name='+encodeURIComponent(name)).then(function(r){return r.json();}).then(function(s){
     var html='<div class="subwrap"><div class="kv">today $'+(s.today_usd||0).toFixed(4)+' · total $'+(s.total_usd||0).toFixed(4)+
       ' · tokens in/out '+(s.tokens_in||0)+'/'+(s.tokens_out||0)+'</div>';
+    if(s.agents && s.agents.length){
+      html+='<table class="tbl"><tr><th>agent</th><th>in</th><th>out</th><th>$</th><th>calls</th></tr>';
+      s.agents.forEach(function(a){
+        html+='<tr><td>'+agentCell(a.agent)+'</td><td>'+a.in+'</td><td>'+a.out+'</td><td>'+(a.cost||0).toFixed(4)+'</td><td>'+a.calls+'</td></tr>';
+      });
+      html+='</table>';
+    }
     if(s.models && s.models.length){
       html+='<table class="tbl"><tr><th>model</th><th>in</th><th>out</th><th>est</th><th>$</th><th>calls</th></tr>';
       s.models.forEach(function(m){
@@ -1357,6 +1461,12 @@ function drillToggle(name){
       if(px){ px.innerHTML='proxy: <code>'+esc(p.base_url||'-')+'</code> - key '+(p.key_masked ? esc(p.key_masked)+' ('+esc(p.provider||'?')+')' : 'not synced yet'); }
   }).catch(function(){ console.warn('dashboard: request failed silently in drillToggle'); });
   }).catch(function(){ host.innerHTML='<div class="subwrap hint">detail unavailable</div>'; });
+}
+
+/* agent column of the burn views: "" = calls made with a shared key
+   (minted before per-agent keys, or via "hotbedd key mint") */
+function agentCell(a){
+  return a ? esc(a) : '<span class="dim" title="shared key - minted before per-agent virtual keys or via hotbedd key mint; re-sync the sandbox to give every agent its own">shared key</span>';
 }
 
 function renderBurnTab(sb){
@@ -1384,6 +1494,15 @@ function renderBurnTab(sb){
       '<div class="bstat"><div class="v">'+(s.calls||0)+'</div><div class="k">calls</div></div>'+
       '</div>';
     var html=cards;
+    if(s.agents && s.agents.length){
+      html+='<div class="k" style="font-size:.66rem;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;margin:4px 0 4px">per agent</div>';
+      html+='<table class="tbl"><thead><tr><th>agent</th><th>in</th><th>out</th><th>est</th><th>$</th><th>calls</th><th>today</th><th>models</th><th>last call</th></tr></thead><tbody>';
+      s.agents.forEach(function(a){
+        html+='<tr><td>'+agentCell(a.agent)+'</td><td>'+fmtTok(a.in)+'</td><td>'+fmtTok(a.out)+'</td><td>'+(a.est_calls||'')+'</td><td>'+((a.cost||0).toFixed(4))+'</td><td>'+a.calls+'</td><td>'+(a.today_calls||0)+'</td><td>'+(a.models||0)+'</td><td>'+(a.last?dnsWhen(a.last):'-')+'</td></tr>';
+      });
+      html+='</tbody></table>';
+      html+='<div class="k" style="font-size:.66rem;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 4px">per model</div>';
+    }
     if(s.models && s.models.length){
       html+='<table class="tbl"><thead><tr><th>model</th><th>in</th><th>out</th><th>est</th><th>$</th><th>calls</th></tr></thead><tbody>';
       s.models.forEach(function(m){
@@ -1395,9 +1514,9 @@ function renderBurnTab(sb){
     }
     if(s.recent && s.recent.length){
       html+='<div class="k" style="font-size:.66rem;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 4px">recent calls</div>';
-      html+='<table class="tbl recent"><thead><tr><th>time</th><th>model</th><th>in</th><th>out</th><th>$</th><th>status</th></tr></thead><tbody>';
+      html+='<table class="tbl recent"><thead><tr><th>time</th><th>agent</th><th>model</th><th>in</th><th>out</th><th>$</th><th>status</th></tr></thead><tbody>';
       s.recent.forEach(function(e){
-        html+='<tr><td>'+esc((e.ts||'').replace('T',' ').slice(0,19))+'</td><td>'+esc(e.model)+'</td><td>'+fmtTok(e.in)+'</td><td>'+fmtTok(e.out)+'</td><td>'+((e.cost||0).toFixed(4))+'</td><td>'+(e.status||'')+((e.est)?'<span class="chipmuted">est</span>':'')+'</td></tr>';
+        html+='<tr><td>'+esc((e.ts||'').replace('T',' ').slice(0,19))+'</td><td>'+agentCell(e.agent)+'</td><td>'+esc(e.model)+'</td><td>'+fmtTok(e.in)+'</td><td>'+fmtTok(e.out)+'</td><td>'+((e.cost||0).toFixed(4))+'</td><td>'+(e.status||'')+((e.est)?'<span class="chipmuted">est</span>':'')+'</td></tr>';
       });
       html+='</tbody></table><div class="hint">est = token estimate (bytes/4 - used when the provider reports no usage)</div>';
     }
@@ -1406,18 +1525,144 @@ function renderBurnTab(sb){
   }).catch(function(){ burnRetry(host, function(){ renderBurnTab(sb); }); });
 }
 
+/* ---------- agent modules ---------- */
+function renderModules(){
+  var body=$('glob-body');
+  body.innerHTML='<div class="hint">loading…</div>';
+  fetch('/api/agents').then(function(r){return r.json();}).then(function(j){
+    if(state.view!=='modules') return;
+    var mods=j.agents||[];
+    var html='<div class="modgrid">'+mods.map(function(m){
+      return '<div class="modcard'+(m.enabled?'':' off')+'">'+
+        '<div class="mh"><b>'+esc(m.name)+'</b>'+(m.builtin?'<span class="dnsst">built in</span>':'')+
+        '<span class="ios-toggle" title="offer at sandbox creation"><input type="checkbox" data-mod="'+esc(m.id)+'"'+(m.enabled?' checked':'')+'><span class="track"></span><span class="knob"></span></span></div>'+
+        '<div class="md">'+esc(m.description||'')+'</div>'+
+        '<div class="mk">'+esc(m.id)+' · runs <code>'+esc(m.command)+'</code> · '+esc(m.wired)+
+        (m.homepage?' · <a href="'+esc(m.homepage).split('"').join('&quot;')+'" target="_blank" rel="noopener">docs</a>':'')+'</div>'+
+        '</div>';
+    }).join('')+'</div>';
+    if(j.errors && j.errors.length){
+      html+='<div class="hint" style="margin-top:var(--s3)"><b>skipped modules:</b><br>'+j.errors.map(esc).join('<br>')+'</div>';
+    }
+    html+='<div class="hint" style="margin-top:var(--s4)">Add a module: create <span class="mono">'+esc((j.dirs||[])[1]||'agents')+'/&lt;id&gt;/</span> with an <span class="mono">agent.json</span> (name, command, optional proxy wiring) and an <span class="mono">install.sh</span> (runs as root in the container; helpers from <span class="mono">agents/_lib.sh</span>). Existing sandboxes: <span class="mono">hotbedd agents add SANDBOX ID</span> or the ＋ Agent button on a container.</div>';
+    body.innerHTML=html;
+    body.querySelector('.modgrid').addEventListener('change',function(ev){
+      var t=ev.target, id=t&&t.getAttribute('data-mod'); if(!id) return;
+      t.disabled=true;
+      fetch('/api/agents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id,enabled:t.checked})})
+        .then(function(r){return r.json();}).then(function(res){
+          if(res.error){ toast('modules: '+res.error,'err'); }
+          renderModules();
+        }).catch(function(){ toast('modules: request failed','err'); renderModules(); });
+    });
+  }).catch(function(){ body.innerHTML='<div class="hint">modules unavailable</div>'; });
+}
+/* per-sandbox agent buttons: one "<agent> in tmux" per installed module
+   (OpenCode keeps its classic button) plus ＋ Agent for later installs */
+function renderAgentButtons(sb, list){
+  var host=$('d-agentbtns'); if(!host) return;
+  if(sb.state!=='running'){ host.innerHTML=''; return; } // VM "booting" too: ssh not ready
+  host.innerHTML=(list||[]).filter(function(a){ return !a.builtin; }).map(function(a){
+    return '<button data-agent="'+esc(a.id)+'">'+esc(a.name)+' in tmux</button>';
+  }).join('');
+  Array.prototype.forEach.call(host.querySelectorAll('button[data-agent]'),function(b){
+    b.addEventListener('click',function(){ attachGo(sb,'agent:'+b.getAttribute('data-agent'),false); });
+  });
+}
+/* Agents tab: every module with its state in THIS sandbox - open the
+   installed ones, install enabled ones, pointer for disabled ones. */
+var agentsBusy={};
+function agentsURL(sb){ return '/api/sandboxes/'+sb.kind+'/'+encodeURIComponent(sb.name)+'/agents'; }
+function renderAgentsTab(sb){
+  var host=$('agents-body');
+  if(!sb){ host.innerHTML='<div class="hint">no sandbox selected</div>'; return; }
+  if(sb.state!=='running'){ host.innerHTML='<div class="hint">'+esc(sb.name)+' is '+esc(sb.state||'not running')+' - agents can be installed and opened once it runs.</div>'; return; }
+  if(!host.firstChild || host.getAttribute('data-sb')!==keyOf(sb)){ host.innerHTML='<div class="hint">loading…</div>'; }
+  host.setAttribute('data-sb',keyOf(sb));
+  Promise.all([
+    fetch('/api/agents').then(function(r){return r.json();}),
+    fetch(agentsURL(sb)).then(function(r){return r.json();})
+  ]).then(function(res){
+    if(state.sel!==keyOf(sb) || activeTab!=='agents') return;
+    var mods=res[0].agents||[], inst={};
+    if(res[1].error){ host.innerHTML='<div class="hint">'+esc(res[1].error)+'</div>'; return; }
+    (res[1].installed||[]).forEach(function(a){ inst[a.id]=true; });
+    var where = sb.kind==='vm' ? 'over ssh into the guest' : 'into the container';
+    var html='<div class="hint">Coding agents in <b>'+esc(sb.name)+'</b>. Install runs '+where+' (needs outbound network - an allowlist fence may block downloads; allow the domains in the DNS tab or install first). Proxy-capable agents get this sandbox\'s key and show up in its Burn tab.</div>'+
+      '<div class="dnstools"><span class="grow"></span><button class="tool" id="agents-resync" title="re-write every installed agent\'s proxy wiring (after provider/model changes)">&#8635; re-sync proxy wiring</button></div>'+
+      '<div class="agrid">';
+    mods.forEach(function(m){
+      var has=!!inst[m.id], busy=agentsBusy[keyOf(sb)+'/'+m.id];
+      var chip = has ? '<span class="dnsst ok">installed</span>' : (busy ? '<span class="dnsst">installing…</span>' : (m.enabled ? '<span class="dnsst">available</span>' : '<span class="dnsst">module off</span>'));
+      var act;
+      if(has){ act='<button class="primary" data-open="'+esc(m.id)+'">Open in tmux</button>'; }
+      else if(busy){ act='<span class="hint" style="margin:0">installing - this takes 0.5–2 min…</span>'; }
+      else if(m.enabled){ act='<button data-install="'+esc(m.id)+'">Install</button>'; }
+      else { act='<button data-install="'+esc(m.id)+'" data-enable="1" title="switches the module on (offered in the create wizard from now on) and installs it here">Enable &amp; install</button>'; }
+      html+='<div class="acard'+(has||m.enabled?'':' na')+'"><div class="ah"><b>'+esc(m.name)+'</b>'+chip+'</div>'+
+        '<div class="ad">'+esc(m.description||'')+'</div>'+
+        '<div class="mk" style="color:var(--faint);font:.7rem var(--mono)">runs <code>'+esc(m.command)+'</code> · '+esc(m.wired)+'</div>'+
+        '<div class="aa">'+act+'</div></div>';
+    });
+    html+='</div>';
+    host.innerHTML=html;
+    host.querySelectorAll('[data-open]').forEach(function(b){
+      b.addEventListener('click',function(){
+        var id=b.getAttribute('data-open');
+        attachGo(sb, id==='opencode'?'opencode':'agent:'+id, false);
+      });
+    });
+    host.querySelectorAll('[data-install]').forEach(function(b){
+      b.addEventListener('click',function(){
+        var id=b.getAttribute('data-install');
+        if(!b.getAttribute('data-enable')){ installAgent(sb, id); return; }
+        b.disabled=true;
+        fetch('/api/agents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id,enabled:true})})
+          .then(function(r){return r.json();}).then(function(res){
+            if(res.error){ b.disabled=false; toast('modules: '+res.error,'err'); return; }
+            installAgent(sb, id);
+          }).catch(function(){ b.disabled=false; toast('modules: request failed','err'); });
+      });
+    });
+    $('agents-resync').addEventListener('click',function(){
+      var btn=this; btn.disabled=true;
+      fetch('/api/sandboxes/'+sb.kind+'/'+encodeURIComponent(sb.name)+'/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
+        .then(function(r){return r.json();}).then(function(j){
+          btn.disabled=false;
+          if(j.error){ toast('sync: '+j.error,'err'); return; }
+          var n=(j.agents||[]).length;
+          toast('proxy wiring re-synced (OpenCode'+(n?' + '+n+' agent'+(n>1?'s':''):'')+')'+(j.warn?' - '+j.warn:''), j.warn?'err':'ok');
+        }).catch(function(){ btn.disabled=false; toast('sync: request failed','err'); });
+    });
+  }).catch(function(){ host.innerHTML='<div class="hint">agents unavailable</div>'; });
+}
+function installAgent(sb, id){
+  var k=keyOf(sb)+'/'+id;
+  agentsBusy[k]=true;
+  renderAgentsTab(sb);
+  fetch(agentsURL(sb),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})})
+    .then(function(r){return r.json();}).then(function(res){
+      delete agentsBusy[k];
+      if(res.error){ toast('install '+id+': '+res.error,'err'); }
+      else { toast(id+' installed in '+sb.name+(res.warn?' (warning: '+res.warn+')':''), res.warn?'err':'ok'); }
+      if(state.sel===keyOf(sb)){
+        if(activeTab==='agents'){ renderAgentsTab(sb); }
+        if(res.installed){ renderAgentButtons(sb, res.installed); }
+      }
+    }).catch(function(){ delete agentsBusy[k]; toast('install '+id+': request failed','err'); if(state.sel===keyOf(sb)&&activeTab==='agents') renderAgentsTab(sb); });
+}
+
 /* ---------- dns tab ---------- */
 /* What a container looked up (recorded by the DNS fence while tracking is
    on) + allowlist toggles to open forgotten domains after the fact. Polls
    every 5 s while visible; the table body is patched in place so the
    filter input keeps focus. */
 var dnsTimer=null, dnsBusy=false, dnsFilter='', dnsOnlyBlocked=false, dnsSB=null, dnsLast=null;
-function dnsURL(sb){ return '/api/sandboxes/container/'+encodeURIComponent(sb.name)+'/dns'; }
+function dnsURL(sb){ return '/api/sandboxes/'+sb.kind+'/'+encodeURIComponent(sb.name)+'/dns'; }
 function renderDnsTab(sb){
   var host=$('dns-body');
   if(dnsTimer){ clearInterval(dnsTimer); dnsTimer=null; }
   if(!sb){ host.innerHTML='<div class="hint">no sandbox selected</div>'; return; }
-  if(sb.kind!=='container'){ host.innerHTML='<div class="hint">DNS tracking covers container sandboxes (egress fences are container-only).</div>'; return; }
   if(!dnsSB || dnsSB.name!==sb.name){ host.innerHTML='<div class="hint">loading…</div>'; host.removeAttribute('data-sig'); }
   dnsSB=sb;
   var load=function(){
@@ -1567,7 +1812,7 @@ function renderHelp(){
   sql.innerHTML=
     hsec('The idea')+
     '<div style="font-size:.82rem;color:var(--dim);line-height:1.55;max-width:70ch">'+
-    '<p><b>hbd</b> makes a disposable Docker container per project dir - your project is bind-mounted at <span class="mono">/workspace</span>, the only host path the agent can touch. <b>hotbedvm</b> is the VM escape hatch (libvirt, or docker-in-docker "hotbedvmd"): snapshots, ssh, full disk. <b>hotbedd</b> is this daemon and dashboard: OpenCode config, the proxy (burn ledger), wallets, egress fences, kits.</p>'+
+    '<p><b>hbd</b> makes a disposable Docker container per project dir - your project is bind-mounted at <span class="mono">/workspace</span>, the only host path the agent can touch. <b>hotbedvm</b> is the VM escape hatch (libvirt, or docker-in-docker "hotbedvmd"): snapshots, ssh, full disk. <b>hotbedd</b> is this daemon and dashboard: LLM providers, the proxy (burn ledger, one virtual key per sandbox and agent), wallets, egress fences, agent modules.</p>'+
     '<p>Provider API keys stay on the host in hotbedd only - sandboxes get per-sandbox minted proxy keys, the UI shows them masked everywhere.</p>'+
     '<p><b>Egress fences</b>: <span class="mono">none</span> keeps only loopback+established (everything else drops, DNS included). <span class="mono">proxy-only</span> additionally keeps private ranges and DNS open so the host-side proxy works while public addresses drop. <span class="mono">allowlist</span> routes all DNS through the fence and only lets the sandbox reach domains from its configured list. With <b>DNS tracking</b> (allow / allowlist) every lookup shows up in the sandbox&rsquo;s DNS tab, where a toggle per domain allows it after the fact.</p>'+
     '</div>'+
@@ -1617,7 +1862,7 @@ function renderHelp(){
       ['hotbedd key mint|ls|revoke','per-sandbox proxy keys'],
       ['hotbedd budget [NAME] [USD] [--tokens N]','wallets (Burn tab "set" button does the same)'],
       ['hotbedd price ls|set','$/Mtok pricing used for the $ columns'],
-      ['hotbedd sync NAME|all','push proxy-backed OpenCode config into sandbox(es)'],
+      ['hotbedd sync NAME|all','push proxy wiring (OpenCode + every installed agent, each with its own virtual key) into sandbox(es)'],
       ['hotbedd mount ls|add|rm','host bind mounts of a container (add/rm recreates it)'],
       ['hotbedd recipe print|up|validate / hotbedd egress','declarative hbd.yaml sandboxes / outbound fence'],
       ['hotbedd audit [N]','control-plane audit trail']
@@ -1644,7 +1889,7 @@ function renderHelp(){
 
 function renderConfigGlobal(){
   var body=$('glob-body');
-  body.innerHTML='<div class="hint">Providers hold the upstream endpoints and keys. They stay in hotbedd; sandboxes receive only their minted proxy key. Values shown as <code>&lt;masked&gt;</code> are preserved on save. After editing providers run <code>hotbedd sync</code> (or the sync button on the burn view).</div>'+
+  body.innerHTML='<div class="hint">LLM providers are the upstream endpoints every agent in every sandbox talks to - through the proxy, never directly. Each provider: <code>base_url</code>, <code>api_key</code>, <code>models</code>, optional <code>style</code> (<code>openai</code> default, <code>anthropic</code> for Claude Code) and <code>compat</code> rewrites (e.g. <code>["anthropic-gateway"]</code> for an Anthropic route in front of open models). Keys stay in hotbedd: sandboxes get one virtual key per agent that the proxy translates, so the burn view splits usage per sandbox <i>and</i> agent. Values shown as <code>&lt;masked&gt;</code> are preserved on save; after editing run <code>hotbedd sync</code> (or re-sync on a sandbox\'s Agents tab).</div>'+
     '<textarea id="cfg-editor" spellcheck="false"></textarea>'+
     '<div class="warnline" id="cfg-warn"></div>';
   fetch('/api/config').then(function(r){return r.json();}).then(function(cfg){
@@ -1707,18 +1952,15 @@ function select(sb){
   $('d-sub').innerHTML = (vmKind? esc('VM · ') : '')+ esc(sb.kind)+(vmKind && sb.backend? ' · '+esc(sb.backend):'')+
      (sb.project? ' · '+esc(short(sb.project)):'') + (sb.stack? ' · '+esc(sb.stack):'');
   updateButtons(sb);
+  $('d-agentbtns').innerHTML='';
   renderOverview(sb);
   renderConn(sb);
   // keep the burned tab live across sandbox switches too - switching
   // machines with the burn pane open must swap the data, not just the name
   if(activeTab==='burn'){ renderBurnTab(sb); }
   if(activeTab==='logs'){ openLogs(sb); }
-  // DNS tracking rides the container egress fence - VMs have no DNS tab
-  $('tabbtn-dns').hidden=(sb.kind!=='container');
-  if(activeTab==='dns'){
-    if(sb.kind==='container'){ renderDnsTab(sb); }
-    else { document.querySelector('.tab[data-tab="overview"]').click(); }
-  }
+  if(activeTab==='dns'){ renderDnsTab(sb); }
+  if(activeTab==='agents'){ renderAgentsTab(sb); }
   saveView();
 }
 function renderOverview(sb){
@@ -1748,6 +1990,7 @@ function cardrowRender(host, cards){
 /* detail fetch merges mounts/env into overview */
 var s={FetchDetail:function(sb){
   fetch('/api/sandboxes/'+sb.kind+'/'+sb.name).then(function(r){return r.json();}).then(function(j){
+    if(j && state.sel===keyOf(sb)){ renderAgentButtons(sb, j.agents); }
     if(!j || !j.detail) { $('ov-cards').appendChild(h('div',{class:'card'},'<h4>detail</h4><div class="v small">container detail needs docker inspect (daemon has it)</div>')); if(j && j.conn) fillDetailConn(j.conn); return; }
     var d=j.detail; extras=[];
     if(j.snapshots && j.snapshots.length){
@@ -1947,10 +2190,11 @@ function initTabs(){
       activeTab=t.getAttribute('data-tab');
       saveView();
       Array.prototype.forEach.call(document.querySelectorAll('.tab'),function(x){x.classList.toggle('active',x===t);});
-      ['overview','logs','conn','burn','dns'].forEach(function(id){ $('tab-'+id).hidden=(id!==activeTab); });
+      ['overview','logs','conn','burn','agents','dns'].forEach(function(id){ $('tab-'+id).hidden=(id!==activeTab); });
       if(activeTab==='logs' && state.sel){ var sb=currentSB(); if(sb) openLogs(sb); }
       if(activeTab==='burn'){ var sb2=currentSB(); renderBurnTab(sb2); }
       if(activeTab==='dns'){ renderDnsTab(currentSB()); }
+      if(activeTab==='agents'){ renderAgentsTab(currentSB()); }
       if(activeTab!=='logs'){ closeLogs(); }
     });
   });
@@ -2021,6 +2265,7 @@ function init(){
     el.addEventListener('click', function(ev){ ev.preventDefault(); showGlobal('create'); });
   });
   $('lnk-config').addEventListener('click', function(ev){ ev.preventDefault(); showGlobal('config'); });
+  $('lnk-modules').addEventListener('click', function(ev){ ev.preventDefault(); showGlobal('modules'); });
   restoreBoot(); // start page: whatever the user left open (fallback: overview)
 }
 document.addEventListener('DOMContentLoaded', init);

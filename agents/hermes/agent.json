@@ -1,0 +1,16 @@
+{
+  "name": "Hermes Agent",
+  "description": "Nous Research's self-improving agent (skills, memory, tools). Installs per user with its own pinned Python (~2 min). Gets the hotbed proxy as a named provider with every model of your provider (switch with /model); wants a model with at least 64k context.",
+  "homepage": "https://hermes-agent.nousresearch.com",
+  "command": "hermes",
+  "proxy": {
+    "style": "openai",
+    "env": {
+      "HOTBED_PROXY_KEY": "{{key}}"
+    },
+    "files": {
+      "~/.config/hotbed/agents/hermes/provider.json": "{\"name\": \"hotbed\", \"base_url\": \"{{base}}\", \"api_key\": \"{{key}}\", \"models\": {{models_json}}}\n"
+    },
+    "setup": "f=\"$HOME/.config/hotbed/agents/hermes/provider.json\"; [ -f \"$f\" ] || exit 0; hermes config set providers.hotbed \"$(cat \"$f\")\" >/dev/null && hermes config set model.provider hotbed >/dev/null && hermes config set model.default {{model}} >/dev/null"
+  }
+}

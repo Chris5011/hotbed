@@ -1,0 +1,20 @@
+{
+  "name": "Claude Code",
+  "description": "Anthropic's agentic coding CLI. Talks to an anthropic-style provider through the hotbed proxy - any gateway with an Anthropic Messages route works (local models too: every Claude model alias maps to the synced model). Telemetry and auto-updates are off.",
+  "homepage": "https://docs.claude.com/en/docs/claude-code",
+  "command": "claude",
+  "proxy": {
+    "style": "anthropic",
+    "env": {
+      "ANTHROPIC_BASE_URL": "{{base_root}}",
+      "ANTHROPIC_AUTH_TOKEN": "{{key}}",
+      "ANTHROPIC_MODEL": "{{model}}",
+      "ANTHROPIC_SMALL_FAST_MODEL": "{{model}}",
+      "ANTHROPIC_DEFAULT_HAIKU_MODEL": "{{model}}",
+      "ANTHROPIC_DEFAULT_SONNET_MODEL": "{{model}}",
+      "ANTHROPIC_DEFAULT_OPUS_MODEL": "{{model}}",
+      "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+      "DISABLE_AUTOUPDATER": "1"
+    }
+  }
+}

@@ -18,7 +18,7 @@ cd "$ROOT"
 FAIL=0
 
 for f in vm/hotbedvm.sh tests/hotbedd-smoke.sh tests/vmsmoke.sh tests/vmdsmoke.sh tests/smoke.sh bin/hbd \
-         install.sh quick-install.sh scripts/update.sh; do
+         install.sh quick-install.sh scripts/update.sh agents/_lib.sh agents/*/install.sh; do
     [ -f "$f" ] || continue
     if bash -n "$f" 2>/dev/null; then
         echo "bash  $f  ok"
