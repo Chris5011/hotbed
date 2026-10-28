@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -38,10 +39,24 @@ func (s *Server) statsRoute(w http.ResponseWriter, r *http.Request) {
 		"host":    hostInfo(),
 	}
 	if s.Collector != nil {
-		resp["sandboxes"] = sandboxCounts(s.Collector.Snapshot())
+		// never block the start page on a cold inventory scan (docker
+		// stats alone samples ~2 s): answer from the cache, or with zero
+		// counts flagged "warming" while one background scan fills it
+		if list, ok := s.Collector.Cached(); ok {
+			resp["sandboxes"] = sandboxCounts(list)
+		} else {
+			counts := sandboxCounts(nil)
+			counts["warming"] = true
+			resp["sandboxes"] = counts
+			if statsWarmKick.CompareAndSwap(false, true) {
+				go func() { s.Collector.Scan(); statsWarmKick.Store(false) }()
+			}
+		}
 	}
 	okJSON(w, resp)
 }
+
+var statsWarmKick atomic.Bool
 
 // ------------------------------------------------------------- CPU percent --
 

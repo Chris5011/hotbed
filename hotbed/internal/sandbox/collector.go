@@ -138,6 +138,14 @@ func (c *Collector) Scan() []Sandbox {
 }
 
 // Snapshot returns the last successful scan (scans if never scanned).
+// Cached returns the last scan without ever scanning (ok=false before the
+// first scan finished) — for callers that must not block on docker stats.
+func (c *Collector) Cached() ([]Sandbox, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.last, c.last != nil
+}
+
 func (c *Collector) Snapshot() []Sandbox {
 	c.mu.Lock()
 	l := c.last
