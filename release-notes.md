@@ -1,3 +1,90 @@
+# Hotbed v0.7.0 — agents, DNS insight and per-agent burn
+
+The biggest release since the proxy landed: coding agents beyond OpenCode
+as drop-in modules, DNS tracking with allow-afterwards for every sandbox
+kind (containers and both VM backends), per-agent virtual keys, a
+one-command installer and a reworked create wizard. Everything below was
+verified live on the release host (containers, hotbedvm/libvirt and
+hotbedvmd VMs), including a real-inference sweep of all six agents
+against a self-hosted vLLM gateway.
+
+## What's new
+
+- **Agent modules** — Aider, Claude Code, Codex CLI, Hermes Agent,
+  OpenClaw and OpenCode (built in). A module is a folder
+  (`agents/<id>/agent.json` + `install.sh`); add your own under
+  `~/.config/hotbedd/agents/` without touching the daemon. Toggle them on
+  the new *Agent modules* page; enabled ones are checkboxes in the create
+  wizard. Every sandbox gets an **Agents** tab (Install / Enable & install
+  / Open in tmux / re-sync) and one "*Name* in tmux" button per installed
+  agent. Works in containers and both VM backends (installed over ssh
+  after boot). CLI: `hotbedd agents ls|enable|disable|add SANDBOX ID`.
+- **Proxy wiring for every agent** — manifests declare the provider style
+  (`openai`/`anthropic`), env, files and a `setup` command; sync renders
+  them with the sandbox's key and the provider's models (`{{model}}`,
+  `{{models_json}}`, `{{models_objects}}`, …). Hermes and OpenClaw get the
+  full model list.
+- **Per-agent virtual keys** — one `hbk-<agent>-<provider>-…` key per
+  sandbox × agent × provider; the proxy translates it and books every call
+  to the sandbox *and* agent. Burn tab, burn drilldown, `hotbedd usage
+  NAME` and `hotbedd key ls` show the per-agent split. Existing keys keep
+  working as "shared key" until a re-sync.
+- **Local models, Claude Code included** — new per-provider
+  `compat: ["anthropic-gateway"]` rewrite lets Claude Code run against the
+  Anthropic route of an OpenAI-style gateway in front of open models
+  (in-conversation system messages moved to the top-level system,
+  unsupported effort mapped); every Claude model alias maps to the synced
+  model.
+- **DNS tracking + allow afterwards** — `allow` and `allowlist` sandboxes
+  can record every lookup (domain, count, refused, first/last seen). The
+  new **DNS** tab lists them with an allow toggle per domain (live, no
+  restart), *Lock down to allowlist* and *Open egress*. Allowlists may
+  start empty. CLI: `hotbedd egress NAME … --track | track on|off | seen |
+  add|rm DOMAIN`. Recipes: `dns_track`, `egress_allowlist`.
+- **Fences for VMs** — DNS tracking, allowlists and all presets now work
+  for hotbedvmd (rules on the VM's container, outside the guest) and
+  libvirt VMs (rules inside the guest over ssh). The guest DNS cache is
+  flushed on every fence change so refused lookups show up.
+- **Fences survive restarts** — stop/start, the idle sweeper and reboots
+  used to wipe the netns rules silently; the daemon now re-applies every
+  recorded preset within ~30 s.
+- **Create wizard rework** — kind cards, one section order for every kind
+  (Basics → Workspace → Network → Coding agents → OpenCode → Budgets);
+  VMs gain size presets, a styled workspace row and the full Network
+  section.
+- **LLM providers** — the "OpenCode config" page is now *LLM providers*
+  (style + compat documented in place).
+- **One-command install** — `curl -fsSL
+  https://raw.githubusercontent.com/Chris5011/hotbed/main/quick-install.sh
+  | bash -s -- --deps --service` (clone, sha-verified binary, install.sh,
+  systemd user unit). Re-run to update.
+
+## Fixes
+
+- `install.sh` / `scripts/update.sh` aborted on the current tree (stale
+  `hotbedd/` path); `hotbedvm` is now installed as a wrapper on PATH.
+- Wizard-created containers without a mount had a root-owned
+  `/workspace` — agents could not write files.
+- The relay now respawns on every new daemon build (version + binary
+  hash), not only on version bumps.
+- The relay keeps the DNS fence running even without LLM providers.
+- Upstream errors without reported usage book zero tokens instead of a
+  bytes/4 estimate (a client retrying 400s drained wallets).
+- OpenAI Responses API usage is parsed exactly (Codex).
+- Recipes accept `egress: allowlist`.
+
+## Upgrade from v0.6.1
+
+```bash
+cd ~/hotbed
+scripts/update.sh --yes
+```
+
+Then, per sandbox, *re-sync proxy wiring* on its Agents tab (or
+`hotbedd sync NAME`) to give every agent its own virtual key.
+
+---
+
 # Hotbed v0.6.1 — the fence polish release
 
 Three user-reported fixes around the v0.6.0 fences and one sure-footed
