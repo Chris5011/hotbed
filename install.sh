@@ -45,7 +45,7 @@ ask()  { # ask QUESTION [default]
 }
 
 # ---- sanity: run from a real kit tree ---------------------------------------
-[[ -f "$ROOT/vm/hotbedvm.sh" && -f "$ROOT/bin/hbd" && -d "$ROOT/hotbedd" ]] \
+[[ -f "$ROOT/vm/hotbedvm.sh" && -f "$ROOT/bin/hbd" && -f "$ROOT/hotbed/go.mod" ]] \
     || fail "run install.sh from the hotbed repo root (or a release tree)"
 
 mkdir -p "$BIN_DIR"
@@ -63,11 +63,19 @@ if [[ $DO_DEPS -eq 1 ]]; then
     else
         fail "--with-deps needs root or sudo (no sudo found)"
     fi
-    # a piped/non-interactive run (`curl … | bash`) cannot answer sudo's
-    # password prompt - fail with the remedy instead of sudo's raw stderr
+    # sudo needs a password: ask for it once up front via the terminal (works
+    # under `curl … | bash` too - stdin is the pipe, /dev/tty is not). Only a
+    # run without any terminal fails, with the remedy instead of sudo's stderr.
     if [[ -n "$SUDO" ]] && ! $SUDO -n true 2>/dev/null; then
-        fail "--with-deps needs sudo. Run me in your own terminal (the password prompt is normal), or as root."
+        if [[ -r /dev/tty ]] && { : </dev/tty; } 2>/dev/null; then
+            say "--with-deps installs packages - sudo will ask for your password once"
+            $SUDO -v </dev/tty || fail "sudo authentication failed"
+        else
+            fail "--with-deps needs sudo, but there is no terminal for the password prompt. Run me in your own terminal, or as root."
+        fi
     fi
+    IS_WSL=0
+    grep -qi microsoft /proc/version 2>/dev/null && IS_WSL=1
     if ! command -v apt-get >/dev/null 2>&1; then
         fail "--with-deps supports apt (Debian/Ubuntu). Missing prereqs must be \
 installed manually: docker tmux git curl wget jq ripgrep ssh less xz zip unzip \
@@ -78,7 +86,13 @@ file build-essential pkg-config python3 (docker: docs.docker.com/engine/install/
     declare -a MISS=()
     add() { command -v "$1" >/dev/null 2>&1 || MISS+=("$2"); }
     add bash    bash
-    add docker  docker.io
+    if [[ $IS_WSL -eq 1 ]] && ! command -v docker >/dev/null 2>&1; then
+        # a distro-local docker.io next to Docker Desktop means two engines
+        # fighting over one socket - Desktop's WSL integration is the way
+        say "WSL without docker: enable Docker Desktop → Settings → Resources → WSL Integration for this distro (skipping docker.io)"
+    else
+        add docker docker.io
+    fi
     add tmux    tmux
     add git     git
     add curl    curl
@@ -120,7 +134,8 @@ file build-essential pkg-config python3 (docker: docs.docker.com/engine/install/
         say "installing the Go toolchain (official tarball: apt's golang is too old)"
         GARCH="$(uname -m)"; [ "$GARCH" = x86_64 ] && GARCH=amd64 || GARCH=arm64
         GVER="$(curl -fsSL 'https://go.dev/dl/?mode=json' | jq -r '.[0].version' | sed 's/^go//')"
-        GVER="${GVER:-1.24.0}"
+        # fallback: the module's own minimum (go.mod "go 1.26" → 1.26.0)
+        GVER="${GVER:-$(awk '/^go /{print $2; exit}' "$ROOT/hotbed/go.mod").0}"
         curl -fsSL "https://go.dev/dl/go${GVER}.linux-${GARCH}.tar.gz" -o /tmp/opencode-gotool.tgz
         $SUDO rm -rf /usr/local/go
         $SUDO tar -xzf /tmp/opencode-gotool.tgz -C /usr/local
@@ -170,18 +185,30 @@ if [[ ! -x "$SBXD" ]]; then
     command -v go >/dev/null 2>&1 || fail "no daemon binary and no Go toolchain — download a release asset into dist/ or the kit root, or run 'make build'"
 fi
 if [[ ! -x "$SBXD" ]]; then
-    ( cd "$ROOT/hotbedd" && go build -o bin/hotbedd ./cmd/hotbedd ) && say "built hotbedd from source"
+    ( cd "$ROOT/hotbed" && go build -o bin/hotbedd ./cmd/hotbedd ) && say "built hotbedd from source"
 fi
 
 # ---- install entry points ----------------------------------------------------
 ln -sf "$ROOT/bin/hbd" "$BIN_DIR/hbd"        # kit CLI self-locates its root
 ln -sf "$SBXD" "$BIN_DIR/hotbedd"               # CLI (needs HOTBED_ROOT, see wrapper)
+rm -f "$BIN_DIR/hotbedd-serve"   # never write through a stale symlink
 cat > "$BIN_DIR/hotbedd-serve" <<EOF
 #!/usr/bin/env bash
 # daemon entry point: pins HOTBED_ROOT to this checkout and runs hotbedd serve
 exec env HOTBED_ROOT="$ROOT" "$SBXD" serve "\$@"
 EOF
 chmod +x "$BIN_DIR/hotbedd-serve"
+# hotbedvm.sh derives its root from its own path (no symlink resolution), so
+# a wrapper instead of a symlink: bash then sees the real script location.
+# rm first: older installs left a symlink there, and writing through it
+# would overwrite vm/hotbedvm.sh itself with this wrapper.
+rm -f "$BIN_DIR/hotbedvm"
+cat > "$BIN_DIR/hotbedvm" <<EOF
+#!/usr/bin/env bash
+# VM CLI entry point: runs this checkout's vm/hotbedvm.sh
+exec bash "$ROOT/vm/hotbedvm.sh" "\$@"
+EOF
+chmod +x "$BIN_DIR/hotbedvm"
 case ":$PATH:" in *":$BIN_DIR:"*) ;; *) say "note: $BIN_DIR is not on your PATH — add it to shell profile" ;; esac
 
 # ---- dependency gate ----------------------------------------------------------

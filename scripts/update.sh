@@ -44,7 +44,7 @@ fail() { printf '\033[31;1mupdate:\033[0m %s\n' "$*" >&2; exit 1; }
 
 command -v gh >/dev/null 2>&1 || fail "gh CLI required (gh auth login once)"
 command -v git >/dev/null 2>&1 || fail "git required"
-[[ -f vm/hotbedvm.sh && -f bin/hbd && -d hotbedd ]] || fail "run from the kit tree"
+[[ -f vm/hotbedvm.sh && -f bin/hbd && -f hotbed/go.mod ]] || fail "run from the kit tree"
 
 # ---- arch + latest release ----------------------------------------------------
 case "$(uname -m)" in
