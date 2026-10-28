@@ -692,7 +692,10 @@ function renderHostOverview(){
       ovKV('swap', esc(humanBytes(m.swap_used)+' of '+humanBytes(m.swap_total)))+
       '</div></div>';
     function grp(t,g){ return ovKV(t, esc(((g||{}).running!=null?g.running:'–')+' running · '+((g||{}).total!=null?g.total:'–')+' known')); }
-    var hbCard='<div class="ov-card"><div class="ov-h">Sandboxes <b>'+(hbd.containers?hbd.containers.total:0)+(hbd.vms_libvirt?hbd.vms_libvirt.total:0)+(hbd.vms_docker?hbd.vms_docker.total:0)+'</b></div>'+
+    // numeric sum (string concat showed "201" for 2+0+1); "…" while the
+    // daemon's first inventory scan is still running (warming)
+    var hbTotal=hbd.warming ? '…' : ((hbd.containers?hbd.containers.total:0)+(hbd.vms_libvirt?hbd.vms_libvirt.total:0)+(hbd.vms_docker?hbd.vms_docker.total:0));
+    var hbCard='<div class="ov-card"><div class="ov-h">Sandboxes <b>'+hbTotal+'</b></div>'+
       '<div style="margin-top:var(--s3)">'+
       grp('containers (hbd)',hbd.containers)+
       grp('VMs · libvirt (hotbedvm)',hbd.vms_libvirt)+
@@ -1588,14 +1591,17 @@ function renderAgentsTab(sb){
     if(res[1].error){ host.innerHTML='<div class="hint">'+esc(res[1].error)+'</div>'; return; }
     (res[1].installed||[]).forEach(function(a){ inst[a.id]=true; });
     var where = sb.kind==='vm' ? 'over ssh into the guest' : 'into the container';
-    var html='<div class="hint">Coding agents in <b>'+esc(sb.name)+'</b>. Install runs '+where+' (needs outbound network - an allowlist fence may block downloads; allow the domains in the DNS tab or install first). Proxy-capable agents get this sandbox\'s key and show up in its Burn tab.</div>'+
+    var html='<div class="hint">Coding agents in <b>'+esc(sb.name)+'</b>. Install runs '+where+' (needs outbound network - an allowlist fence may block downloads; allow the domains in the DNS tab or install first). Proxy-capable agents get their own virtual key and show up in this sandbox\'s Burn tab. Conversations are kept in the workspace (<span class="mono">/workspace/.hotbed/agents/&lt;agent&gt;</span>, git-ignored): mount the same folder into a new sandbox and <i>Resume last</i> picks them up.</div>'+
       '<div class="dnstools"><span class="grow"></span><button class="tool" id="agents-resync" title="re-write every installed agent\'s proxy wiring (after provider/model changes)">&#8635; re-sync proxy wiring</button></div>'+
       '<div class="agrid">';
     mods.forEach(function(m){
       var has=!!inst[m.id], busy=agentsBusy[keyOf(sb)+'/'+m.id];
       var chip = has ? '<span class="dnsst ok">installed</span>' : (busy ? '<span class="dnsst">installing…</span>' : (m.enabled ? '<span class="dnsst">available</span>' : '<span class="dnsst">module off</span>'));
       var act;
-      if(has){ act='<button class="primary" data-open="'+esc(m.id)+'">Open in tmux</button>'; }
+      if(has){
+        act='<button class="primary" data-open="'+esc(m.id)+'">Open in tmux</button>'+
+          (m.resume?'<button data-resume="'+esc(m.id)+'" title="continue the last conversation: '+esc(m.resume)+' (sessions live in the workspace, so they survive a torn-down sandbox)">Resume last</button>':'');
+      }
       else if(busy){ act='<span class="hint" style="margin:0">installing - this takes 0.5–2 min…</span>'; }
       else if(m.enabled){ act='<button data-install="'+esc(m.id)+'">Install</button>'; }
       else { act='<button data-install="'+esc(m.id)+'" data-enable="1" title="switches the module on (offered in the create wizard from now on) and installs it here">Enable &amp; install</button>'; }
@@ -1611,6 +1617,9 @@ function renderAgentsTab(sb){
         var id=b.getAttribute('data-open');
         attachGo(sb, id==='opencode'?'opencode':'agent:'+id, false);
       });
+    });
+    host.querySelectorAll('[data-resume]').forEach(function(b){
+      b.addEventListener('click',function(){ attachGo(sb, 'agent:'+b.getAttribute('data-resume')+':resume', false); });
     });
     host.querySelectorAll('[data-install]').forEach(function(b){
       b.addEventListener('click',function(){

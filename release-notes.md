@@ -29,6 +29,12 @@ against a self-hosted vLLM gateway.
   to the sandbox *and* agent. Burn tab, burn drilldown, `hotbedd usage
   NAME` and `hotbedd key ls` show the per-agent split. Existing keys keep
   working as "shared key" until a re-sync.
+- **Conversations survive the sandbox** — every agent keeps its sessions
+  in the workspace (`/workspace/.hotbed/agents/<id>`, git-ignored): tear
+  the sandbox down, mount the same folder into a new one, *Resume last*
+  (Agents tab) continues the conversation. Verified for all six agents.
+  Virtual keys follow the workspace, so credential-bound sessions
+  (Hermes) resume too.
 - **Local models, Claude Code included** — new per-provider
   `compat: ["anthropic-gateway"]` rewrite lets Claude Code run against the
   Anthropic route of an OpenAI-style gateway in front of open models

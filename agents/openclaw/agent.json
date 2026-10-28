@@ -3,6 +3,12 @@
   "description": "Self-hosted personal agent with tools and skills. Runs as a local terminal chat (openclaw chat - no gateway service) against an openai-style provider through the hotbed proxy. Needs Node 24 (provisioned on install).",
   "homepage": "https://docs.openclaw.ai",
   "command": "openclaw chat",
+  "resume": "openclaw chat",
+  "persist": {
+    "links": {
+      "~/.openclaw/agents": "agents/"
+    }
+  },
   "proxy": {
     "style": "openai",
     "env": {

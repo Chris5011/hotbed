@@ -39,7 +39,9 @@ type Module struct {
 	Command        string   `json:"command"`                   // what the launch runs
 	Builtin        bool     `json:"builtin,omitempty"`         // baked into the stack images (no install)
 	DefaultEnabled bool     `json:"default_enabled,omitempty"` // when config.json does not say
+	Resume         string   `json:"resume,omitempty"`          // command continuing the last conversation
 	Proxy          *Proxy   `json:"proxy,omitempty"`           // nil = agent brings its own auth
+	Persist        *Persist `json:"persist,omitempty"`         // sessions kept in the workspace
 	EgressDomains  []string `json:"egress_domains,omitempty"`  // added to allowlist sandboxes at create
 
 	Dir        string `json:"-"`
@@ -55,6 +57,14 @@ type Proxy struct {
 	// the env file loaded; template values are substituted shell-quoted.
 	// For agents configured through their own CLI (hermes config set …).
 	Setup string `json:"setup,omitempty"`
+}
+
+// Persist moves an agent's conversations into the workspace
+// ({{state}} = /workspace/.hotbed/agents/<id>), so tearing the sandbox
+// down keeps them and a new sandbox on the same folder resumes them.
+type Persist struct {
+	Env   map[string]string `json:"env,omitempty"`   // relocation vars, e.g. CLAUDE_CONFIG_DIR={{state}}
+	Links map[string]string `json:"links,omitempty"` // "~/path" -> "rel/" (dir) | "rel" (file) under {{state}}
 }
 
 // MarkerDir holds one file per installed module inside a container.
@@ -137,8 +147,21 @@ func loadOne(dir string) (Module, error) {
 			}
 		}
 		for path := range p.Files {
-			if !strings.HasPrefix(path, "~/") || strings.Contains(path, "..") {
-				return Module{}, fmt.Errorf("agent %s: proxy.files %q must be a ~/ path", id, path)
+			if !(strings.HasPrefix(path, "~/") || strings.HasPrefix(path, "{{state}}/")) || strings.Contains(path, "..") {
+				return Module{}, fmt.Errorf("agent %s: proxy.files %q must be a ~/ or {{state}}/ path", id, path)
+			}
+		}
+	}
+	if p := m.Persist; p != nil {
+		for k := range p.Env {
+			if !envRe.MatchString(k) {
+				return Module{}, fmt.Errorf("agent %s: persist.env %q is not a variable name", id, k)
+			}
+		}
+		for src, rel := range p.Links {
+			if !strings.HasPrefix(src, "~/") || strings.Contains(src, "..") ||
+				rel == "" || strings.HasPrefix(rel, "/") || strings.Contains(rel, "..") {
+				return Module{}, fmt.Errorf("agent %s: persist.links %q -> %q must map a ~/ path to a relative name", id, src, rel)
 			}
 		}
 	}

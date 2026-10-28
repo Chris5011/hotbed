@@ -71,11 +71,16 @@ func EnsureSession(sb sandbox.Sandbox, mode string, port string) (string, error)
 	if !TmuxPresent() {
 		return "", fmt.Errorf("tmux not found (sudo apt install tmux)")
 	}
-	if id, ok := strings.CutPrefix(mode, "agent:"); ok {
+	if rest, ok := strings.CutPrefix(mode, "agent:"); ok {
+		id, resume := strings.CutSuffix(rest, ":resume")
 		if id != "opencode" {
-			return ensureAgentSession(sb, id)
+			return ensureAgentSession(sb, id, resume)
 		}
-		mode = "opencode" // the builtin module keeps its classic wiring (VMs too)
+		// the builtin module keeps its classic wiring (VMs too)
+		mode = "opencode"
+		if resume {
+			mode = "opencode-resume"
+		}
 	}
 	sess := SessionName(sb.Name)
 	if HasSession(sess) {
@@ -102,15 +107,20 @@ func EnsureSession(sb sandbox.Sandbox, mode string, port string) (string, error)
 		// the bind-mounted direct provider — otherwise the burn ledger
 		// stays empty by construction. tmux sessions roll on attach, so
 		// the env lands with this attach.
-		if mode == "opencode" || mode == "shell" {
+		if mode == "opencode" || mode == "opencode-resume" || mode == "shell" {
 			if tg, ok := cfgsync.Lookup(sb.Name); ok && tg.XDGOverride {
 				xdgBase, _ := cnXdgValue(sb.Name)
 				xdg = "-e XDG_CONFIG_HOME=" + xdgBase + " "
 			}
+			// sessions in the workspace: every OpenCode start must carry the
+			// DB path (its background service keeps the first one it saw)
+			xdg += opencodePersistFlags(sb)
 		}
 		switch mode {
 		case "opencode":
 			inner = fmt.Sprintf("docker exec -it -u %s:%s -w /workspace -e TERM=xterm-256color %s%s opencode", uid, gid, xdg, sb.Name)
+		case "opencode-resume":
+			inner = fmt.Sprintf("docker exec -it -u %s:%s -w /workspace -e TERM=xterm-256color %s%s opencode --continue", uid, gid, xdg, sb.Name)
 		default:
 			inner = fmt.Sprintf("docker exec -it -u %s:%s -w /workspace -e TERM=xterm-256color %s%s bash", uid, gid, xdg, sb.Name)
 		}
@@ -119,9 +129,12 @@ func EnsureSession(sb sandbox.Sandbox, mode string, port string) (string, error)
 		if ssh == "" {
 			return "", fmt.Errorf("no ssh endpoint known for %s yet (wait for the lease/port)", sb.Name)
 		}
-		if mode == "opencode" {
-			inner = ssh + " -- 'cd /workspace 2>/dev/null; opencode'"
-		} else {
+		switch mode {
+		case "opencode":
+			inner = ssh + " -- " + shellQuote(vmOpencode(""))
+		case "opencode-resume":
+			inner = ssh + " -- " + shellQuote(vmOpencode("--continue"))
+		default:
 			inner = ssh
 		}
 	default:
@@ -140,8 +153,48 @@ func EnsureSession(sb sandbox.Sandbox, mode string, port string) (string, error)
 // separate from the shell/opencode session so agents run side by side.
 func AgentSessionName(name, id string) string { return SessionName(name) + "-" + id }
 
-// agentCommand is the docker exec line launching an agent module.
-func agentCommand(sb sandbox.Sandbox, id string) (string, error) {
+// opencodePersistFlags returns docker -e flags pointing the builtin
+// OpenCode's session DB into the workspace — only once sync created the
+// state folder (a fresh or unmounted workspace keeps OpenCode's default).
+func opencodePersistFlags(sb sandbox.Sandbox) string {
+	m, err := agents.Get("opencode")
+	if err != nil {
+		return ""
+	}
+	env := agents.PersistEnv(m)
+	if len(env) == 0 {
+		return ""
+	}
+	if _, err := engine.Run("docker", "exec", sb.Name, "test", "-d", agents.StateDir(m.ID)); err != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, k := range sortedKeys(env) {
+		b.WriteString("-e " + k + "=" + shellQuote(env[k]) + " ")
+	}
+	return b.String()
+}
+
+// vmOpencode is the guest-side OpenCode start: the persistent DB env is
+// exported when the workspace state folder exists.
+func vmOpencode(args string) string {
+	cmd := "cd /workspace 2>/dev/null; "
+	if m, err := agents.Get("opencode"); err == nil {
+		env := agents.PersistEnv(m)
+		if len(env) > 0 {
+			cmd += "if [ -d " + shellQuote(agents.StateDir(m.ID)) + " ]; then export"
+			for _, k := range sortedKeys(env) {
+				cmd += " " + k + "=" + shellQuote(env[k])
+			}
+			cmd += "; fi; "
+		}
+	}
+	return strings.TrimSpace(cmd + "opencode " + args)
+}
+
+// agentCommand is the docker exec line launching an agent module
+// (resume: the manifest's continue-last-conversation command).
+func agentCommand(sb sandbox.Sandbox, id string, resume bool) (string, error) {
 	m, err := agents.Get(id)
 	if err != nil {
 		return "", err
@@ -151,7 +204,7 @@ func agentCommand(sb sandbox.Sandbox, id string) (string, error) {
 		uid, gid := hostID()
 		home := engine.ContainerHome(sb.Name)
 		return fmt.Sprintf("docker exec -it -u %s:%s -w /workspace -e TERM=xterm-256color %s bash -lc %s",
-			uid, gid, sb.Name, shellQuote(agents.LaunchScript(home, m))), nil
+			uid, gid, sb.Name, shellQuote(agents.LaunchScript(home, m, resume))), nil
 	case sandbox.KindVM:
 		ssh := SSHCommand(sb, "")
 		if ssh == "" {
@@ -159,14 +212,14 @@ func agentCommand(sb sandbox.Sandbox, id string) (string, error) {
 		}
 		// -t: the agent is a TUI; ssh would not allocate a pty for a command
 		return strings.Replace(ssh, "ssh ", "ssh -t ", 1) + " -- " +
-			shellQuote("bash -lc "+shellQuote(agents.LaunchScript(vmHome, m))), nil
+			shellQuote("bash -lc "+shellQuote(agents.LaunchScript(vmHome, m, resume))), nil
 	}
 	return "", fmt.Errorf("unknown sandbox kind %q", sb.Kind)
 }
 
 // ensureAgentSession starts (or reuses) the tmux session running an agent.
-func ensureAgentSession(sb sandbox.Sandbox, id string) (string, error) {
-	inner, err := agentCommand(sb, id)
+func ensureAgentSession(sb sandbox.Sandbox, id string, resume bool) (string, error) {
+	inner, err := agentCommand(sb, id, resume)
 	if err != nil {
 		return "", err
 	}
@@ -243,10 +296,11 @@ func SSHCommand(sb sandbox.Sandbox, portOverride string) string {
 
 // ConnInfo rolls every connection variant for the UI/CLI.
 func ConnInfo(sb sandbox.Sandbox, mode string, port string) sandbox.ConnInfo {
-	if id, ok := strings.CutPrefix(mode, "agent:"); ok {
+	if rest, ok := strings.CutPrefix(mode, "agent:"); ok {
+		id, resume := strings.CutSuffix(rest, ":resume")
 		if id != "opencode" {
 			ci := sandbox.ConnInfo{AttachHTTP: "/api/sandboxes/" + sb.Kind + "/" + sb.Name + "/attach"}
-			if inner, err := agentCommand(sb, id); err == nil {
+			if inner, err := agentCommand(sb, id, resume); err == nil {
 				ci.TmuxSession = AgentSessionName(sb.Name, id)
 				ci.TmuxAttach = "tmux attach -t " + ci.TmuxSession
 				ci.BackendCmd = inner
@@ -276,6 +330,7 @@ func ConnInfo(sb sandbox.Sandbox, mode string, port string) sandbox.ConnInfo {
 			xdgBase, _ := cnXdgValue(sb.Name)
 			xdg = "-e XDG_CONFIG_HOME=" + xdgBase + " "
 		}
+		xdg += opencodePersistFlags(sb)
 		ci.BackendCmd = fmt.Sprintf("docker exec -it -u %s:%s -w /workspace -e TERM=xterm-256color %s%s opencode", uid, gid, xdg, sb.Name)
 		ci.ShellCmd = fmt.Sprintf("docker exec -it -u %s:%s -w /workspace -e TERM=xterm-256color %s%s bash", uid, gid, xdg, sb.Name)
 		inner = "docker exec -it -u " + uid + ":" + gid + " -w /workspace -e TERM=xterm-256color " + xdg + sb.Name + " bash"
@@ -284,7 +339,7 @@ func ConnInfo(sb sandbox.Sandbox, mode string, port string) sandbox.ConnInfo {
 		ci.ShellCmd = ssh
 		inner = ssh
 		if mode == "opencode" {
-			ci.BackendCmd = ssh + " -- 'cd /workspace 2>/dev/null; opencode'"
+			ci.BackendCmd = ssh + " -- " + shellQuote(vmOpencode(""))
 			inner = ci.BackendCmd
 		}
 	}

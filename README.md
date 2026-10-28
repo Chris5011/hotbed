@@ -1110,6 +1110,12 @@ A module is two files:
     "setup": "x config set base_url {{base}}"  // optional: runs as the sandbox user after
                                               // env+files, values shell-quoted (Hermes, OpenClaw)
   },
+  "resume": "codex resume --last",          // continue the last conversation (Agents tab "Resume last")
+  "persist": {                              // keep conversations in the workspace ({{state}})
+    "env":   { "CODEX_HOME": "{{state}}" },          // agents with a relocation variable
+    "links": { "~/.x/sessions": "sessions/",         // the rest: home path -> symlink into
+               "~/.x/state.db": "state.db" }         // {{state}} (trailing / = folder)
+  },
   "egress_domains": []                      // added to allowlist sandboxes at create
 }
 ```
@@ -1128,6 +1134,27 @@ into `~/.config/hotbed/agents/<id>.env` + the listed files — so every
 agent's calls land in the same burn ledger and wallets. Without a provider
 of the right style (e.g. Claude Code needs an `anthropic`-style one) the
 agent is still installed and can be used with its own login.
+
+**Conversations live in the workspace.** Every agent keeps its sessions in
+`/workspace/.hotbed/agents/<id>/` (a `.gitignore` in `.hotbed/` keeps them
+out of your commits), so they survive tearing the sandbox down: mount the
+same project folder into a new sandbox, install the agent, and *Resume
+last* (Agents tab) continues where you left off. How each agent is pointed
+there: OpenCode `OPENCODE_DB` (injected into every OpenCode start — its
+background service keeps the first DB path it saw), Claude Code
+`CLAUDE_CONFIG_DIR`, Codex `CODEX_HOME`, Aider history files, Hermes and
+OpenClaw via symlinks for their session stores. Existing home-folder
+sessions are moved into the workspace on the first sync; a workspace
+without a host mount simply keeps them inside the sandbox.
+
+Virtual keys follow the workspace too: each project folder gets an id
+(`/workspace/.hotbed/id`), and a new sandbox on a folder whose previous
+sandbox was deleted gets that agent's previous key back (re-activated,
+re-bound — burn and wallets count for the new sandbox). Agents that bind
+a session to its credential (Hermes) can only resume that way; a folder
+mounted into two live sandboxes at once still gets one key per sandbox.
+Hermes references the key as `${HOTBED_PROXY_KEY}`, so its `config.yaml`
+in the workspace never contains a token.
 
 **Local / self-hosted models.** All six shipped agents run against an
 OpenAI-style gateway in front of open models (tested: Bifrost → vLLM,

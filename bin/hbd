@@ -207,6 +207,13 @@ run_opts_common() {
 exec_env_flags() {
     local cn="$1"
     printf -- '--env=TERM=%s\n' "${TERM:-xterm-256color}"
+    # OpenCode sessions in the workspace (hotbedd creates the folder on
+    # sync): every OpenCode start must carry the DB path - its background
+    # service keeps whichever path the first start used. Mirrors the
+    # daemon's attach-time env.
+    if [[ -n "$cn" ]] && "$DOCKER" exec -u 0 "$cn" test -d /workspace/.hotbed/agents/opencode >/dev/null 2>&1; then
+        printf -- '--env=OPENCODE_DB=%s\n' /workspace/.hotbed/agents/opencode/opencode.db
+    fi
     # Point opencode at the hotbedd-synced proxy config when it exists
     # (hotbedd sync NAME): requests then flow through the daemon's token
     # accounting proxy instead of the bind-mounted direct provider. Mirrors

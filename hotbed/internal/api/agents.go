@@ -117,11 +117,8 @@ func (s *Server) sandboxAgentsRoute(w http.ResponseWriter, r *http.Request, sb s
 	}
 	audit.Record("agent.install", sb.Name, m.ID)
 	warn := ""
-	s.reloadCfg()
-	if len(s.Cfg.Opencode.Providers) > 0 {
-		if _, e := s.syncAgents(sb, m.ID); e != nil {
-			warn = e.Error()
-		}
+	if _, e := s.syncAgents(sb, m.ID); e != nil { // persistence + proxy wiring
+		warn = e.Error()
 	}
 	okJSON(w, map[string]any{"ok": true, "installed": installedViews(box), "warn": warn})
 }
@@ -191,10 +188,16 @@ func (s *Server) syncAgents(sb sandbox.Sandbox, only ...string) ([]agents.SyncRe
 			continue
 		}
 		m, err := agents.Get(id)
-		if err != nil || m.Builtin {
+		if err != nil {
 			continue
 		}
-		if m.Proxy != nil && base == "" {
+		if m.Builtin { // classic wiring (cfgsync); only its session folder here
+			if e := agents.ApplyPersist(box, m); e != nil {
+				errs = append(errs, e.Error())
+			}
+			continue
+		}
+		if m.Proxy != nil && base == "" && len(s.Cfg.Opencode.Providers) > 0 {
 			b, _, e := attach.ResolveProxyURL(sb, s.Cfg.Proxy.Port)
 			if e != nil {
 				return res, e

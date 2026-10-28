@@ -1036,14 +1036,15 @@ func (s *Server) createRoute(w http.ResponseWriter, r *http.Request) {
 			}
 			warn += "sync: " + e.Error()
 		}
-		if len(installed) > 0 {
-			if _, e := s.syncAgents(sb, installed...); e != nil {
-				if warn != "" {
-					warn += "; "
-				}
-				warn += e.Error()
-			}
+
+	}
+	// every agent incl. the builtin: sessions into the workspace, proxy
+	// wiring when providers exist (independent of the OpenCode sync choice)
+	if _, e := s.syncAgents(cnSB); e != nil {
+		if warn != "" {
+			warn += "; "
 		}
+		warn += e.Error()
 	}
 	okJSON(w, map[string]any{
 		"ok":        true,
@@ -1267,8 +1268,8 @@ func (s *Server) installVMAgents(name string, mods []agents.Module) []string {
 	if warn != "" {
 		audit.Record("agent.install", name, "warnings: "+warn)
 	}
-	if len(installed) > 0 && len(s.Cfg.Opencode.Providers) > 0 {
-		if _, err := s.syncAgents(sb, installed...); err != nil {
+	if len(installed) > 0 {
+		if _, err := s.syncAgents(sb); err != nil { // persistence + proxy wiring
 			audit.Record("agent.sync", name, "failed: "+err.Error())
 		}
 	}

@@ -93,21 +93,22 @@ func agentsAdd(name, id string) error {
 	}
 	audit.Record("agent.install", name, m.ID)
 	ok("%s installed in %s\n", m.Name, name)
-	if m.Proxy == nil {
-		return nil
-	}
 	cfg, ks, _, err := p2Stores()
-	if err != nil || len(cfg.Opencode.Providers) == 0 {
-		fmt.Println("no providers configured - skipping proxy wiring (hotbedd config init, then: hotbedd sync " + name + ")")
-		return nil
-	}
-	base, _, err := attach.ResolveProxyURL(sb, cfg.Proxy.Port)
 	if err != nil {
-		return fmt.Errorf("proxy not reachable from %s: %w", name, err)
+		return err
+	}
+	base := ""
+	if m.Proxy != nil && len(cfg.Opencode.Providers) > 0 {
+		if base, _, err = attach.ResolveProxyURL(sb, cfg.Proxy.Port); err != nil {
+			return fmt.Errorf("proxy not reachable from %s: %w", name, err)
+		}
 	}
 	res, err := agents.Sync(box, m, cfg, ks, base)
 	if err != nil {
 		return err
+	}
+	if res.Persisted != "" {
+		fmt.Println("sessions: " + res.Persisted + " (kept in the workspace)")
 	}
 	if res.Skipped != "" {
 		fmt.Println("proxy: " + res.Skipped)

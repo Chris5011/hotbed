@@ -1,16 +1,21 @@
 {
   "name": "Codex CLI",
-  "description": "OpenAI's coding agent CLI. Runs against an openai-style provider through the hotbed proxy - the provider must serve the Responses API (/v1/responses; current Codex dropped chat completions). Config lives in a sandbox-local CODEX_HOME.",
+  "description": "OpenAI's coding agent CLI. Runs against an openai-style provider through the hotbed proxy - the provider must serve the Responses API (/v1/responses; current Codex dropped chat completions). CODEX_HOME (config + sessions) lives in the workspace.",
   "homepage": "https://github.com/openai/codex",
   "command": "codex",
+  "resume": "codex resume --last",
+  "persist": {
+    "env": {
+      "CODEX_HOME": "{{state}}"
+    }
+  },
   "proxy": {
     "style": "openai",
     "env": {
-      "CODEX_HOME": "{{home}}/.config/hotbed/agents/codex",
       "HOTBED_PROXY_KEY": "{{key}}"
     },
     "files": {
-      "~/.config/hotbed/agents/codex/config.toml": "# written by hotbedd sync\nmodel = \"{{model}}\"\nmodel_provider = \"hotbed\"\n\n[model_providers.hotbed]\nname = \"hotbed proxy ({{provider}})\"\nbase_url = \"{{base}}\"\nenv_key = \"HOTBED_PROXY_KEY\"\nwire_api = \"responses\"\n"
+      "{{state}}/config.toml": "# written by hotbedd sync\nmodel = \"{{model}}\"\nmodel_provider = \"hotbed\"\n\n[model_providers.hotbed]\nname = \"hotbed proxy ({{provider}})\"\nbase_url = \"{{base}}\"\nenv_key = \"HOTBED_PROXY_KEY\"\nwire_api = \"responses\"\n"
     }
   }
 }

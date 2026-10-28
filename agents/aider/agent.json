@@ -3,6 +3,14 @@
   "description": "AI pair programming in the terminal (git-aware edits). Uses any openai-style provider through the hotbed proxy; analytics and update checks are off.",
   "homepage": "https://aider.chat",
   "command": "aider",
+  "resume": "aider --restore-chat-history",
+  "persist": {
+    "env": {
+      "AIDER_CHAT_HISTORY_FILE": "{{state}}/chat.history.md",
+      "AIDER_INPUT_HISTORY_FILE": "{{state}}/input.history",
+      "AIDER_LLM_HISTORY_FILE": "{{state}}/llm.history"
+    }
+  },
   "proxy": {
     "style": "openai",
     "env": {
