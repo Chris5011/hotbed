@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"hotbed/internal/dnsfence"
@@ -85,12 +86,11 @@ func consumeEgressEvents(off int64) int64 {
 			continue
 		}
 		key := ev.Sandbox + "|" + ev.IP
-		if applied[key] {
+		if wasApplied(key) {
 			continue
 		}
-		// single goroutine owns this loop: no lock needed for the map
 		if ApplyEgressIP(ev.Sandbox, ev.IP) == nil {
-			applied[key] = true
+			markApplied(key)
 		}
 	}
 	pos, err := f.Seek(0, 2)
@@ -111,10 +111,35 @@ func trimEgressEvents(size int64) {
 	_ = os.Truncate(dnsfence.EventsPath(), 0)
 }
 
-// applied tracks ACCEPTs installed this daemon life (per sandbox+ip); a
-// fence re-apply bakes its own upstream resolution, stale memory just
-// causes harmless `-C || -I` idempotence.
-var applied = map[string]bool{}
+// applied tracks ACCEPTs installed this daemon life (per sandbox+ip). A
+// fence re-apply rebuilds the chain, so it forgets that sandbox's entries
+// (forgetApplied) — otherwise fresh fence answers would never re-open.
+var (
+	appliedMu sync.Mutex
+	applied   = map[string]bool{}
+)
+
+func wasApplied(key string) bool {
+	appliedMu.Lock()
+	defer appliedMu.Unlock()
+	return applied[key]
+}
+
+func markApplied(key string) {
+	appliedMu.Lock()
+	applied[key] = true
+	appliedMu.Unlock()
+}
+
+func forgetApplied(sandbox string) {
+	appliedMu.Lock()
+	defer appliedMu.Unlock()
+	for k := range applied {
+		if strings.HasPrefix(k, sandbox+"|") {
+			delete(applied, k)
+		}
+	}
+}
 
 // SnapshotSandboxIPs writes the fence's {ip: sandbox-name} attribution
 // snapshot for all running containers (best-effort; the fence fails

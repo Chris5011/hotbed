@@ -68,6 +68,7 @@ const indexHTML = `<!doctype html>
         <button class="tab" data-tab="logs">Logs</button>
         <button class="tab" data-tab="conn">Connection</button>
         <button class="tab" data-tab="burn">Burn</button>
+        <button class="tab" data-tab="dns" id="tabbtn-dns">DNS</button>
       </div>
 
       <div id="tab-overview" class="tabpane">
@@ -92,6 +93,10 @@ const indexHTML = `<!doctype html>
           <button class="tool" id="burn-reload" title="re-read the burn ledger now">&#8635; reload</button>
         </div>
         <div id="burn-hbd"></div>
+      </div>
+
+      <div id="tab-dns" class="tabpane" hidden>
+        <div id="dns-body"></div>
       </div>
     </section>
 
@@ -318,6 +323,16 @@ textarea#cfg-editor{width:100%;min-height:54vh;background:var(--well);color:var(
 tr.rowdim td{opacity:.42}
 tr.rowdim td:first-child{opacity:.95}
 #burntbl tr[data-hidden]{display:none}
+/* DNS tab */
+.dnsst{font-size:.6rem;border:1px solid var(--line2);color:var(--dim);border-radius:999px;padding:.05rem .45rem;text-transform:uppercase;letter-spacing:.05em;font-family:var(--sans);font-weight:700}
+.dnsst.ok{color:var(--grn);border-color:rgba(76,195,138,.5)}
+.dnsst.bad{color:var(--red);border-color:rgba(229,72,77,.45)}
+.dnstools{display:flex;gap:var(--s3);align-items:center;flex-wrap:wrap;margin:0 0 var(--s3)}
+.dnstools label{display:inline-flex;gap:.4rem;align-items:center;color:var(--dim);font-size:.76rem;cursor:pointer;user-select:none}
+.dnstools .grow{flex:1}
+#dns-filter{width:220px;max-width:100%}
+#dns-tbl td.tg{width:46px}
+#dns-tbl .via{color:var(--faint);font-size:.68rem;margin-left:.4rem;font-family:var(--sans)}
 /* iOS-style toggle switch (appearance of #burn-show-stale) */
 .ios-toggle{position:relative;display:inline-block;width:38px;height:22px;vertical-align:-5px;margin-right:.45rem}
 .ios-toggle input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;z-index:2}
@@ -326,6 +341,8 @@ tr.rowdim td:first-child{opacity:.95}
 .ios-toggle input:checked ~ .track{background:rgba(76,195,138,.28);border-color:rgba(76,195,138,.55)}
 .ios-toggle input:checked ~ .knob{left:18px;background:var(--grn)}
 .ios-toggle input:checked:hover ~ .track{background:rgba(76,195,138,.4)}
+.ios-toggle input:disabled{cursor:not-allowed}
+.ios-toggle input:disabled ~ .track,.ios-toggle input:disabled ~ .knob{opacity:.45}
 .chipmuted{font-size:.6rem;color:var(--yel);border:1px solid rgba(231,164,59,.5);border-radius:999px;padding:.05rem .45rem;margin-left:.4rem;text-transform:uppercase;letter-spacing:.05em;vertical-align:middle}
 .starpin{background:none;border:none;color:var(--faint);cursor:pointer;font-size:1rem;padding:0 .15rem;line-height:1}
 .starpin:hover{color:var(--yel)}
@@ -555,6 +572,7 @@ var burnShowStale=false; // show-stale toggle state (undeclared ghost fixed: rea
 function clearTimers(){
   if(hostTimer){ clearInterval(hostTimer); hostTimer=null; }
   if(burnTimer){ clearInterval(burnTimer); burnTimer=null; }
+  if(dnsTimer){ clearInterval(dnsTimer); dnsTimer=null; }
 }
 function showGlobal(kind){
   clearTimers();
@@ -1000,7 +1018,8 @@ function renderCreator(){
     '<div id="cw-cont-fields">'+
     '<div class="cw-sec"><div class="cw-sec-t">Network</div><div class="cw-grid two">'+
       '<div class="field"><label for="cw-egress">Egress</label><select id="cw-egress"><option>allow</option><option>allowlist</option><option>proxy-only</option><option>none</option></select><div class="fm">outbound fence; re-apply after recreates</div></div>'+
-      '<div class="field" id="cw-egdom-row" style="display:none"><label for="cw-eg-dom">Allowed domains</label><input id="cw-eg-dom" style="width:100%" placeholder="api.openai.com, example.org" autocomplete="off" title="opencode.ai is needed to converse with models: opencode authenticates and fetches its model list from api.opencode.ai, and this entry already covers it via suffix match; without it, opencode fails early (EAI_AGAIN) instead of chatting. Update checks also phone home there."><div class="fm">comma/space separated; suffix match covers subdomains; DNS goes through the fence, everything else drops; re-applies after recreates. Include opencode.ai: synchronized opencode uses it for login and the model list, so without it chatting fails</div></div>'+
+      '<div class="field" id="cw-egdom-row" style="display:none"><label for="cw-eg-dom">Allowed domains</label><input id="cw-eg-dom" style="width:100%" placeholder="api.openai.com, example.org" autocomplete="off" title="opencode.ai is needed to converse with models: opencode authenticates and fetches its model list from api.opencode.ai, and this entry already covers it via suffix match; without it, opencode fails early (EAI_AGAIN) instead of chatting. Update checks also phone home there."><div class="fm">comma/space separated; suffix match covers subdomains; DNS goes through the fence, everything else drops. May stay empty with tracking on: allow what the DNS tab shows later. Include opencode.ai: synchronized opencode uses it for login and the model list, so without it chatting fails</div></div>'+
+      '<div class="field" id="cw-egtrack-row"><label>DNS tracking</label><label class="check"><input type="checkbox" id="cw-eg-track" checked><span class="box"></span>record lookups</label><div class="fm">see every domain the sandbox resolves in its DNS tab, allow forgotten ones there afterwards</div></div>'+
     '</div>'+
     '<div class="rows-t">Published ports - host → container</div>'+
     '<div class="rows" id="cw-ports"></div>'+
@@ -1044,8 +1063,10 @@ function renderCreator(){
   // selected — it keeps its value (documented) when the preset switches
   // away and back, but is only applied on create when allowlist is active.
   var egressDomUpdate=function(){
-    var row=$('cw-egdom-row');
-    row.style.display=($('cw-egress').value==='allowlist')?'':'none';
+    var v=$('cw-egress').value;
+    $('cw-egdom-row').style.display=(v==='allowlist')?'':'none';
+    // tracking needs DNS through the fence: allow and allowlist only
+    $('cw-egtrack-row').style.display=(v==='allow'||v==='allowlist')?'':'none';
   };
   $('cw-egress').addEventListener('change',egressDomUpdate);
   egressDomUpdate();
@@ -1128,6 +1149,9 @@ function renderCreator(){
     };
     if(payload.egress==='allowlist'){
       payload.egress_domains=($('cw-eg-dom').value||'').split(/[\s,]+/).filter(Boolean);
+    }
+    if(payload.egress==='allow'||payload.egress==='allowlist'){
+      payload.egress_track=$('cw-eg-track').checked;
     }
     if($('cw-usd').value!==''){ payload.budget_usd=parseFloat($('cw-usd').value)||0; }
     if($('cw-tok').value!==''){ payload.budget_tokens=parseInt($('cw-tok').value,10)||0; }
@@ -1382,6 +1406,155 @@ function renderBurnTab(sb){
   }).catch(function(){ burnRetry(host, function(){ renderBurnTab(sb); }); });
 }
 
+/* ---------- dns tab ---------- */
+/* What a container looked up (recorded by the DNS fence while tracking is
+   on) + allowlist toggles to open forgotten domains after the fact. Polls
+   every 5 s while visible; the table body is patched in place so the
+   filter input keeps focus. */
+var dnsTimer=null, dnsBusy=false, dnsFilter='', dnsOnlyBlocked=false, dnsSB=null, dnsLast=null;
+function dnsURL(sb){ return '/api/sandboxes/container/'+encodeURIComponent(sb.name)+'/dns'; }
+function renderDnsTab(sb){
+  var host=$('dns-body');
+  if(dnsTimer){ clearInterval(dnsTimer); dnsTimer=null; }
+  if(!sb){ host.innerHTML='<div class="hint">no sandbox selected</div>'; return; }
+  if(sb.kind!=='container'){ host.innerHTML='<div class="hint">DNS tracking covers container sandboxes (egress fences are container-only).</div>'; return; }
+  if(!dnsSB || dnsSB.name!==sb.name){ host.innerHTML='<div class="hint">loading…</div>'; host.removeAttribute('data-sig'); }
+  dnsSB=sb;
+  var load=function(){
+    fetch(dnsURL(sb)).then(function(r){return r.json();}).then(function(j){
+      if(dnsSB!==sb || dnsBusy) return;
+      if(j.error){ host.innerHTML='<div class="hint">'+esc(j.error)+'</div>'; host.removeAttribute('data-sig'); return; }
+      paintDns(sb,j);
+    }).catch(function(){ if(dnsSB===sb && !host.getAttribute('data-sig')){ burnRetry(host, function(){ renderDnsTab(sb); }); } });
+  };
+  load();
+  dnsTimer=setInterval(function(){
+    if(state.view!=='sandbox'||activeTab!=='dns'||state.sel!==keyOf(sb)){ clearInterval(dnsTimer); dnsTimer=null; return; }
+    if(!dnsBusy) load();
+  },5000);
+}
+function dnsPost(sb, body){
+  dnsBusy=true;
+  Array.prototype.forEach.call(document.querySelectorAll('#dns-body input[type=checkbox], #dns-body button'),function(el){ el.disabled=true; });
+  return fetch(dnsURL(sb),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+    .then(function(r){return r.json();})
+    .then(function(j){
+      dnsBusy=false;
+      $('dns-body').removeAttribute('data-sig'); // controls re-enable via a full repaint
+      if(j.error){ toast('dns: '+j.error,'err'); renderDnsTab(sb); return; }
+      paintDns(sb,j);
+    })
+    .catch(function(){ dnsBusy=false; toast('dns: request failed','err'); $('dns-body').removeAttribute('data-sig'); renderDnsTab(sb); });
+}
+function dnsWhen(t){
+  if(!t) return '<span class="dim">-</span>';
+  var d=new Date(t); if(isNaN(d)) return esc(t);
+  var sec=Math.max(0,(Date.now()-d.getTime())/1000);
+  if(sec<60) return Math.round(sec)+'s ago';
+  if(sec<3600) return Math.round(sec/60)+'m ago';
+  if(sec<86400) return Math.round(sec/3600)+'h ago';
+  return esc(d.toISOString().replace('T',' ').slice(0,16));
+}
+function paintDns(sb,j){
+  var host=$('dns-body');
+  dnsLast=j;
+  var recorded=!!j.mode, mode=j.mode||'allow', track=!!j.track;
+  var fenceable=(mode==='allow'||mode==='allowlist');
+  var sig=mode+'|'+track+'|'+recorded;
+  if(host.getAttribute('data-sig')!==sig || !$('dns-tbl')){
+    var expl;
+    if(mode==='allowlist'){
+      expl='<b>allowlist</b> fence: only listed domains resolve, everything else is refused and dropped. Flip a toggle to allow a domain - it applies live, no restart. Entries match their subdomains too.';
+      if(!track){ expl+=' Tracking is off, so refused lookups are not recorded - turn it on to see what the sandbox is missing.'; }
+    } else if(mode==='allow'){
+      expl=track
+        ? '<b>allow</b> + tracking: outbound is open, every lookup passes and lands here. The toggles collect an allowlist; <i>Lock down</i> switches this sandbox to the allowlist preset with exactly those domains.'
+        : '<b>allow</b>: outbound is open and lookups are not recorded. Turn tracking on to see which domains this sandbox (and its agent) reaches.';
+      if(!recorded){ expl+=' <span class="dim">(no preset recorded for this sandbox - treated as the docker default)</span>'; }
+    } else {
+      expl='This sandbox runs the <b>'+esc(mode)+'</b> preset - DNS tracking needs <span class="mono">allow</span> or <span class="mono">allowlist</span> (<span class="mono">hotbedd egress '+esc(sb.name)+' allowlist --track</span>).';
+    }
+    var presetBtn='';
+    if(mode==='allow' && track){ presetBtn='<button class="tool" id="dns-lock" title="switch to the allowlist preset using the toggled domains">&#128274; Lock down to allowlist</button>'; }
+    if(mode==='allowlist'){ presetBtn='<button class="tool" id="dns-open" title="switch back to the allow preset (tracking stays as is)">Open egress (allow)</button>'; }
+    host.innerHTML=
+      '<div class="hint">'+expl+'</div>'+
+      '<div class="burnbar">'+
+        '<div class="bstat"><div class="v" id="dns-n-dom">0</div><div class="k">domains seen</div></div>'+
+        '<div class="bstat"><div class="v" id="dns-n-q">0</div><div class="k">lookups</div></div>'+
+        '<div class="bstat" id="dns-blk-card"><div class="v" id="dns-n-blk">0</div><div class="k">'+(mode==='allowlist'?'blocked domains':'not on the list')+'</div></div>'+
+        '<div class="bstat"><div class="v" id="dns-n-list">0</div><div class="k">allowlist entries</div></div>'+
+      '</div>'+
+      '<div class="dnstools">'+
+        '<label title="record every DNS lookup of this sandbox"><span class="ios-toggle"><input type="checkbox" id="dns-track"'+(track?' checked':'')+(fenceable?'':' disabled')+'><span class="track"></span><span class="knob"></span></span>record lookups</label>'+
+        '<label><span class="ios-toggle"><input type="checkbox" id="dns-onlyblk"'+(dnsOnlyBlocked?' checked':'')+'><span class="track"></span><span class="knob"></span></span>only '+(mode==='allowlist'?'blocked':'unlisted')+'</label>'+
+        '<input id="dns-filter" type="search" placeholder="filter domains" autocomplete="off" spellcheck="false">'+
+        '<span class="grow"></span>'+presetBtn+
+        '<button class="tool" id="dns-clear" title="forget the recorded lookups (the allowlist stays)">&#128465; clear record</button>'+
+      '</div>'+
+      '<div id="dns-tbl"></div>';
+    host.setAttribute('data-sig',sig);
+    $('dns-filter').value=dnsFilter;
+    $('dns-filter').addEventListener('input',function(){ dnsFilter=this.value.trim().toLowerCase(); if(dnsLast) dnsTable(sb,dnsLast); });
+    $('dns-onlyblk').addEventListener('change',function(){ dnsOnlyBlocked=this.checked; if(dnsLast) dnsTable(sb,dnsLast); });
+    $('dns-track').addEventListener('change',function(){ dnsPost(sb,{action:'track',on:this.checked}); });
+    $('dns-clear').addEventListener('click',function(){
+      askConfirm({title:'Clear DNS record of '+sb.name+'?', body:'Drops every recorded lookup. The allowlist and the fence stay as they are.', confirmLabel:'Clear', danger:true},
+        function(ok){ if(ok) dnsPost(sb,{action:'clear'}); });
+    });
+    if($('dns-lock')) $('dns-lock').addEventListener('click',function(){
+      var n=(dnsLast&&dnsLast.allowlist||[]).length;
+      askConfirm({title:'Lock '+sb.name+' down to its allowlist?',
+        body:'From now on only the <b>'+n+'</b> listed domain(s) (and the hotbed proxy) stay reachable; every other lookup is refused and dropped. Tracking stays on, so forgotten domains show up here to allow.',
+        confirmLabel:'Lock down'}, function(ok){ if(ok) dnsPost(sb,{action:'preset',preset:'allowlist'}); });
+    });
+    if($('dns-open')) $('dns-open').addEventListener('click',function(){
+      askConfirm({title:'Open egress for '+sb.name+'?', body:'Removes the fence: the sandbox may reach any address again. The allowlist is kept for a later lock-down.', confirmLabel:'Open egress', danger:true},
+        function(ok){ if(ok) dnsPost(sb,{action:'preset',preset:'allow'}); });
+    });
+    $('dns-tbl').addEventListener('change',function(ev){
+      var t=ev.target; if(!t || !t.getAttribute('data-i') || !dnsLast) return;
+      var r=(dnsLast.domains||[])[parseInt(t.getAttribute('data-i'),10)]; if(!r) return;
+      dnsPost(sb,{action:t.checked?'allow':'deny',domain:r.domain});
+    });
+  }
+  dnsTable(sb,j);
+}
+function dnsTable(sb,j){
+  var mode=j.mode||'allow', fenceable=(mode==='allow'||mode==='allowlist');
+  var rows=j.domains||[], q=0, blk=0;
+  rows.forEach(function(r){ q+=r.count||0; if(!r.allowed && r.count) blk++; });
+  $('dns-n-dom').textContent=rows.filter(function(r){return r.count;}).length;
+  $('dns-n-q').textContent=q;
+  $('dns-n-blk').textContent=blk;
+  $('dns-blk-card').classList.toggle('warn', mode==='allowlist' && blk>0);
+  $('dns-n-list').textContent=(j.allowlist||[]).length;
+  var html='<table class="tbl"><thead><tr><th>allow</th><th>domain</th><th>status</th><th>lookups</th><th>refused</th><th>last seen</th><th>first seen</th></tr></thead><tbody>';
+  var shown=0;
+  rows.forEach(function(r,i){
+    if(dnsFilter && r.domain.indexOf(dnsFilter)<0) return;
+    if(dnsOnlyBlocked && r.allowed) return;
+    shown++;
+    var via=(r.allowed && !r.listed)? r.covered_by : '';
+    var dis=(!fenceable || dnsBusy || via)?' disabled':'';
+    var tip=via? ' title="allowed via the entry '+esc(via)+'"' : '';
+    var st;
+    if(r.allowed){ st='<span class="dnsst ok">allowed</span>'; }
+    else if(mode==='allowlist'){ st='<span class="dnsst bad">blocked</span>'; }
+    else { st='<span class="dnsst">open</span>'; }
+    html+='<tr><td class="tg"><span class="ios-toggle"'+tip+'><input type="checkbox" data-i="'+i+'"'+(r.allowed?' checked':'')+dis+'><span class="track"></span><span class="knob"></span></span></td>'+
+      '<td>'+esc(r.domain)+(via?'<span class="via">via '+esc(via)+'</span>':'')+'</td><td>'+st+'</td>'+
+      '<td>'+(r.count||0)+'</td><td>'+(r.blocked||0)+'</td><td>'+dnsWhen(r.last)+'</td><td>'+dnsWhen(r.first)+'</td></tr>';
+  });
+  html+='</tbody></table>';
+  if(!rows.length){
+    html='<div class="hint">'+(j.track? 'No lookups recorded yet - they appear here within a few seconds of the sandbox resolving a name.' : 'Nothing recorded - tracking is off.')+'</div>';
+  } else if(!shown){
+    html+='<div class="hint">no rows match the filter</div>';
+  }
+  $('dns-tbl').innerHTML=html;
+}
+
 /* ---------- help & CLI reference ---------- */
 function cliTable(rows){
   return '<table class="tbl"><tbody>'+rows.map(function(r){
@@ -1396,7 +1569,7 @@ function renderHelp(){
     '<div style="font-size:.82rem;color:var(--dim);line-height:1.55;max-width:70ch">'+
     '<p><b>hbd</b> makes a disposable Docker container per project dir - your project is bind-mounted at <span class="mono">/workspace</span>, the only host path the agent can touch. <b>hotbedvm</b> is the VM escape hatch (libvirt, or docker-in-docker "hotbedvmd"): snapshots, ssh, full disk. <b>hotbedd</b> is this daemon and dashboard: OpenCode config, the proxy (burn ledger), wallets, egress fences, kits.</p>'+
     '<p>Provider API keys stay on the host in hotbedd only - sandboxes get per-sandbox minted proxy keys, the UI shows them masked everywhere.</p>'+
-    '<p><b>Egress fences</b>: <span class="mono">none</span> keeps only loopback+established (everything else drops, DNS included). <span class="mono">proxy-only</span> additionally keeps private ranges and DNS open so the host-side proxy works while public addresses drop. <span class="mono">allowlist</span> routes all DNS through the fence and only lets the sandbox reach domains from its configured list.</p>'+
+    '<p><b>Egress fences</b>: <span class="mono">none</span> keeps only loopback+established (everything else drops, DNS included). <span class="mono">proxy-only</span> additionally keeps private ranges and DNS open so the host-side proxy works while public addresses drop. <span class="mono">allowlist</span> routes all DNS through the fence and only lets the sandbox reach domains from its configured list. With <b>DNS tracking</b> (allow / allowlist) every lookup shows up in the sandbox&rsquo;s DNS tab, where a toggle per domain allows it after the fact.</p>'+
     '</div>'+
     hsec('LLM disclosure')+
     '<div style="font-size:.82rem;color:var(--dim);line-height:1.55;max-width:70ch">'+
@@ -1540,6 +1713,12 @@ function select(sb){
   // machines with the burn pane open must swap the data, not just the name
   if(activeTab==='burn'){ renderBurnTab(sb); }
   if(activeTab==='logs'){ openLogs(sb); }
+  // DNS tracking rides the container egress fence - VMs have no DNS tab
+  $('tabbtn-dns').hidden=(sb.kind!=='container');
+  if(activeTab==='dns'){
+    if(sb.kind==='container'){ renderDnsTab(sb); }
+    else { document.querySelector('.tab[data-tab="overview"]').click(); }
+  }
   saveView();
 }
 function renderOverview(sb){
@@ -1768,9 +1947,10 @@ function initTabs(){
       activeTab=t.getAttribute('data-tab');
       saveView();
       Array.prototype.forEach.call(document.querySelectorAll('.tab'),function(x){x.classList.toggle('active',x===t);});
-      ['overview','logs','conn','burn'].forEach(function(id){ $('tab-'+id).hidden=(id!==activeTab); });
+      ['overview','logs','conn','burn','dns'].forEach(function(id){ $('tab-'+id).hidden=(id!==activeTab); });
       if(activeTab==='logs' && state.sel){ var sb=currentSB(); if(sb) openLogs(sb); }
       if(activeTab==='burn'){ var sb2=currentSB(); renderBurnTab(sb2); }
+      if(activeTab==='dns'){ renderDnsTab(currentSB()); }
       if(activeTab!=='logs'){ closeLogs(); }
     });
   });

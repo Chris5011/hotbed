@@ -220,10 +220,10 @@ func ApplyEgressFence(name, preset string, domains []string) (int, error) {
 		if gw == "" {
 			return 0, fmt.Errorf("allowlist fence %s: no default docker bridge gateway", name)
 		}
+		// an empty list is legal: only the fence and the hosted proxy stay
+		// reachable — the "start closed, allow what the DNS tab shows"
+		// workflow begins exactly here
 		norm := normalizeDomains(domains)
-		if len(norm) == 0 {
-			return 0, fmt.Errorf("allowlist fence %s: no domains configured", name)
-		}
 		var ips []string
 		resolved := map[string]bool{}
 		for _, d := range norm {
@@ -238,6 +238,7 @@ func ApplyEgressFence(name, preset string, domains []string) (int, error) {
 			}
 		}
 		script := egressAllowlistScript(ips)
+		forgetApplied(name) // the chain is rebuilt: keeper must re-open fresh answers
 		if out, err := egressRun(name, script); err != nil {
 			return len(ips), fmt.Errorf("egress %s → allowlist: %w: %s", name, err, strings.TrimSpace(out))
 		}
@@ -252,6 +253,48 @@ func ApplyEgressFence(name, preset string, domains []string) (int, error) {
 		return len(ips), nil
 	}
 	return 0, applyEgress(name, preset)
+}
+
+// ApplyDNSTrack puts an unfenced sandbox's DNS through the fence so its
+// lookups can be recorded: no filter chain (outbound stays the Docker
+// default), only the nat DNAT + resolver rewrite. The fence passes every
+// lookup of a sandbox whose recorded preset is `allow`.
+func ApplyDNSTrack(name string) error {
+	if BridgeGateway() == "" {
+		return fmt.Errorf("dns tracking %s: no default docker bridge gateway", name)
+	}
+	script := egressBinCheck + fmt.Sprintf(
+		"iptables -D OUTPUT -j %s 2>/dev/null; iptables -F %s 2>/dev/null; iptables -X %s 2>/dev/null; ",
+		egressChain, egressChain, egressChain) + egressDNATScript()
+	if out, err := egressRun(name, script); err != nil {
+		return fmt.Errorf("dns tracking %s: %w: %s", name, err, strings.TrimSpace(out))
+	}
+	if err := egressResolverExec(name, egressResolverInstall()); err != nil {
+		fmt.Fprintf(os.Stderr, "\033[33;1mhotbedd:\033[0m dns tracking %s: resolver rewrite skipped: %v\n", name, err)
+	}
+	keeperNudge() // attribution first: unknown sources are refused
+	audit.Record("egress.set", name, "allow + dns tracking")
+	return nil
+}
+
+// EgressInstalled reports whether the sandbox netns currently carries the
+// rules of a preset (allowlist: filter + nat side; tracked allow: nat side;
+// proxy-only/none: filter chain; allow: nothing to check → true).
+func EgressInstalled(name, preset string, track bool) (bool, error) {
+	out, err := ShowEgressContainer(name)
+	if err != nil {
+		return false, err
+	}
+	hasFilter := strings.Contains(out, "-N "+egressChain)
+	hasNat := strings.Contains(out, "-N "+egressNatChain)
+	switch preset {
+	case "allowlist":
+		return hasFilter && hasNat, nil
+	case "allow":
+		return !track || hasNat, nil
+	default:
+		return hasFilter, nil
+	}
 }
 
 // lookupIP resolves d best-effort (short timeout; unresolved domains are

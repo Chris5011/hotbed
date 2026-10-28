@@ -23,6 +23,7 @@ import (
 	"hotbed/internal/cfgsync"
 	"hotbed/internal/config"
 	"hotbed/internal/dnsfence"
+	"hotbed/internal/egressctl"
 	"hotbed/internal/engine"
 	"hotbed/internal/env"
 	"hotbed/internal/keys"
@@ -154,6 +155,10 @@ func serve(args []string) error {
 	// egress keeper: installs per-IP ACCEPTs for fresh allowlist-fence DNS
 	// answers and refreshes the fence's ip→sandbox attribution snapshot.
 	engine.StartEgressKeeper()
+
+	// egress re-applier: stop/start (sweeper included) wipes the netns
+	// rules of fenced and DNS-tracked sandboxes — put them back.
+	egressctl.StartReapplier()
 
 	// dns fence listener (allowlist egress). On Docker Desktop the real
 	// fence runs inside the engine's relay container — a host listener

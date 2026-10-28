@@ -20,6 +20,7 @@ import (
 	"hotbed/internal/audit"
 	"hotbed/internal/cfgsync"
 	"hotbed/internal/config"
+	"hotbed/internal/egressctl"
 	"hotbed/internal/engine"
 	"hotbed/internal/env"
 	"hotbed/internal/keys"
@@ -210,6 +211,8 @@ func (s *Server) sandboxRoute(w http.ResponseWriter, r *http.Request) {
 		s.connectRoute(w, r, sb)
 	case "sync":
 		s.syncRoute(w, r, sb)
+	case "dns":
+		s.dnsRoute(w, r, sb)
 	case "start":
 		s.actStart(w, sb)
 	case "stop":
@@ -520,6 +523,11 @@ func (s *Server) actionDelete(w http.ResponseWriter, r *http.Request) {
 		notes = append(notes, "sync target removal failed: "+err.Error())
 	}
 	attach.KillTunnel(sb.Name)
+	if sb.Kind == sandbox.KindContainer {
+		if err := egressctl.Forget(s.Cfg, sb.Name); err != nil {
+			notes = append(notes, "egress records removal failed: "+err.Error())
+		}
+	}
 
 	var err error
 	switch sb.Kind {
@@ -896,6 +904,7 @@ type createReq struct {
 	Env           map[string]string `json:"env"`
 	Egress        string            `json:"egress"`
 	EgressDomains []string          `json:"egress_domains,omitempty"` // allowlist preset only
+	EgressTrack   bool              `json:"egress_track,omitempty"`   // record DNS lookups (allow/allowlist)
 	BudgetUSD     *float64          `json:"budget_usd"`
 	BudgetTokens  *int              `json:"budget_tokens"`
 	Provider      string            `json:"provider"`
@@ -981,24 +990,18 @@ func (s *Server) createRoute(w http.ResponseWriter, r *http.Request) {
 	if err := s.Cfg.SetWallets(cn, in.BudgetUSD, in.BudgetTokens); err != nil {
 		warn = "wallets: " + err.Error()
 	}
-	if in.Egress != "" && in.Egress != "allow" {
-		var e error
+	if (in.Egress != "" && in.Egress != "allow") || in.EgressTrack {
+		if in.Egress == "" {
+			in.Egress = "allow"
+		}
 		if in.Egress == "allowlist" {
 			// the wizard may bring fresh domains — persist them (they
-			// double as the fence's re-apply source and the fence edits)
-			if len(in.EgressDomains) > 0 {
-				s.Cfg.SetEgressAllowlist(cn, in.EgressDomains)
-			}
-			domains := s.Cfg.EgressAllowlistFor(cn)
-			if len(domains) == 0 {
-				e = fmt.Errorf("allowlist: no domains given")
-			} else {
-				_, e = engine.ApplyEgressFence(cn, in.Egress, domains)
-			}
-		} else {
-			e = engine.ApplyEgressContainer(cn, in.Egress)
+			// double as the fence's re-apply source and the DNS tab's
+			// toggles). An empty list is fine: only the proxy stays
+			// reachable until domains get allowed from the DNS tab.
+			s.Cfg.SetEgressAllowlist(cn, in.EgressDomains)
 		}
-		if e != nil {
+		if _, e := egressctl.Apply(s.Cfg, cn, in.Egress, in.EgressTrack); e != nil {
 			if warn != "" {
 				warn += "; "
 			}

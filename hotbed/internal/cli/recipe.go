@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 
+	"hotbed/internal/config"
+	"hotbed/internal/egressctl"
 	"hotbed/internal/engine"
 	"hotbed/internal/env"
 	"hotbed/internal/recipe"
@@ -226,21 +228,22 @@ func recipeUp(args []string) error {
 	if r.Egress != "" {
 		var e error
 		var done string
-		switch {
-		case r.Egress == "allowlist":
-			if list := configAllowlist(cn); len(list) == 0 {
-				e = fmt.Errorf("no domains in config egress_allowlist for %s", cn)
-			} else {
-				var n int
-				if n, e = engine.ApplyEgressFence(cn, r.Egress, list); e == nil {
-					done = fmt.Sprintf("allowlist (%d domains, %d ips)", len(list), n)
-				}
+		cfg, err := config.Open()
+		if err != nil {
+			e = err
+		} else {
+			if r.Egress == "allowlist" && r.EgressAllow != nil {
+				cfg.SetEgressAllowlist(cn, r.EgressAllow)
 			}
-		default:
-			if e = engine.ApplyEgressContainer(cn, r.Egress); e == nil && r.Egress == "allow" {
-				done = "allow (reset)"
-			} else if e == nil {
+			var n int
+			if n, e = egressctl.Apply(cfg, cn, r.Egress, r.DNSTrack); e == nil {
 				done = r.Egress
+				if r.Egress == "allowlist" {
+					done = fmt.Sprintf("allowlist (%d domains, %d ips)", len(cfg.EgressAllowlistFor(cn)), n)
+				}
+				if cfg.EgressTrack[cn] {
+					done += " + dns tracking"
+				}
 			}
 		}
 		if e != nil {

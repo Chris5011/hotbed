@@ -9,7 +9,6 @@ package cli
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -18,6 +17,8 @@ import (
 
 	"hotbed/internal/audit"
 	"hotbed/internal/config"
+	"hotbed/internal/dnsfence"
+	"hotbed/internal/egressctl"
 	"hotbed/internal/engine"
 )
 
@@ -333,81 +334,157 @@ func mountRm(args []string) error {
 // Outbound fences via iptables inside the sandbox netns. No confirm gate:
 // presets are instantly reversible (`allow`) and lose no data.
 
+const egressUsage = `usage:
+  hotbedd egress NAME                                  show preset, tracking, allowlist, rules
+  hotbedd egress NAME allow|proxy-only|none [--track|--no-track]
+  hotbedd egress NAME allowlist [DOMAINS...] [--track|--no-track]
+                                    (no domains = keep the configured list, may be empty)
+  hotbedd egress NAME track on|off                     record DNS lookups (allow / allowlist)
+  hotbedd egress NAME seen                             domains the sandbox looked up
+  hotbedd egress NAME add|rm DOMAIN...                 edit the allowlist (live on a fenced sandbox)`
+
 func egressCmd(args []string) error {
 	name := firstArg(args)
-	if name == "" {
-		return fmt.Errorf("usage: hotbedd egress NAME [allow|proxy-only|none|allowlist [ Domains...]]   (omit preset to show)")
+	if name == "" || strings.HasPrefix(name, "-") {
+		return fmt.Errorf("%s", egressUsage)
 	}
-	preset := firstArg(args[1:])
-	if preset == "" {
-		s, err := engine.ShowEgressContainer(name)
-		if err != nil {
-			return err
+	var rest []string
+	trackFlag := 0 // 0 keep, 1 on, -1 off
+	for _, a := range args[1:] {
+		switch a {
+		case "--track":
+			trackFlag = 1
+		case "--no-track":
+			trackFlag = -1
+		default:
+			rest = append(rest, a)
 		}
-		if list := configAllowlist(name); len(list) > 0 {
-			fmt.Printf("%s: configured allowlist: %s\n", name, strings.Join(list, ", "))
-		}
-		if s == "" {
-			fmt.Printf("%s: no egress rules (allow all)\n", name)
-			return nil
-		}
-		fmt.Printf("%s:\n  %s\n", name, strings.ReplaceAll(s, "\n", "\n  "))
-		return nil
 	}
-	if preset == "allowlist" {
-		domains := args[2:]
-		if len(domains) == 0 {
-			// no domains = show the configured list and current fence
-			return egressCmd([]string{name})
-		}
-		norm := configSetAllowlist(name, domains)
-		n, err := engine.ApplyEgressFence(name, preset, norm)
-		if err != nil {
-			return err
-		}
-		ok("egress %s → allowlist: %s (%d domain(s), %d ip(s) pre-resolved; DNS goes through the fence on gw, everything else drops — re-apply after recreation)\n",
-			name, strings.Join(norm, ", "), len(norm), n)
-		return nil
-	}
-	if !engine.KnownEgressPreset(preset) {
-		return fmt.Errorf("unknown egress preset %q (allow|proxy-only|none|allowlist)", preset)
-	}
-	if err := engine.ApplyEgressContainer(name, preset); err != nil {
+	cfg, err := config.Open()
+	if err != nil {
 		return err
 	}
+	verb := firstArg(rest)
+	switch verb {
+	case "":
+		return egressShow(cfg, name)
+	case "seen":
+		return egressSeen(cfg, name)
+	case "track":
+		v := firstArg(rest[1:])
+		if v != "on" && v != "off" {
+			return fmt.Errorf("usage: hotbedd egress NAME track on|off")
+		}
+		if err := egressctl.SetTrack(cfg, name, v == "on"); err != nil {
+			return err
+		}
+		ok("egress %s: dns tracking %s\n", name, v)
+		return nil
+	case "add", "rm":
+		if len(rest) < 2 {
+			return fmt.Errorf("usage: hotbedd egress NAME %s DOMAIN...", verb)
+		}
+		for _, d := range rest[1:] {
+			var e error
+			if verb == "add" {
+				e = egressctl.AllowDomain(cfg, name, d)
+			} else {
+				e = egressctl.DenyDomain(cfg, name, d)
+			}
+			if e != nil {
+				return e
+			}
+		}
+		ok("egress %s allowlist: %s\n", name, strings.Join(cfg.EgressAllowlistFor(name), ", "))
+		return nil
+	}
+	preset := verb
+	if !engine.KnownEgressPreset(preset) {
+		return fmt.Errorf("unknown egress preset %q\n%s", preset, egressUsage)
+	}
+	track := cfg.EgressTrack[name]
+	if trackFlag != 0 {
+		track = trackFlag > 0
+	}
+	if preset == "allowlist" && len(rest) > 1 {
+		cfg.SetEgressAllowlist(name, rest[1:])
+	}
+	n, err := egressctl.Apply(cfg, name, preset, track)
+	if err != nil {
+		return err
+	}
+	tr := ""
+	if cfg.EgressTrack[name] {
+		tr = "; dns tracking on"
+	}
 	switch preset {
+	case "allowlist":
+		list := cfg.EgressAllowlistFor(name)
+		ok("egress %s → allowlist: %s (%d domain(s), %d ip(s) pre-resolved; DNS goes through the fence, everything else drops%s)\n",
+			name, strings.Join(list, ", "), len(list), n, tr)
 	case "allow":
-		ok("egress %s → allow (rules removed, docker default; resolver reset to docker internal)\n", name)
+		if track {
+			ok("egress %s → allow + dns tracking (outbound open; lookups recorded via the fence)\n", name)
+		} else {
+			ok("egress %s → allow (rules removed, docker default; resolver reset to docker internal)\n", name)
+		}
 	default:
-		ok("egress %s → %s (loopback+established kept; rules live in the sandbox netns — re-apply after recreation)\n", name, preset)
+		ok("egress %s → %s (loopback+established kept; re-applied by the daemon after restarts)\n", name, preset)
 	}
 	return nil
 }
 
-// configAllowlist returns the configured domains for a sandbox (for show).
-func configAllowlist(name string) []string {
-	p := config.Path()
-	b, err := os.ReadFile(p)
+func egressShow(cfg *config.Config, name string) error {
+	mode := cfg.EgressMode[name]
+	if mode == "" {
+		mode = "(not recorded - applied before v0.7 or never)"
+	}
+	fmt.Printf("%s: preset %s · dns tracking %v\n", name, mode, cfg.EgressTrack[name])
+	if list := cfg.EgressAllowlistFor(name); len(list) > 0 {
+		fmt.Printf("%s: allowlist: %s\n", name, strings.Join(list, ", "))
+	}
+	s, err := engine.ShowEgressContainer(name)
 	if err != nil {
+		return err
+	}
+	if s == "" {
+		fmt.Printf("%s: no egress rules in the netns (allow all)\n", name)
 		return nil
 	}
-	var c struct {
-		Allowlist map[string][]string `json:"egress_allowlist"`
-	}
-	if json.Unmarshal(b, &c) != nil {
-		return nil
-	}
-	return c.Allowlist[name]
+	fmt.Printf("%s:\n  %s\n", name, strings.ReplaceAll(s, "\n", "\n  "))
+	return nil
 }
 
-// configSetAllowlist persists the sandbox's allowlist into config.json.
-func configSetAllowlist(name string, domains []string) []string {
-	cfg, err := config.Open()
-	if err != nil {
-		// config unreadable: apply the fence with just this call's domains
-		return domains
+func egressSeen(cfg *config.Config, name string) error {
+	seen := dnsfence.ReadSeen(name)
+	if len(seen.Domains) == 0 {
+		if !cfg.EgressTrack[name] {
+			fmt.Printf("%s: dns tracking is off - `hotbedd egress %s track on`\n", name, name)
+		} else {
+			fmt.Printf("%s: no lookups recorded yet\n", name)
+		}
+		return nil
 	}
-	return cfg.SetEgressAllowlist(name, domains)
+	names := make([]string, 0, len(seen.Domains))
+	for d := range seen.Domains {
+		names = append(names, d)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		return seen.Domains[names[i]].Last.After(seen.Domains[names[j]].Last)
+	})
+	fmt.Printf("%-48s %-9s %7s %7s  %s\n", "DOMAIN", "STATUS", "LOOKUPS", "BLOCKED", "LAST (UTC)")
+	for _, d := range names {
+		e := seen.Domains[d]
+		st := "blocked"
+		if cfg.EgressMode[name] == "allow" {
+			st = "open"
+		}
+		if by := cfg.AllowlistCovers(name, d); by != "" {
+			st = "allowed"
+		}
+		fmt.Printf("%-48s %-9s %7d %7d  %s\n", d, st, e.Count, e.Blocked, e.Last.Format("2006-01-02 15:04:05"))
+	}
+	return nil
 }
 
 // ----------------------------------------------------------------- audit ---

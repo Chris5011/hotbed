@@ -18,7 +18,10 @@ package engine
 // minted later by the main daemon are picked up live.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -168,6 +171,36 @@ func legacyRelayCleanup() {
 	// honest waitRelay error below
 }
 
+// relayStamp identifies the daemon build a relay must run: version plus a
+// short hash of the binary. The relay bind-mounts the daemon executable by
+// inode, so a rebuild with an unchanged version string (every local
+// `make build`) would otherwise keep the old relay - and its old DNS fence -
+// running forever.
+func relayStamp() string {
+	stampOnce.Do(func() {
+		stamp = env.Version
+		exe, err := os.Executable()
+		if err != nil {
+			return
+		}
+		f, err := os.Open(exe)
+		if err != nil {
+			return
+		}
+		defer f.Close()
+		h := sha256.New()
+		if _, err := io.Copy(h, f); err == nil {
+			stamp += "+" + hex.EncodeToString(h.Sum(nil))[:12]
+		}
+	})
+	return stamp
+}
+
+var (
+	stampOnce sync.Once
+	stamp     string
+)
+
 // relayOwnsEnv reads the HOTBEDD_VERSION env of a relay container (empty
 // when absent — pre-0.6 relays never carried it).
 func relayOwnsVersion(name string) string {
@@ -198,11 +231,11 @@ func EnsureRelay(proxyPort string) (string, error) {
 	legacyRelayCleanup()
 	name := RelayContainer()
 	exists, running := relayRunning(name)
-	staleRelay := exists && running && relayOwns(name) && relayOwnsVersion(name) != env.Version
+	staleRelay := exists && running && relayOwns(name) && relayOwnsVersion(name) != relayStamp()
 	if staleRelay {
 		_, _ = RunTO(30*time.Second, "docker", "rm", "-f", name)
 		audit.Record("relay.refresh", name,
-			fmt.Sprintf("relay binary predates the daemon (%s → %s)", relayOwnsVersion(name), env.Version))
+			fmt.Sprintf("relay binary predates the daemon (%s → %s)", relayOwnsVersion(name), relayStamp()))
 		fmt.Printf("\033[36;1mhotbedd:\033[0m relay respawned for the new daemon build (%s)\n", name)
 		exists = false
 	}
@@ -245,7 +278,7 @@ func EnsureRelay(proxyPort string) (string, error) {
 		"-e", "HOTBEDD_CONFIG_DIR=/etc/hotbedd",
 		"-e", "HOTBEDD_DATA_DIR=/keys",
 		"-e", "HOTBEDD_STATE_DIR=/state", // usage receipts shared with the dashboard
-		"-e", "HOTBEDD_VERSION=" + env.Version, // upgrade detection: stale relays respawn
+		"-e", "HOTBEDD_VERSION=" + relayStamp(), // upgrade detection: stale relays respawn
 		"-v", env.ConfigDir() + ":/etc/hotbedd:ro",
 		"-v", env.DataDir() + ":/keys:ro",
 		"-v", env.StateDir() + ":/state",

@@ -12,7 +12,9 @@
 //	  - /tmp/cache:/cache:ro
 //	budget: 5                     # USD wallet (0 = unlimited)
 //	budget_tokens: 500000         # token wallet (0 = unlimited)
-//	egress: proxy-only            # allow | proxy-only | none | allowlist (via $ egress_allowlist)
+//	egress: proxy-only            # allow | proxy-only | none | allowlist
+//	egress_allowlist: [api.openai.com, opencode.ai]   # allowlist domains (optional)
+//	dns_track: true               # record DNS lookups (allow / allowlist only)
 //	sync: true                    # push proxy-backed opencode config after spawn
 //	provider: openwebui
 //	model: openwebui/glm-4.7
@@ -41,7 +43,9 @@ type Recipe struct {
 	Env          map[string]string
 	Budget       *float64 // nil = leave wallet untouched
 	BudgetTokens *int     // nil = leave wallet untouched
-	Egress       string   // "", "allow", "proxy-only", "none"
+	Egress       string   // "", "allow", "proxy-only", "none", "allowlist"
+	EgressAllow  []string // allowlist domains (nil = keep the config's list)
+	DNSTrack     bool     // record DNS lookups via the fence
 	Sync         bool
 	Provider     string
 	Model        string
@@ -258,6 +262,18 @@ func fromNode(root node) (*Recipe, error) {
 	for _, n := range root.listOrEmpty("mounts") {
 		r.Mounts = append(r.Mounts, n.scalar)
 	}
+	for _, n := range root.listOrEmpty("egress_allowlist") {
+		r.EgressAllow = append(r.EgressAllow, n.scalar)
+	}
+	if v, ok := root.get("dns_track"); ok && v.kind == kindScalar {
+		switch strings.ToLower(v.scalar) {
+		case "true", "yes", "1":
+			r.DNSTrack = true
+		case "false", "no", "0", "":
+		default:
+			return nil, fmt.Errorf("dns_track: boolean expected (got %q)", v.scalar)
+		}
+	}
 	if v, ok := root.get("budget"); ok && v.kind == kindScalar {
 		f, err := strconv.ParseFloat(v.scalar, 64)
 		if err != nil || f < 0 {
@@ -311,9 +327,15 @@ func (r *Recipe) Validate() error {
 		return fmt.Errorf("name %q: spaces and path characters are not allowed", r.Name)
 	}
 	switch r.Egress {
-	case "", "allow", "proxy-only", "none":
+	case "", "allow", "proxy-only", "none", "allowlist":
 	default:
 		return fmt.Errorf("egress %q: use allow | proxy-only | none | allowlist", r.Egress)
+	}
+	if r.DNSTrack && r.Egress != "allow" && r.Egress != "allowlist" {
+		return fmt.Errorf("dns_track: needs egress allow or allowlist (got %q)", r.Egress)
+	}
+	if len(r.EgressAllow) > 0 && r.Egress != "allowlist" {
+		return fmt.Errorf("egress_allowlist: only used with egress: allowlist")
 	}
 	targets := map[string]bool{}
 	for _, m := range r.Mounts {

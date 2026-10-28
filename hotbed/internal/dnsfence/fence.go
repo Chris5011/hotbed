@@ -12,6 +12,11 @@ package dnsfence
 //     iptables ACCEPT inside the sandbox netns seconds later),
 //   - anything else → synthesized REFUSED (fail closed).
 //
+// Sandboxes on the plain `allow` preset with DNS tracking enabled are
+// DNAT'ed here too, but every lookup passes (the fence only records it).
+// Tracked sandboxes of either kind get each lookup counted into
+// dns-seen/<name>.json (see seen.go) — the dashboard's DNS tab.
+//
 // It runs inside the docker engine netns — on Docker Desktop as part of the
 // proxy relay (`hotbedd proxy`), on native engines as part of `hotbedd
 // serve` — because containers cannot reach the host the other way round.
@@ -65,9 +70,16 @@ type fence struct {
 	cfgStat fileStat
 	cfg     *config.Config
 
-	seenMu sync.Mutex
-	seen   map[string]struct{} // event dedup: one log line per (sandbox, ip)
+	loggedMu sync.Mutex
+	logged   map[string]time.Time // event dedup: (sandbox, ip) -> last logged
+
+	lookups *seenLog // tracked-sandbox lookup counts
 }
+
+// eventTTL bounds the (sandbox, ip) dedup: a fence re-apply rebuilds the
+// sandbox chain from scratch, so IPs answered earlier must be re-announced
+// to the keeper eventually instead of being swallowed forever.
+const eventTTL = 5 * time.Minute
 
 // fileStat is the cheap freshness stamp for cached state reads.
 type fileStat struct {
@@ -100,7 +112,8 @@ func Run(bind, port string) error {
 	f := &fence{
 		upstream: upstream,
 		load:     config.Load,
-		seen:     map[string]struct{}{},
+		logged:   map[string]time.Time{},
+		lookups:  newSeenLog(),
 	}
 	addr := net.JoinHostPort(bind, port)
 	u, err := net.ListenPacket("udp", addr)
@@ -113,6 +126,8 @@ func Run(bind, port string) error {
 		return fmt.Errorf("dns fence tcp %s: %w", addr, err)
 	}
 	defer l.Close()
+
+	go f.lookups.loop()
 
 	errc := make(chan error, 2)
 	go func() {
@@ -161,12 +176,26 @@ func (f *fence) arbitrate(src net.Addr, raw []byte) ([]byte, string, [][]byte) {
 		return nil, "", nil
 	}
 	sb := f.sandboxOf(hostOf(src))
-	if sb == "" || !f.allowed(sb, q.domain) {
+	if sb == "" {
+		return q.refusedA(), "", nil
+	}
+	cfg := f.config()
+	open := cfg != nil && cfg.EgressMode[sb] == "allow"
+	allowed := open || f.allowed(sb, q.domain)
+	if cfg != nil && cfg.EgressTrack[sb] {
+		f.lookups.record(sb, q.domain, !allowed)
+	}
+	if !allowed {
 		return q.refusedA(), "", nil
 	}
 	resp, err := f.exchange(raw)
 	if err != nil {
 		return q.noRecords(), sb, nil // upstream hiccup: empty NOERROR, client retries
+	}
+	if open {
+		// unfenced sandbox: pass the answer through untouched (AAAA
+		// included) and announce no IPs — there is no chain to open
+		return resp, "", nil
 	}
 	ips := extractIPv4(resp)
 	if out := q.withA(ips); out != nil {
@@ -353,23 +382,31 @@ func (f *fence) config() *config.Config {
 }
 
 // log appends resolved-domain hits to the shared event file, deduped per
-// (sandbox, ip) for this fence process's lifetime — the daemon's keeper
+// (sandbox, ip) within eventTTL — the daemon's keeper
 // installs new iptables ACCEPTs only for these lines.
 func (f *fence) log(sandbox string, ips [][]byte) {
 	if sandbox == "" || len(ips) == 0 {
 		return
 	}
-	f.seenMu.Lock()
-	defer f.seenMu.Unlock()
+	f.loggedMu.Lock()
+	defer f.loggedMu.Unlock()
+	now := time.Now()
 	var fresh []event
 	for _, b := range ips {
 		ip := net.IP(b).String()
 		key := sandbox + "|" + ip
-		if _, dup := f.seen[key]; dup {
+		if at, dup := f.logged[key]; dup && now.Sub(at) < eventTTL {
 			continue
 		}
-		f.seen[key] = struct{}{}
+		f.logged[key] = now
 		fresh = append(fresh, event{Sandbox: sandbox, IP: ip})
+	}
+	if len(f.logged) > 50000 { // long-lived fence: drop expired keys
+		for k, at := range f.logged {
+			if now.Sub(at) >= eventTTL {
+				delete(f.logged, k)
+			}
+		}
 	}
 	if len(fresh) == 0 {
 		return

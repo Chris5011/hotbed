@@ -31,7 +31,13 @@ func proxyCmd(_ []string) error {
 		return fmt.Errorf("config: %w — run `hotbedd config init`", err)
 	}
 	if len(cfg.Opencode.Providers) == 0 {
-		return fmt.Errorf("no providers configured — run `hotbedd config init` first")
+		// the relay also hosts the DNS fence: fenced/tracked sandboxes
+		// need it even on a box without any LLM provider configured
+		if env.DNSFenceDisabled() {
+			return fmt.Errorf("no providers configured — run `hotbedd config init` first")
+		}
+		fmt.Printf("\033[36;1mhotbedd proxy:\033[0m no providers configured — DNS fence only (port %s)\n", cfg.Proxy.DNSPort)
+		return dnsfence.Run("0.0.0.0", cfg.Proxy.DNSPort)
 	}
 	ks, err := keys.Open()
 	if err != nil {

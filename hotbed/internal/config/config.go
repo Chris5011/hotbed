@@ -57,6 +57,14 @@ type Config struct {
 	// fence may reach (everything else drops). Installed via
 	// `hotbedd egress NAME allowlist DOMAINS...` (list only = show).
 	EgressAllowlist map[string][]string `json:"egress_allowlist,omitempty"`
+	// EgressMode records the egress preset last applied per sandbox
+	// (allow|proxy-only|none|allowlist). The DNS fence reads it to tell a
+	// tracked-but-open sandbox (allow: pass every lookup, just record it)
+	// from a fenced one, and the daemon re-applies it after restarts.
+	EgressMode map[string]string `json:"egress_mode,omitempty"`
+	// EgressTrack marks sandboxes whose DNS lookups the fence records
+	// (state dir dns-seen/<name>.json) — allow and allowlist presets only.
+	EgressTrack map[string]bool `json:"egress_track,omitempty"`
 }
 
 // Sweeper auto-stops idle kit sandboxes (containers with the dev.hotbed label,
@@ -106,6 +114,62 @@ func (c *Config) SetEgressAllowlist(name string, domains []string) []string {
 // EgressAllowlistFor returns the configured domains of a sandbox.
 func (c *Config) EgressAllowlistFor(name string) []string {
 	return c.EgressAllowlist[name]
+}
+
+// SetEgressState persists the applied preset and the DNS tracking flag of a
+// sandbox. Tracking only exists for allow/allowlist (the presets whose DNS
+// can ride the fence); it is forced off for the others.
+func (c *Config) SetEgressState(name, preset string, track bool) error {
+	if preset != "allow" && preset != "allowlist" {
+		track = false
+	}
+	if c.EgressMode == nil {
+		c.EgressMode = map[string]string{}
+	}
+	if c.EgressTrack == nil {
+		c.EgressTrack = map[string]bool{}
+	}
+	c.EgressMode[name] = preset
+	if track {
+		c.EgressTrack[name] = true
+	} else {
+		delete(c.EgressTrack, name)
+	}
+	return c.Save()
+}
+
+// ForgetEgress drops every egress record of a sandbox (on delete).
+func (c *Config) ForgetEgress(name string) error {
+	_, a := c.EgressAllowlist[name]
+	_, m := c.EgressMode[name]
+	_, t := c.EgressTrack[name]
+	if !a && !m && !t {
+		return nil
+	}
+	delete(c.EgressAllowlist, name)
+	delete(c.EgressMode, name)
+	delete(c.EgressTrack, name)
+	return c.Save()
+}
+
+// AllowlistCovers reports which allowlist entry (suffix match) admits
+// domain for the sandbox; "" = not covered. Same rule as the DNS fence.
+func (c *Config) AllowlistCovers(name, domain string) string {
+	domain = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(domain)), ".")
+	if domain == "" {
+		return ""
+	}
+	for _, e := range c.EgressAllowlist[name] {
+		e = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(e), "."))
+		e = strings.TrimPrefix(e, "*.")
+		if e == "" {
+			continue
+		}
+		if e == domain || strings.HasSuffix(domain, "."+e) {
+			return e
+		}
+	}
+	return ""
 }
 
 // HostOpenCodePath is the host-side opencode config (import source).

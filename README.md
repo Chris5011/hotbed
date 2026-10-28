@@ -156,6 +156,22 @@ docker engine with nested KVM working behind it.
 
 ## Install: step by step
 
+### Quick install (one command)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Chris5011/hotbed/main/quick-install.sh | bash
+# fresh Debian/Ubuntu box, daemon as a systemd user service:
+curl -fsSL https://raw.githubusercontent.com/Chris5011/hotbed/main/quick-install.sh | bash -s -- --deps --service
+```
+
+It clones the kit to `~/hotbed` (`--dir` to change), installs the
+checksum-verified release binary for your arch (source build for branches
+or with `--build`), runs `install.sh --yes` and — with `--service` —
+installs and starts `hotbedd.service` (systemd user unit). Re-run it to
+update. Other flags: `--ref vX.Y.Z|branch`, `--vm-image` (fetch the VM
+master image too). While the repo is private, export `GITHUB_TOKEN` or have
+`gh` logged in. The rest of this section is what happens underneath.
+
 `install.sh` does the work; the steps below tell you exactly what it does
 and what *you* need in place first. It is safe to re-run (idempotent) and
 never touches existing sandboxes.
@@ -993,9 +1009,35 @@ the sandbox's netns (domains are pre-resolved at install time, then kept
 fresh by the daemon's egress keeper); everything not on the list gets a
 synthesized REFUSED and stays dropped. Unknown sandbox sources and DNS
 bypasses fail closed. DoH/DoT workarounds (unlisted hosts on port 443)
-drop with everything else. Recreates wipe netns rules, so re-apply.
+drop with everything else. Stop/start wipes the netns rules; the daemon
+re-applies every preset it recorded (`egress_mode` in config) within ~30 s.
 Dashboard create wizard offers it, plus `hbd` recipes via
-`egress: allowlist` + `egress_allowlist` in config.
+`egress: allowlist` + `egress_allowlist` (in the recipe or in config).
+An allowlist may start empty — only the hotbed proxy is reachable then.
+
+**DNS tracking** (`allow` and `allowlist` presets): the fence records every
+lookup of a tracked sandbox into `state/dns-seen/<name>.json` — domain,
+lookups, refused count, first/last seen. With `allowlist` that shows what
+the fence blocked; with `allow` the sandbox's DNS is routed through the
+fence in pass-through mode, so you see where the agent goes while nothing
+is blocked. The sandbox's **DNS tab** in the dashboard lists the domains
+with an allow toggle each (live: the fence re-reads the list per lookup,
+removing an entry rebuilds the chain), plus *Lock down to allowlist* to
+turn an observed `allow` sandbox into a fenced one with exactly the
+toggled domains. Enable it in the create wizard (checkbox, on by
+default), with `dns_track: true` in a recipe, or:
+
+```bash
+hotbedd egress NAME allow --track        # open egress, lookups recorded
+hotbedd egress NAME seen                  # what it looked up (status, counts)
+hotbedd egress NAME add api.example.com   # allow afterwards (rm to revoke)
+hotbedd egress NAME allowlist             # lock down to the collected list
+hotbedd egress NAME track off
+```
+
+Tracking routes DNS to the fence's upstream (`HOTBEDD_DNS_UPSTREAM`,
+default `1.1.1.1:53`) instead of Docker's resolver — set it if your network
+requires its own DNS.
 
 **Audit trail** — `state/audit.jsonl` records the control plane: sandbox
 start/stop/spawn, key mint/revoke, wallet changes, mount recreates, egress
@@ -1249,7 +1291,9 @@ needs at least one *running* sandbox in the inventory for the P1 part.
 
 ```text
 bin/hbd                    container sandbox CLI (the daily driver)
-bin/hotbedvm → vm/hotbedvm.sh    VM CLI (symlinked by install-self)
+vm/hotbedvm.sh             VM CLI (install.sh puts a `hotbedvm` wrapper on PATH)
+quick-install.sh           one-command install/update (curl | bash)
+install.sh                 kit installer: PATH wrappers, prereq gate, base image
 containers/Dockerfile      5 stack images from one shared base layer
 containers/entrypoint.sh   runtime uid/sudo/ownership bootstrap
 tests/smoke.sh             container suite (all stacks; no VMs needed)
@@ -1267,6 +1311,8 @@ SECURITY.md                full security survey: fixed findings + accepted risks
   internal/cli/            serve + ps/stats/logs/attach/connect/start/stop +
                            doctor + config/usage/key/budget/sync (p2.go)
   internal/config/         global settings store + masked merge + host import
+  internal/dnsfence/       allowlist DNS fence + per-sandbox lookup tracking
+  internal/egressctl/      preset apply + config record, DNS-tab actions, re-applier
   internal/keys/           per-sandbox proxy keys + budget wallets
   internal/ledger/         usage journal, token/cost summaries, pricing
   internal/proxy/          LLM proxy: auth, budgets, usage-aware SSE pass
