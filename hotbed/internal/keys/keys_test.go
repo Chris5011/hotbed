@@ -34,3 +34,33 @@ func TestAgentKeys(t *testing.T) {
 		t.Errorf("revoke = %d, want 3", n)
 	}
 }
+
+// TestWorkspaceKeyRebind: a deleted sandbox's workspace key comes back for
+// the next sandbox on that folder; a live sandbox's key is never shared.
+func TestWorkspaceKeyRebind(t *testing.T) {
+	t.Setenv("HOTBEDD_DATA_DIR", t.TempDir())
+	t.Setenv("HOTBEDD_STATE_DIR", t.TempDir())
+	s := New()
+	a, _, _ := s.EnsureWorkspaceKey("sbA", "hermes", "up", "ws1")
+	// second sandbox on the same folder while A lives: own key
+	b, minted, _ := s.EnsureWorkspaceKey("sbB", "hermes", "up", "ws1")
+	if !minted || b.Token == a.Token {
+		t.Fatal("live sandbox key was shared")
+	}
+	// A deleted -> C on the same folder gets A's token back, bound to C
+	_, _ = s.Revoke("sbA")
+	c, minted, _ := s.EnsureWorkspaceKey("sbC", "hermes", "up", "ws1")
+	if minted || c.Token != a.Token || c.Sandbox != "sbC" {
+		t.Errorf("rebind = %+v minted=%v, want A's token on sbC", c, minted)
+	}
+	if k, ok := s.ByToken(a.Token); !ok || k.Sandbox != "sbC" {
+		t.Errorf("token resolves to %+v %v", k, ok)
+	}
+	// other folder or other agent: fresh key
+	if d, _, _ := s.EnsureWorkspaceKey("sbD", "hermes", "up", "ws2"); d.Token == a.Token {
+		t.Error("key crossed workspaces")
+	}
+	if e, _, _ := s.EnsureWorkspaceKey("sbE", "codex", "up", "ws1"); e.Token == a.Token {
+		t.Error("key crossed agents")
+	}
+}

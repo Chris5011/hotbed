@@ -34,8 +34,13 @@ type Key struct {
 	Sandbox  string `json:"sandbox"`
 	Provider string `json:"provider"`
 	Agent    string `json:"agent,omitempty"` // agent module id; "" = shared/manual key
-	Created  string `json:"created"`
-	Revoked  string `json:"revoked,omitempty"`
+	// Workspace is the id of the project folder the key was minted for
+	// (/workspace/.hotbed/id): a later sandbox on the same folder gets
+	// the same token back — agents that bind sessions to their
+	// credentials (Hermes) can then resume conversations.
+	Workspace string `json:"workspace,omitempty"`
+	Created   string `json:"created"`
+	Revoked   string `json:"revoked,omitempty"`
 }
 
 type file struct {
@@ -91,13 +96,42 @@ func (s *Store) EnsureKey(sandbox, provider string) (Key, bool, error) {
 // EnsureAgentKey returns the active virtual key for (sandbox, agent,
 // provider), minting one if needed (idempotent).
 func (s *Store) EnsureAgentKey(sandbox, agent, provider string) (Key, bool, error) {
+	return s.EnsureWorkspaceKey(sandbox, agent, provider, "")
+}
+
+// EnsureWorkspaceKey is EnsureAgentKey with workspace continuity: when no
+// active key exists for (sandbox, agent, provider), a key previously minted
+// for the same workspace whose sandbox is gone (revoked on delete) is
+// re-activated and re-bound to this sandbox instead of minting a fresh
+// token. A key still active for another sandbox is never shared.
+func (s *Store) EnsureWorkspaceKey(sandbox, agent, provider, workspace string) (Key, bool, error) {
 	f, err := s.load()
 	if err != nil {
 		return Key{}, false, err
 	}
-	for _, k := range f.Keys {
+	for i, k := range f.Keys {
 		if k.Sandbox == sandbox && k.Provider == provider && k.Agent == agent && k.Revoked == "" {
+			if workspace != "" && k.Workspace == "" {
+				f.Keys[i].Workspace = workspace
+				_ = s.save(f)
+				k.Workspace = workspace
+			}
 			return k, false, nil
+		}
+	}
+	if workspace != "" && agent != "" {
+		for i := len(f.Keys) - 1; i >= 0; i-- { // newest first
+			k := f.Keys[i]
+			if k.Workspace != workspace || k.Agent != agent || k.Provider != provider || k.Revoked == "" {
+				continue
+			}
+			old := k.Sandbox
+			f.Keys[i].Revoked, f.Keys[i].Sandbox = "", sandbox
+			if err := s.save(f); err != nil {
+				return Key{}, false, err
+			}
+			audit.Record("key.rebind", sandbox, fmt.Sprintf("%s@%s: workspace key of deleted %s re-activated", agent, provider, old))
+			return f.Keys[i], false, nil
 		}
 	}
 	b := make([]byte, 16)
@@ -108,11 +142,12 @@ func (s *Store) EnsureAgentKey(sandbox, agent, provider string) (Key, bool, erro
 		// full 128 bits of randomness in the token (hex) — brute-force
 		// resistance for the 0.0.0.0 proxy listener; older shorter tokens
 		// keep working (ByToken matches stored strings)
-		Token:    "hbk-" + tokenTag(agent, provider) + "-" + hex.EncodeToString(b),
-		Sandbox:  sandbox,
-		Provider: provider,
-		Agent:    agent,
-		Created:  time.Now().UTC().Format(time.RFC3339),
+		Token:     "hbk-" + tokenTag(agent, provider) + "-" + hex.EncodeToString(b),
+		Sandbox:   sandbox,
+		Provider:  provider,
+		Agent:     agent,
+		Workspace: workspace,
+		Created:   time.Now().UTC().Format(time.RFC3339),
 	}
 	f.Keys = append(f.Keys, k)
 	if err := s.save(f); err != nil {
