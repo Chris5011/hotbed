@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"hotbed/internal/dnsfence"
+	"hotbed/internal/env"
 )
 
 // keeperEvent mirrors dnsfence's event line format (decoupled on purpose).
@@ -157,7 +158,22 @@ func SnapshotSandboxIPs() error {
 			continue
 		}
 		if ip, e := ContainerIP(name); e == nil && ip != "" {
-			m[ip] = name
+			// docker-backend VMs: qemu's user-mode net leaves through its
+			// container — attribute to the VM name the dashboard shows
+			m[ip] = strings.TrimPrefix(name, env.VMDockerPrefix)
+		}
+	}
+	// libvirt guests reach the daemon's fence from their lease address
+	if LibvirtUp() {
+		if doms, err := LibvirtList(); err == nil {
+			for _, d := range doms {
+				if d.State != "running" || !strings.HasPrefix(d.Name, env.VMStdPrefix) {
+					continue
+				}
+				if ip := LibvirtLease(d.Name); ip != "" {
+					m[ip] = strings.TrimPrefix(d.Name, env.VMStdPrefix)
+				}
+			}
 		}
 	}
 	b, err := json.Marshal(ipSnapshotFile{IPs: m})

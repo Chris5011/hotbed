@@ -211,14 +211,11 @@ func reapplyTick(seen map[string]string) {
 		if preset == "allow" && !track {
 			continue // docker default: nothing to keep
 		}
-		out, err := engine.RunTO(8*time.Second, "docker", "inspect", "--format",
-			"{{.State.Running}} {{.State.StartedAt}}", name)
-		if err != nil {
-			continue // gone or engine down: try again next tick
-		}
-		running, started, _ := strings.Cut(strings.TrimSpace(out), " ")
-		if running != "true" || seen[name] == started {
-			continue
+		// container StartedAt, docker-VM container StartedAt, or a libvirt
+		// guest's boot id — whatever changes when the rules got wiped
+		started, running, err := engine.EgressStartID(name)
+		if err != nil || !running || seen[name] == started {
+			continue // gone / booting / engine down: next tick
 		}
 		ok, err := engine.EgressInstalled(name, preset, track)
 		if err != nil {

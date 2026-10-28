@@ -4,8 +4,8 @@ package api
 // by the DNS fence while tracking is on) and the allowlist toggles that
 // open forgotten domains after the fact.
 //
-//	GET  /api/sandboxes/container/<name>/dns
-//	POST /api/sandboxes/container/<name>/dns
+//	GET  /api/sandboxes/<kind>/<name>/dns
+//	POST /api/sandboxes/<kind>/<name>/dns
 //	     {"action":"allow"|"deny","domain":"api.example.com"}
 //	     {"action":"track","on":true}
 //	     {"action":"preset","preset":"allowlist"}   (allow ⇄ allowlist)
@@ -36,10 +36,8 @@ type dnsRow struct {
 }
 
 func (s *Server) dnsRoute(w http.ResponseWriter, r *http.Request, sb sandbox.Sandbox) {
-	if sb.Kind != sandbox.KindContainer {
-		httpError(w, 400, "DNS tracking is available for containers only")
-		return
-	}
+	// every kind: containers and docker-backend VMs are fenced in their
+	// container netns, libvirt guests in-guest over ssh (engine targets)
 	switch r.Method {
 	case http.MethodGet:
 		s.dnsState(w, sb.Name)

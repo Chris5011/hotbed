@@ -64,7 +64,7 @@ const (
 
 // egressScript installs the chain for a preset, idempotently: fresh chain
 // (create-or-flush), fill, then (re)install the OUTPUT jump at position 1.
-func egressScript(preset string) string {
+func egressScript(preset, gw string, skipLo bool) string {
 	preset = strings.TrimSpace(preset)
 	if preset == "" {
 		preset = "allow"
@@ -90,9 +90,9 @@ func egressScript(preset string) string {
 		// could never use its provider); resolved allowlist
 		// IPs are appended by the caller
 		rules = append(rules,
-			"-d "+dnsFenceGW()+" -p udp --dport "+dnsFencePort()+" -j ACCEPT",
-			"-d "+dnsFenceGW()+" -p tcp --dport "+dnsFencePort()+" -j ACCEPT",
-			"-d "+dnsFenceGW()+" -p tcp --dport "+proxyFencePort()+" -j ACCEPT")
+			"-d "+gw+" -p udp --dport "+dnsFencePort()+" -j ACCEPT",
+			"-d "+gw+" -p tcp --dport "+dnsFencePort()+" -j ACCEPT",
+			"-d "+gw+" -p tcp --dport "+proxyFencePort()+" -j ACCEPT")
 	}
 	rules = append(rules, "-j DROP")
 
@@ -104,7 +104,7 @@ func egressScript(preset string) string {
 	}
 	fmt.Fprintf(&b, "iptables -D OUTPUT -j %s 2>/dev/null; iptables -I OUTPUT 1 -j %s", egressChain, egressChain)
 	if preset == "allowlist" {
-		b.WriteString(egressDNATScript())
+		b.WriteString(egressDNATScript(gw, skipLo))
 	}
 	return b.String()
 }
@@ -112,15 +112,21 @@ func egressScript(preset string) string {
 // egressDNATScript builds the allowlist nat side: all container :53 traffic
 // is redirected into the fence listener on gw:dns_port (iptables only —
 // resolver file ops run separately via plain exec, see egressResolverExec).
-func egressDNATScript() string {
+// skipLo keeps loopback DNS (a guest's systemd-resolved stub) out of the
+// DNAT: the stub's own upstream queries are what lands in the fence.
+func egressDNATScript(gw string, skipLo bool) string {
+	lo := ""
+	if skipLo {
+		lo = "! -d 127.0.0.0/8 "
+	}
 	return fmt.Sprintf(
 		"iptables -t nat -N %s 2>/dev/null; iptables -t nat -F %s 2>/dev/null; "+
-			"iptables -t nat -A %s -p udp --dport 53 -j DNAT --to-destination %s:%s; "+
-			"iptables -t nat -A %s -p tcp --dport 53 -j DNAT --to-destination %s:%s; "+
+			"iptables -t nat -A %s %s-p udp --dport 53 -j DNAT --to-destination %s:%s; "+
+			"iptables -t nat -A %s %s-p tcp --dport 53 -j DNAT --to-destination %s:%s; "+
 			"iptables -t nat -D OUTPUT -j %s 2>/dev/null; iptables -t nat -I OUTPUT 1 -j %s",
 		egressNatChain, egressNatChain,
-		egressNatChain, dnsFenceGW(), dnsFencePort(),
-		egressNatChain, dnsFenceGW(), dnsFencePort(),
+		egressNatChain, lo, gw, dnsFencePort(),
+		egressNatChain, lo, gw, dnsFencePort(),
 		egressNatChain, egressNatChain)
 }
 
@@ -128,11 +134,11 @@ func egressDNATScript() string {
 // for the allowlist fence. They run via PLAIN docker exec (the sandbox's
 // own mount ns) — the netns helper shares nothing of the rootfs, so letting
 // it rewrite files would silently corrupt the wrong /etc/resolv.conf.
-func egressResolverInstall() string {
+func egressResolverInstall(gw string) string {
 	return fmt.Sprintf(
 		"cat /etc/resolv.conf > /etc/resolv.conf.hbd-bak 2>/dev/null; "+
 			"printf 'nameserver %s\\noptions ndots:1 timeout:2 attempts:4\\n' > /etc/resolv.conf; true",
-		dnsFenceGW())
+		gw)
 }
 
 func egressResolverRestore() string {
@@ -152,7 +158,7 @@ func egressResolverExec(name, script string) error {
 // egressAllowlistScript is the full allowlist iptables setup: base chain +
 // one ACCEPT per pre-resolved IP + nat side. Resolver file ops run via
 // egressResolverExec separately (plain exec, own mount ns).
-func egressAllowlistScript(ips []string) string {
+func egressAllowlistScript(ips []string, gw string, skipLo bool) string {
 	var b strings.Builder
 	b.WriteString(egressBinCheck)
 	fmt.Fprintf(&b, "iptables -N %s 2>/dev/null; iptables -F %s 2>/dev/null; ", egressChain, egressChain)
@@ -161,12 +167,12 @@ func egressAllowlistScript(ips []string) string {
 	for _, ip := range ips {
 		fmt.Fprintf(&b, "iptables -A %s -d %s -j ACCEPT; ", egressChain, ip)
 	}
-	fmt.Fprintf(&b, "iptables -A %s -d %s -p udp --dport %s -j ACCEPT; ", egressChain, dnsFenceGW(), dnsFencePort())
-	fmt.Fprintf(&b, "iptables -A %s -d %s -p tcp --dport %s -j ACCEPT; ", egressChain, dnsFenceGW(), dnsFencePort())
-	fmt.Fprintf(&b, "iptables -A %s -d %s -p tcp --dport %s -j ACCEPT; ", egressChain, dnsFenceGW(), proxyFencePort())
+	fmt.Fprintf(&b, "iptables -A %s -d %s -p udp --dport %s -j ACCEPT; ", egressChain, gw, dnsFencePort())
+	fmt.Fprintf(&b, "iptables -A %s -d %s -p tcp --dport %s -j ACCEPT; ", egressChain, gw, dnsFencePort())
+	fmt.Fprintf(&b, "iptables -A %s -d %s -p tcp --dport %s -j ACCEPT; ", egressChain, gw, proxyFencePort())
 	fmt.Fprintf(&b, "iptables -A %s -j DROP; ", egressChain)
 	fmt.Fprintf(&b, "iptables -D OUTPUT -j %s 2>/dev/null; iptables -I OUTPUT 1 -j %s; ", egressChain, egressChain)
-	b.WriteString(egressDNATScript())
+	b.WriteString(egressDNATScript(gw, skipLo))
 	return b.String()
 }
 
@@ -180,10 +186,6 @@ func egressResetScript() string {
 		egressChain, egressChain, egressChain,
 		egressNatChain, egressNatChain, egressNatChain)
 }
-
-// dnsFenceGW is the DNAT target address (the sandboxed gateway where the
-// fence listener lives). Empty gw → allowlist cannot be installed.
-func dnsFenceGW() string { return BridgeGateway() }
 
 // dnsFencePort is the fence's listen port; HOTBEDD_DNS_PORT overrides
 // (must match the fence runner and requires a relay/daemon restart — an
@@ -206,7 +208,8 @@ func proxyFencePort() string {
 	return env.DefaultProxyPort
 }
 
-// ApplyEgressFence installs/removes outbound rules inside a container,
+// ApplyEgressFence installs/removes outbound rules for a sandbox (container
+// netns, docker-VM container netns or libvirt guest - see egress_target.go),
 // resolving allowlist domains up front so the fence is complete at minute
 // zero. preset "allowlist" requires domains (from config.EgressAllowlist);
 // other presets ignore domains. Returns the count of resolved IPv4s.
@@ -215,10 +218,14 @@ func ApplyEgressFence(name, preset string, domains []string) (int, error) {
 	if preset == "" {
 		preset = "allow"
 	}
+	t, err := resolveEgressTarget(name)
+	if err != nil {
+		return 0, err
+	}
 	if preset == "allowlist" {
-		gw := BridgeGateway()
+		gw := t.fenceGW()
 		if gw == "" {
-			return 0, fmt.Errorf("allowlist fence %s: no default docker bridge gateway", name)
+			return 0, fmt.Errorf("allowlist fence %s: no fence address (docker bridge / guest gateway) found", name)
 		}
 		// an empty list is legal: only the fence and the hosted proxy stay
 		// reachable — the "start closed, allow what the DNS tab shows"
@@ -237,22 +244,23 @@ func ApplyEgressFence(name, preset string, domains []string) (int, error) {
 				}
 			}
 		}
-		script := egressAllowlistScript(ips)
+		script := egressAllowlistScript(ips, gw, t.skipLoopback())
 		forgetApplied(name) // the chain is rebuilt: keeper must re-open fresh answers
-		if out, err := egressRun(name, script); err != nil {
+		if out, err := t.run(script); err != nil {
 			return len(ips), fmt.Errorf("egress %s → allowlist: %w: %s", name, err, strings.TrimSpace(out))
 		}
-		if err := egressResolverExec(name, egressResolverInstall()); err != nil {
+		if err := t.resolver(egressResolverInstall(gw)); err != nil {
 			// non-fatal (the nat side catches unrewritten resolvers too)
 			fmt.Fprintf(os.Stderr, "\033[33;1mhotbedd:\033[0m egress %s: resolver rewrite skipped: %v\n", name, err)
 		}
 		keeperNudge() // so later lookups attribute to this sandbox fast
+		t.flushGuestDNS()
 		audit.Record("egress.set", name,
 			fmt.Sprintf("allowlist: %d domains, %d pre-resolved ips (%s)",
 				len(norm), len(ips), strings.Join(norm, ",")))
 		return len(ips), nil
 	}
-	return 0, applyEgress(name, preset)
+	return 0, applyEgress(t, preset)
 }
 
 // ApplyDNSTrack puts an unfenced sandbox's DNS through the fence so its
@@ -260,19 +268,25 @@ func ApplyEgressFence(name, preset string, domains []string) (int, error) {
 // default), only the nat DNAT + resolver rewrite. The fence passes every
 // lookup of a sandbox whose recorded preset is `allow`.
 func ApplyDNSTrack(name string) error {
-	if BridgeGateway() == "" {
-		return fmt.Errorf("dns tracking %s: no default docker bridge gateway", name)
+	t, err := resolveEgressTarget(name)
+	if err != nil {
+		return err
+	}
+	gw := t.fenceGW()
+	if gw == "" {
+		return fmt.Errorf("dns tracking %s: no fence address (docker bridge / guest gateway) found", name)
 	}
 	script := egressBinCheck + fmt.Sprintf(
 		"iptables -D OUTPUT -j %s 2>/dev/null; iptables -F %s 2>/dev/null; iptables -X %s 2>/dev/null; ",
-		egressChain, egressChain, egressChain) + egressDNATScript()
-	if out, err := egressRun(name, script); err != nil {
+		egressChain, egressChain, egressChain) + egressDNATScript(gw, t.skipLoopback())
+	if out, err := t.run(script); err != nil {
 		return fmt.Errorf("dns tracking %s: %w: %s", name, err, strings.TrimSpace(out))
 	}
-	if err := egressResolverExec(name, egressResolverInstall()); err != nil {
+	if err := t.resolver(egressResolverInstall(gw)); err != nil {
 		fmt.Fprintf(os.Stderr, "\033[33;1mhotbedd:\033[0m dns tracking %s: resolver rewrite skipped: %v\n", name, err)
 	}
 	keeperNudge() // attribution first: unknown sources are refused
+	t.flushGuestDNS()
 	audit.Record("egress.set", name, "allow + dns tracking")
 	return nil
 }
@@ -344,14 +358,18 @@ func ApplyEgressIP(name, ip string) error {
 	script := fmt.Sprintf(
 		"iptables -C %s -d %s -j ACCEPT 2>/dev/null || iptables -I %s 3 -d %s -j ACCEPT",
 		egressChain, ip, egressChain, ip)
-	if out, err := egressRun(name, script); err != nil {
+	t, err := resolveEgressTarget(name)
+	if err != nil {
+		return err
+	}
+	if out, err := t.run(script); err != nil {
 		return fmt.Errorf("egress %s: allow ip %s: %w: %s", name, ip, err, strings.TrimSpace(out))
 	}
 	return nil
 }
 
-// ApplyEgressContainer installs/removes iptables OUTPUT rules inside a
-// container. preset=="" or "allow" resets everything (Docker's default).
+// ApplyEgressContainer installs/removes iptables OUTPUT rules for a
+// sandbox. preset=="" or "allow" resets everything (Docker's default).
 // allowlist needs domains — use ApplyEgressFence instead (the CLI/API do).
 func ApplyEgressContainer(name, preset string) error {
 	_, err := ApplyEgressFence(name, preset, nil)
@@ -359,7 +377,8 @@ func ApplyEgressContainer(name, preset string) error {
 }
 
 // applyEgress handles the plain (domain-less) presets.
-func applyEgress(name, preset string) error {
+func applyEgress(t egressTarget, preset string) error {
+	name := t.name
 	preset = strings.TrimSpace(preset)
 	if preset == "" {
 		preset = "allow"
@@ -370,15 +389,16 @@ func applyEgress(name, preset string) error {
 	if preset == "allowlist" {
 		return fmt.Errorf("egress %s: allowlist needs domains — `hotbedd egress %s allowlist DOMAINS...`", name, name)
 	}
-	script := egressScript(preset)
+	script := egressScript(preset, t.fenceGW(), t.skipLoopback())
 	if preset == "allow" {
 		script = egressResetScript()
 	}
-	if out, err := egressRun(name, script); err != nil {
+	if out, err := t.run(script); err != nil {
 		return fmt.Errorf("egress %s → %s: %w: %s", name, preset, err, strings.TrimSpace(out))
 	}
+	t.flushGuestDNS()
 	if preset == "allow" {
-		if err := egressResolverExec(name, egressResolverRestore()); err != nil {
+		if err := t.resolver(egressResolverRestore()); err != nil {
 			// best-effort: a shell-less leftover from an older reset stays
 			fmt.Fprintf(os.Stderr, "\033[33;1mhotbedd:\033[0m egress %s: resolver restore skipped: %v\n", name, err)
 		}
@@ -390,10 +410,14 @@ func applyEgress(name, preset string) error {
 }
 
 // ShowEgressContainer returns the HBD_EGRESS filter rules (and the allowlist
-// nat side when present); "" = unfenced.
+// nat side when present) of any sandbox kind; "" = unfenced.
 func ShowEgressContainer(name string) (string, error) {
-	out, err := egressRun(name, egressBinCheck+
-		"iptables -S "+egressChain+" 2>/dev/null; iptables -t nat -S "+egressNatChain+" 2>/dev/null || true")
+	t, err := resolveEgressTarget(name)
+	if err != nil {
+		return "", err
+	}
+	out, err := t.run(egressBinCheck +
+		"iptables -S " + egressChain + " 2>/dev/null; iptables -t nat -S " + egressNatChain + " 2>/dev/null || true")
 	return strings.TrimSpace(out), err
 }
 
