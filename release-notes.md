@@ -1,3 +1,28 @@
+# Hotbed v0.7.1 — steady Burn tab
+
+A focused fix release on top of v0.7.0.
+
+## Fixes
+
+- **Burn tab no longer flickers while agents work** — the per-sandbox Burn
+  tab was redrawn by every live inventory push (several per second-scale
+  poll while CPU/memory change) on top of its own 5 s refresh, and each
+  redraw blanked it with "loading…" first. Now only its own poll
+  refreshes it, the placeholder shows only when switching sandboxes, and
+  an unchanged ledger leaves the page untouched (measured: 0 redraws in
+  25 s with live inventory pushes arriving). Scroll position is kept.
+
+## Upgrade from v0.7.0
+
+```bash
+cd ~/hotbed
+scripts/update.sh --yes
+```
+
+Then hard-reload the dashboard once (Ctrl+Shift+R).
+
+---
+
 # Hotbed v0.7.0 — agents, DNS insight and per-agent burn
 
 The biggest release since the proxy landed: coding agents beyond OpenCode

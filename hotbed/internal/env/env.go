@@ -13,7 +13,7 @@ import (
 // Version of the hotbedd daemon/CLI. A var on purpose: release builds inject
 // the tagged version here via -ldflags "-X hotbed/internal/env.Version=v…"
 // (Makefile / scripts/release.sh; see docs/RELEASING.md).
-var Version = "0.7.0"
+var Version = "0.7.1"
 
 const (
 	// DefaultPort the daemon (dashboard/API) listens on (localhost only).
