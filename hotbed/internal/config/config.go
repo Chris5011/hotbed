@@ -22,6 +22,20 @@ type Provider struct {
 	APIKey  string   `json:"api_key,omitempty"`
 	Models  []string `json:"models,omitempty"`
 	Style   string   `json:"style,omitempty"` // openai|anthropic (default openai)
+	// Compat lists request rewrites the proxy applies for this upstream,
+	// e.g. "anthropic-gateway" for Anthropic routes of OpenAI-style gateways
+	// in front of open models (see proxy/compat.go).
+	Compat []string `json:"compat,omitempty"`
+}
+
+// HasCompat reports whether a compatibility rewrite is enabled.
+func (p Provider) HasCompat(name string) bool {
+	for _, c := range p.Compat {
+		if c == name {
+			return true
+		}
+	}
+	return false
 }
 
 type Proxy struct {
@@ -65,6 +79,19 @@ type Config struct {
 	// EgressTrack marks sandboxes whose DNS lookups the fence records
 	// (state dir dns-seen/<name>.json) — allow and allowlist presets only.
 	EgressTrack map[string]bool `json:"egress_track,omitempty"`
+	// Agents toggles coding-agent modules (kit dir agents/<id>/). Absent
+	// ids fall back to the module's own default_enabled.
+	Agents map[string]bool `json:"agents,omitempty"`
+}
+
+// SetAgentEnabled toggles a coding-agent module.
+func (c *Config) SetAgentEnabled(id string, on bool) error {
+	if c.Agents == nil {
+		c.Agents = map[string]bool{}
+	}
+	c.Agents[id] = on
+	audit.Record("agent.toggle", "", fmt.Sprintf("%s enabled=%v", id, on))
+	return c.Save()
 }
 
 // Sweeper auto-stops idle kit sandboxes (containers with the dev.hotbed label,

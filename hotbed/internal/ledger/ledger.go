@@ -23,6 +23,7 @@ type Entry struct {
 	TS       string  `json:"ts"`
 	Sandbox  string  `json:"sandbox"`
 	Provider string  `json:"provider"`
+	Agent    string  `json:"agent,omitempty"` // from the virtual key; "" = shared key
 	Model    string  `json:"model"`
 	In       int     `json:"in"`
 	Out      int     `json:"out"`
@@ -35,12 +36,12 @@ type Entry struct {
 
 // Call bundles what the proxy hands over after one request.
 type Call struct {
-	Sandbox, Provider, Model string
-	In, Out                  int
-	Est                      bool
-	DurMS                    int64
-	Status                   int
-	Path                     string
+	Sandbox, Provider, Agent, Model string
+	In, Out                         int
+	Est                             bool
+	DurMS                           int64
+	Status                          int
+	Path                            string
 }
 
 // Ledger persists to ~/.local/state/hotbed/usage.jsonl.
@@ -60,10 +61,17 @@ func Open(prices map[string][2]float64) *Ledger {
 
 // Record computes cost, appends the line, and returns the priced entry.
 func (l *Ledger) Record(c Call) (Entry, error) {
+	// an upstream error without reported usage processed nothing: keep the
+	// call (status shows in the burn view) but book no estimated tokens —
+	// a client retrying a 400 must not burn the wallet on bytes/4 guesses
+	if c.Status >= 400 && c.Est {
+		c.In, c.Out, c.Est = 0, 0, false
+	}
 	e := Entry{
 		TS:       time.Now().UTC().Format(time.RFC3339),
 		Sandbox:  c.Sandbox,
 		Provider: c.Provider,
+		Agent:    c.Agent,
 		Model:    c.Model,
 		In:       c.In,
 		Out:      c.Out,
@@ -177,6 +185,21 @@ type ModelRow struct {
 	Calls int     `json:"calls"`
 }
 
+// AgentRow aggregates one agent inside a sandbox summary ("" = calls made
+// with a shared, agent-less key).
+type AgentRow struct {
+	Agent  string  `json:"agent"`
+	In     int     `json:"in"`
+	Out    int     `json:"out"`
+	Est    int     `json:"est_calls"`
+	Cost   float64 `json:"cost"`
+	Calls  int     `json:"calls"`
+	Today  int     `json:"today_calls"`
+	Models int     `json:"models"`
+	Last   string  `json:"last"`
+	models map[string]bool
+}
+
 // Summary aggregates the journal for one sandbox ("" = all sandboxes).
 type Summary struct {
 	Sandbox        string     `json:"sandbox"`
@@ -188,6 +211,7 @@ type Summary struct {
 	TodayTokensOut int        `json:"today_tokens_out"`
 	Calls          int        `json:"calls"`
 	Models         []ModelRow `json:"models"`
+	Agents         []AgentRow `json:"agents"`
 	Calls25        []Entry    `json:"recent"`
 }
 
@@ -225,6 +249,7 @@ func (l *Ledger) Summarize(sandbox string) Summary {
 	s := Summary{Sandbox: sandbox}
 	today := time.Now().UTC().Format("2006-01-02")
 	mm := map[string]*ModelRow{}
+	am := map[string]*AgentRow{}
 	for _, e := range l.scan() {
 		if sandbox != "" && e.Sandbox != sandbox {
 			continue
@@ -250,7 +275,37 @@ func (l *Ledger) Summarize(sandbox string) Summary {
 		if e.Est {
 			m.Est++
 		}
+		a := am[e.Agent]
+		if a == nil {
+			a = &AgentRow{Agent: e.Agent, models: map[string]bool{}}
+			am[e.Agent] = a
+		}
+		a.In += e.In
+		a.Out += e.Out
+		a.Cost += e.Cost
+		a.Calls++
+		if e.Est {
+			a.Est++
+		}
+		if strings.HasPrefix(e.TS, today) {
+			a.Today++
+		}
+		a.models[e.Model] = true
+		if e.TS > a.Last {
+			a.Last = e.TS
+		}
 	}
+	for _, a := range am {
+		a.Models = len(a.models)
+		s.Agents = append(s.Agents, *a)
+	}
+	sort.Slice(s.Agents, func(i, j int) bool {
+		a, b := s.Agents[i], s.Agents[j]
+		if ta, tb := a.In+a.Out, b.In+b.Out; ta != tb {
+			return ta > tb
+		}
+		return a.Agent < b.Agent
+	})
 	for _, m := range mm {
 		s.Models = append(s.Models, *m)
 	}

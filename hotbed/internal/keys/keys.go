@@ -1,7 +1,10 @@
-// Package keys stores per-sandbox proxy credentials.
+// Package keys stores per-sandbox proxy credentials (virtual keys).
 //
-// Every sandbox gets its own bearer token ("hbk-…" ) minted by hotbedd; the
-// upstream provider key never enters the sandbox. Budget wallets (USD and
+// Every (sandbox, agent, provider) gets its own bearer token ("hbk-…")
+// minted by hotbedd; the proxy translates it to the upstream provider key,
+// which never enters the sandbox, and books every call to the key's
+// sandbox AND agent — per-sandbox-per-agent burn tracking. Keys minted
+// before agents existed carry no agent (shared / manual keys). Budget wallets (USD and
 // tokens) live in config.json now; this file only carries credentials.
 //
 // The store is a stateless file view: every call re-reads keys.json, so CLI
@@ -17,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,6 +33,7 @@ type Key struct {
 	Token    string `json:"token"`
 	Sandbox  string `json:"sandbox"`
 	Provider string `json:"provider"`
+	Agent    string `json:"agent,omitempty"` // agent module id; "" = shared/manual key
 	Created  string `json:"created"`
 	Revoked  string `json:"revoked,omitempty"`
 }
@@ -77,15 +82,21 @@ func (s *Store) save(f file) error {
 // Open loads the store (stateless; kept for API compat).
 func Open() (*Store, error) { return New(), nil }
 
-// EnsureKey returns the active key for (sandbox, provider), minting one if
-// needed. Existing tokens of the same sandbox/provider are kept (idempotent).
+// EnsureKey returns the active shared key for (sandbox, provider) — the
+// agent-less key of `hotbedd key mint`. Syncs use EnsureAgentKey.
 func (s *Store) EnsureKey(sandbox, provider string) (Key, bool, error) {
+	return s.EnsureAgentKey(sandbox, "", provider)
+}
+
+// EnsureAgentKey returns the active virtual key for (sandbox, agent,
+// provider), minting one if needed (idempotent).
+func (s *Store) EnsureAgentKey(sandbox, agent, provider string) (Key, bool, error) {
 	f, err := s.load()
 	if err != nil {
 		return Key{}, false, err
 	}
 	for _, k := range f.Keys {
-		if k.Sandbox == sandbox && k.Provider == provider && k.Revoked == "" {
+		if k.Sandbox == sandbox && k.Provider == provider && k.Agent == agent && k.Revoked == "" {
 			return k, false, nil
 		}
 	}
@@ -97,17 +108,26 @@ func (s *Store) EnsureKey(sandbox, provider string) (Key, bool, error) {
 		// full 128 bits of randomness in the token (hex) — brute-force
 		// resistance for the 0.0.0.0 proxy listener; older shorter tokens
 		// keep working (ByToken matches stored strings)
-		Token:    "hbk-" + provider + "-" + hex.EncodeToString(b),
+		Token:    "hbk-" + tokenTag(agent, provider) + "-" + hex.EncodeToString(b),
 		Sandbox:  sandbox,
 		Provider: provider,
+		Agent:    agent,
 		Created:  time.Now().UTC().Format(time.RFC3339),
 	}
 	f.Keys = append(f.Keys, k)
 	if err := s.save(f); err != nil {
 		return Key{}, false, err
 	}
-	audit.Record("key.mint", sandbox, provider)
+	audit.Record("key.mint", sandbox, strings.TrimPrefix(agent+"@"+provider, "@"))
 	return k, true, nil
+}
+
+// tokenTag is the readable token prefix (survives masking in the UI).
+func tokenTag(agent, provider string) string {
+	if agent == "" {
+		return provider
+	}
+	return agent + "-" + provider
 }
 
 // Revoke kills a sandbox's active keys (next EnsureKey mints fresh).
@@ -168,6 +188,9 @@ func (s *Store) List() []Key {
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Sandbox != out[j].Sandbox {
 			return out[i].Sandbox < out[j].Sandbox
+		}
+		if out[i].Agent != out[j].Agent {
+			return out[i].Agent < out[j].Agent
 		}
 		return out[i].Provider < out[j].Provider
 	})

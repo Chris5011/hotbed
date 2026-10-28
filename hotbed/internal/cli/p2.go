@@ -230,6 +230,14 @@ func usageCmd(args []string) error {
 		fmt.Printf("burn — sandbox %q\n", name)
 		fmt.Printf("  today  $%.4f   total $%.4f   calls %d   tokens in/out %d/%d\n",
 			s.Today, s.Total, s.Calls, s.TokensIn, s.TokensOut)
+		if len(s.Agents) > 0 {
+			fmt.Println("  per agent:")
+			for _, a := range s.Agents {
+				fmt.Printf("  %-42s in %7d  out %7d  $%.4f  %d call(s)\n",
+					agentLabel(a.Agent), a.In, a.Out, a.Cost, a.Calls)
+			}
+			fmt.Println("  per model:")
+		}
 		for _, m := range s.Models {
 			estMark := ""
 			if m.Est > 0 {
@@ -304,9 +312,9 @@ func keyCmd(args []string) error {
 			fmt.Println("no keys minted yet (hotbedd key mint SANDBOX)")
 			return nil
 		}
-		fmt.Printf("%-52s %-18s %-14s %s\n", "TOKEN", "SANDBOX", "PROVIDER", "CREATED")
+		fmt.Printf("%-60s %-22s %-12s %-20s %s\n", "TOKEN", "SANDBOX", "AGENT", "PROVIDER", "CREATED")
 		for _, k := range kk {
-			fmt.Printf("%-52s %-18s %-14s %s\n", k.Token, k.Sandbox, k.Provider, k.Created)
+			fmt.Printf("%-60s %-22s %-12s %-20s %s\n", k.Token, k.Sandbox, agentLabel(k.Agent), k.Provider, k.Created)
 		}
 		return nil
 	case "revoke":
@@ -520,3 +528,12 @@ func syncCmd(args []string) error {
 }
 
 var _ = engine.LookPath
+
+// agentLabel names a key's/ledger row's agent ("" = a shared key from
+// before per-agent keys, or one minted by `hotbedd key mint`).
+func agentLabel(a string) string {
+	if a == "" {
+		return "(shared key)"
+	}
+	return a
+}

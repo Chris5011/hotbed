@@ -228,6 +228,13 @@ func (p *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		dst += "?" + r.URL.RawQuery
 	}
 
+	// opt-in request rewrites for upstreams that need them (compat.go)
+	if !overflow && prov.StyleWire() == "anthropic" && prov.HasCompat(compatAnthropicGateway) {
+		if nb, ok := rewriteAnthropicGateway(body); ok {
+			body = nb
+		}
+	}
+
 	var up *http.Request
 	if overflow {
 		// replay the full original body: everything read so far, then the rest
@@ -280,7 +287,7 @@ func (p *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(resp.StatusCode)
 		in, out, est := p.streamCopy(w, resp.Body, ledger.Estimate(string(body)))
 		_, _ = p.Led.Record(ledger.Call{
-			Sandbox: k.Sandbox, Provider: provID, Model: model,
+			Sandbox: k.Sandbox, Provider: provID, Agent: k.Agent, Model: model,
 			In: in, Out: out, Est: est,
 			DurMS: time.Since(start).Milliseconds(), Status: resp.StatusCode, Path: r.URL.Path,
 		})
@@ -300,7 +307,7 @@ func (p *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		out = 0
 	}
 	_, _ = p.Led.Record(ledger.Call{
-		Sandbox: k.Sandbox, Provider: provID, Model: model,
+		Sandbox: k.Sandbox, Provider: provID, Agent: k.Agent, Model: model,
 		In: in, Out: out, Est: estFlag,
 		DurMS: time.Since(start).Milliseconds(), Status: resp.StatusCode, Path: r.URL.Path,
 	})
@@ -384,6 +391,18 @@ func parseUsageFrames(frames string) (int, int, bool) {
 				ok = true
 			}
 		}
+		if rsp, okr := m["response"].(map[string]any); okr { // openai responses: response.completed
+			if u, oku := rsp["usage"].(map[string]any); oku {
+				if v := num(u, "input_tokens"); v > 0 {
+					in = v
+					ok = true
+				}
+				if v := num(u, "output_tokens"); v > 0 {
+					out = v
+					ok = true
+				}
+			}
+		}
 		if msg, okm := m["message"].(map[string]any); okm { // anthropic message_start
 			if u, oku := msg["usage"].(map[string]any); oku {
 				if v := num(u, "input_tokens"); v > 0 {
@@ -419,10 +438,8 @@ func extractDeltaText(frameJSON string) string {
 				Reasoning string `json:"reasoning_content"`
 			} `json:"delta"`
 		} `json:"choices"`
-		Delta struct {
-			Text    string `json:"text"`
-			Content string `json:"content"`
-		} `json:"delta"`
+		// anthropic: {"text"|"content": …}; openai responses: a plain string
+		Delta json.RawMessage `json:"delta"`
 	}
 	if json.Unmarshal([]byte(frameJSON), &m) != nil {
 		return ""
@@ -432,8 +449,17 @@ func extractDeltaText(frameJSON string) string {
 		b.WriteString(c.Delta.Content)
 		b.WriteString(c.Delta.Reasoning)
 	}
-	b.WriteString(m.Delta.Text)
-	b.WriteString(m.Delta.Content)
+	var s string
+	var obj struct {
+		Text    string `json:"text"`
+		Content string `json:"content"`
+	}
+	if json.Unmarshal(m.Delta, &s) == nil {
+		b.WriteString(s)
+	} else if json.Unmarshal(m.Delta, &obj) == nil {
+		b.WriteString(obj.Text)
+		b.WriteString(obj.Content)
+	}
 	return b.String()
 }
 

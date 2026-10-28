@@ -176,7 +176,7 @@ func Apply(sb sandbox.Sandbox, cfg *config.Config, ks *keys.Store,
 	if !ok || strings.TrimSpace(prov.BaseURL) == "" {
 		return Target{}, fmt.Errorf("provider %q lacks base_url in hotbedd config", provider)
 	}
-	key, _, err := ks.EnsureKey(sb.Name, provider)
+	key, _, err := ks.EnsureAgentKey(sb.Name, "opencode", provider)
 	if err != nil {
 		return Target{}, err
 	}
