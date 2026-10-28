@@ -1474,7 +1474,7 @@ function agentCell(a){
 
 function renderBurnTab(sb){
   var host=$('burn-hbd');
-  if(!sb){ host.innerHTML='<div class="hint">no sandbox selected</div>'; return; }
+  if(!sb){ host.innerHTML='<div class="hint">no sandbox selected</div>'; host.removeAttribute('data-sb'); host.removeAttribute('data-sig'); return; }
   // the detail burn tab polls on the shared lease too: while THIS sandbox's
   // detail view is open the cards/table stay live; ticks skip while the user
   // works an input. The reload button (tab-burn pane) forces a fresh read.
@@ -1487,8 +1487,20 @@ function renderBurnTab(sb){
       renderBurnTab(sb);
     },5000);
   };
-  host.innerHTML='<div class="hint">loading…</div>';
+  // placeholder only when switching sandboxes - a refresh keeps the
+  // current tables on screen until the new data is in
+  if(host.getAttribute('data-sb')!==sb.name){
+    host.innerHTML='<div class="hint">loading…</div>';
+    host.setAttribute('data-sb',sb.name);
+    host.removeAttribute('data-sig');
+  }
   fetch('/api/usage?name='+encodeURIComponent(sb.name)).then(function(r){return r.json();}).then(function(s){
+    if(host.getAttribute('data-sb')!==sb.name) return; // switched meanwhile
+    // unchanged ledger -> keep the DOM as it is (no flicker, scroll kept);
+    // "last call" ages are relative, so the minute bucket counts as data
+    var sig=JSON.stringify(s)+'|'+Math.floor(Date.now()/60000);
+    if(host.getAttribute('data-sig')===sig){ finish(); return; }
+    host.setAttribute('data-sig',sig);
     var cards='<div class="burnbar">'+
       '<div class="bstat"><div class="v">$'+(s.today_usd||0).toFixed(4)+'</div><div class="k">burn today</div></div>'+
       '<div class="bstat"><div class="v">$'+(s.total_usd||0).toFixed(4)+'</div><div class="k">burn total</div></div>'+
@@ -1525,7 +1537,7 @@ function renderBurnTab(sb){
     }
     host.innerHTML=html;
     finish();
-  }).catch(function(){ burnRetry(host, function(){ renderBurnTab(sb); }); });
+  }).catch(function(){ host.removeAttribute('data-sig'); burnRetry(host, function(){ renderBurnTab(sb); }); });
 }
 
 /* ---------- agent modules ---------- */
@@ -2171,7 +2183,9 @@ function openEvents(){
         updateButtons(cur);
         if(activeTab==='overview') renderOverview(cur);
         if(activeTab==='conn') renderConn(cur);
-        if(activeTab==='burn') renderBurnTab(cur);
+        // burn tab: NOT here - inventory snapshots arrive several times per
+        // poll while agents work (cpu/mem change) and each one re-rendered
+        // the whole ledger; renderBurnTab's own 5 s poll keeps it live
       }
     }
   });
