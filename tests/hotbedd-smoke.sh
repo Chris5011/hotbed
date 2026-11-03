@@ -13,6 +13,10 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HOTBEDD="$ROOT/hotbed/bin/hotbedd"
+# every scratch dir lives under /tmp/opencode - a tmpfs /tmp is empty after a
+# WSL/host restart, and a failed mktemp would leave the suite running with
+# empty paths ("mkdir /config: permission denied" across ~40 checks)
+mkdir -p /tmp/opencode || { echo "cannot create /tmp/opencode" >&2; exit 2; }
 PORT="${HOTBEDD_SMOKE_PORT:-7790}"
 export HOTBEDD_PORT="$PORT"
 if ss -ltn 2>/dev/null | grep -q ":$PORT "; then
