@@ -24,6 +24,7 @@ import (
 	"hotbed/internal/egressctl"
 	"hotbed/internal/engine"
 	"hotbed/internal/env"
+	"hotbed/internal/ide"
 	"hotbed/internal/keys"
 	"hotbed/internal/ledger"
 	"hotbed/internal/proxy"
@@ -215,6 +216,8 @@ func (s *Server) sandboxRoute(w http.ResponseWriter, r *http.Request) {
 		s.syncRoute(w, r, sb)
 	case "dns":
 		s.dnsRoute(w, r, sb)
+	case "ide":
+		s.ideRoute(w, r, sb)
 	case "agents":
 		s.sandboxAgentsRoute(w, r, sb)
 	case "start":
@@ -533,6 +536,9 @@ func (s *Server) actionDelete(w http.ResponseWriter, r *http.Request) {
 		notes = append(notes, "sync target removal failed: "+err.Error())
 	}
 	attach.KillTunnel(sb.Name)
+	if sb.Kind == sandbox.KindVM {
+		ide.ForgetVM(sb.Name) // VS Code host alias + pinned host key
+	}
 	if err := egressctl.Forget(s.Cfg, sb.Name); err != nil {
 		notes = append(notes, "egress records removal failed: "+err.Error())
 	}

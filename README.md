@@ -1228,6 +1228,31 @@ telemetry question on first start (sharing is off by default either way).
 A VM created with agents installs them in the background after boot — a
 daemon restart in that window drops the queue (use `＋ Agent`).
 
+### VS Code — open a sandbox in your editor
+
+The **VS Code** button in a sandbox's header (or `hotbedd ide NAME`,
+`--print` for just the URI) opens its `/workspace` in VS Code:
+
+- **Containers** — Dev Containers *attach to running container*. Needs the
+  `ms-vscode-remote.remote-containers` extension; hotbed only reports it
+  missing (and copies `code --install-extension …`), it never installs it.
+- **VMs** — Remote-SSH (`ms-vscode-remote.remote-ssh`) to the host alias
+  `hotbed-<vm>`. hotbed writes its own `~/.ssh/hotbed.conf` and adds one
+  `Include hotbed.conf` line at the top of your `~/.ssh/config` (backed up
+  once to `config.hotbed-bak`; nothing else in it changes). The connection
+  rides `hotbedd ide-pipe <vm>` as ProxyCommand, so it follows lease
+  changes (strict egress) and works from Windows, where libvirt guest
+  addresses do not route. The guest's host key is pinned in
+  `hotbed_known_hosts`; deleting the VM removes its alias and key.
+
+On **WSL** the editor is the Windows VS Code: the files above live in
+`%USERPROFILE%\.ssh`, the identity is a separate key `hotbed_ide`
+(generated with the Windows `ssh-keygen`, authorized in each VM you open) —
+the kit's VM key never leaves the distro. On a native Linux desktop the
+kit's `~/.ssh/hotbedvm_key` is used. VS Code takes its remote environment
+from a login shell (ssh session / Dev Containers' login-shell probe), so
+`/etc/profile.d` settings such as the strict egress proxy apply there.
+
 ### House rules & security posture (P2 included)
 
 

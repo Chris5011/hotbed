@@ -59,6 +59,7 @@ const indexHTML = `<!doctype html>
           <button id="btn-oc">OpenCode in tmux</button>
           <span id="d-agentbtns" class="agentbtns"></span>
           <button id="btn-copy">Copy Connection</button>
+          <button id="btn-ide" title="open /workspace in VS Code (containers: Dev Containers attach, VMs: Remote-SSH)">VS Code</button>
           <button id="btn-start">Start</button>
           <button id="btn-stop" class="danger">Stop</button>
           <button id="btn-del" class="danger">Delete</button>
@@ -2219,6 +2220,7 @@ function updateButtons(sb){
   var lock=!!pend; // while a start/stop is in flight, lock both buttons
   $('btn-start').disabled= lock || sb.state==='running';
   $('btn-stop').disabled = lock || sb.state!=='running';
+  $('btn-ide').disabled = sb.state!=='running';
 }
 
 /* ---------- tabs ---------- */
@@ -2290,6 +2292,23 @@ function init(){
     fetch('/api/sandboxes/'+sb.kind+'/'+sb.name+'/connect?mode=shell')
       .then(function(r){return r.json();})
       .then(function(ci){ copy(ci.shellCmd || ci.wtCommand || ci.tmuxAttach || ''); }); });
+  $('btn-ide').addEventListener('click', function(){
+    var sb=currentSB(); if(!sb) return;
+    var t=toast('Opening '+sb.name+' in VS Code…','pend');
+    fetch('/api/sandboxes/'+sb.kind+'/'+sb.name+'/ide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({launch:true})})
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        t.remove();
+        if(j.error){ toast(j.error,'err'); return; }
+        var r=j.ide||{};
+        if(r.missing_extension){
+          toast('VS Code needs the '+r.missing_extension+' extension - install command copied: '+r.install_hint,'err');
+          copy(r.install_hint); return;
+        }
+        toast(r.launched?('VS Code opening '+sb.name+(r.ssh_host?' (ssh host '+r.ssh_host+')':'')):'VS Code URI: '+r.uri,'ok');
+      })
+      .catch(function(e){ t.remove(); toast('VS Code: '+e,'err'); });
+  });
   $('btn-start').addEventListener('click', function(){ var sb=currentSB(); if(sb) act(sb.kind,sb.name,'start'); });
   $('btn-stop').addEventListener('click', function(){ var sb=currentSB(); if(sb) act(sb.kind,sb.name,'stop'); });
   $('btn-del').addEventListener('click', function(){ var sb=currentSB(); if(sb) delSB(sb); });
