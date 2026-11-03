@@ -1,3 +1,53 @@
+# Hotbed v0.8.0 — strict egress
+
+Implements issue #4: an egress allowlist that the sandbox itself cannot
+overwrite.
+
+## New
+
+- **`strict` egress preset** — the other presets are rules *inside* the
+  sandbox, which root in it (every agent has sudo) can rewrite. `strict`
+  enforces the allowlist from outside:
+  - **containers** move onto an internal docker network
+    (`hotbed-strict-<id>`): no route to the internet, the host or the
+    docker bridge, no external DNS. The only way out is the egress gateway
+    container `sbx-egress-<id>`, an allowlist HTTP(S) proxy (CONNECT /
+    request host, suffix match, no TLS interception) that also forwards
+    the LLM proxy.
+  - **libvirt VMs** have their NIC re-pointed live to an isolated libvirt
+    network (no forward); the daemon serves the proxy on its bridge.
+  - The sandbox gets `HTTP(S)_PROXY` / `NO_PROXY` system-wide; OpenCode and
+    every agent are re-synced onto the new route automatically, on the way
+    in and out (audit `strict.resync`).
+  - Same allowlist, same DNS tab (tracking records the requested hosts),
+    live edits. *Isolate (strict)* / *Leave strict* buttons in the DNS tab,
+    `strict` in the create wizard, `hotbedd egress NAME strict [--track]`.
+  - Refused with an explanation: containers that publish ports (they stay
+    reachable from the host even on an isolated network), containers
+    sharing another netns, docker-backend VMs (published ssh port).
+  - Limits (documented): strict sandboxes share one network and can reach
+    each other; attribution is by source address, so root in one strict
+    sandbox could borrow another strict sandbox's address and allowlist.
+
+## Fixes
+
+- **Agents on VMs without a host share** — cloud-init created the VM-local
+  `/workspace` as root, so persisting agent state (sessions, v0.7) failed
+  with `Permission denied` and the agent sync reported an error on every
+  such VM. New VMs get a user-owned `/workspace`; existing ones are fixed on
+  the next agent sync (only when `/workspace` is not a mount).
+
+## Upgrade from v0.7.3
+
+```bash
+cd ~/hotbed
+scripts/update.sh --yes
+```
+
+Nothing changes for existing sandboxes until you pick `strict`.
+
+---
+
 # Hotbed v0.7.3 — proxy access you can rely on
 
 Fixes for issues #5 and #3.
