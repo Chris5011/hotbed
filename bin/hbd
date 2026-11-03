@@ -257,6 +257,7 @@ ensure_container() {
     "$DOCKER" container run -d \
         --name "$cn" \
         --restart unless-stopped \
+        --init \
         "${flags[@]}" \
         "${opts[@]}" \
         "$(image_name "$cn_stack")" >/dev/null

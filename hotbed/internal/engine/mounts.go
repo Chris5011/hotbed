@@ -256,7 +256,7 @@ func mountsSummary(b []Bind) string {
 func createContainer(d *rawInspect, vols, binds []Bind) error {
 	c := d.Config
 	hc := d.HostConfig
-	args := []string{"create", "--name", strings.TrimPrefix(d.Name, "/")}
+	args := []string{"create", "--init", "--name", strings.TrimPrefix(d.Name, "/")} // --init: zombie reaping (see recipespawn)
 	if c.WorkingDir != "" && c.WorkingDir != "/" {
 		args = append(args, "--workdir", c.WorkingDir)
 	}

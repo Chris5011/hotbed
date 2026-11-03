@@ -290,15 +290,29 @@ func pickProvider(cfg *config.Config, style string) (string, config.Provider, bo
 // manifest's resume command (continue the last conversation) instead.
 // When the agent exits the pane drops into a shell (env kept) instead of
 // vanishing: a startup error stays readable, the agent can be re-run.
+//
+// Orphans: closing the tmux session does not stop a program docker exec
+// started in the container — the agent kept running and held its state
+// lock ("holder N is alive, stop it first"). A launch only happens when no
+// tmux session of this agent exists, so a previous launch still alive is
+// an orphan: its process group (recorded in a pid file, verified to be
+// this agent's launch by its command line) is ended first.
 func LaunchScript(home string, m Module, resume bool) string {
 	env := EnvPath(home, m.ID)
+	pidf := home + "/.config/hotbed/agents/" + m.ID + ".launch.pid"
 	cmd := m.Command
 	if resume && m.Resume != "" {
 		cmd = m.Resume
 	}
-	return fmt.Sprintf("[ -f %s ] && . %s; cd /workspace 2>/dev/null; %s; "+
+	reap := fmt.Sprintf("p=$(cat %[1]s 2>/dev/null); "+
+		"if [ -n \"$p\" ] && [ \"$p\" != \"$$\" ] && tr '\\0' ' ' </proc/$p/cmdline 2>/dev/null | grep -qF %[2]s; then "+
+		"kill -TERM -- -\"$p\" 2>/dev/null || { pkill -TERM -P \"$p\"; kill -TERM \"$p\"; } 2>/dev/null; sleep 1; "+
+		"kill -KILL -- -\"$p\" 2>/dev/null || { pkill -KILL -P \"$p\"; kill -KILL \"$p\"; } 2>/dev/null; fi; "+
+		"mkdir -p \"$(dirname %[1]s)\"; echo $$ > %[1]s; ",
+		shQuote(pidf), shQuote(env))
+	return fmt.Sprintf("%s[ -f %s ] && . %s; cd /workspace 2>/dev/null; %s; "+
 		"printf '\\n[hotbed] %%s exited (%%s) - shell in the sandbox, exit closes this session\\n' %s \"$?\"; exec bash",
-		shQuote(env), shQuote(env), cmd, shQuote(m.Name))
+		reap, shQuote(env), shQuote(env), cmd, shQuote(m.Name))
 }
 
 func shQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }

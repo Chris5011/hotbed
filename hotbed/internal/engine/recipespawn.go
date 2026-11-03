@@ -153,7 +153,9 @@ func SpawnRecipeContainer(s RecipeSpawn) (string, string, error) {
 			}
 		}
 	}
-	args := []string{"create", "--name", cn, "--restart", "unless-stopped",
+	// --init: PID 1 reaps zombies (sleep infinity never does; ended agent
+	// processes piled up as <defunct> entries)
+	args := []string{"create", "--init", "--name", cn, "--restart", "unless-stopped",
 		"--workdir", "/workspace",
 		"--label", envLabel + "=1",
 		"--label", env.OwnerLabelKey + "=" + env.OwnerLabel(),
