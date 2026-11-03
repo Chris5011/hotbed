@@ -193,7 +193,7 @@ dr="$(curl -s --max-time 30 -X POST "http://127.0.0.1:7799/api/create" \
 grep -q '"ok":true' <<<"$dr" \
     && pass "missing stack image: create auto-builds through the daemon" \
     || fail "missing stack image: create did not auto-build (${dr:0:120})"
-ord="$(awk '/--target base/{b=NR} /create --name hotbed-imgtest/{c=NR} END{ if(b&&c&&b<c) print "ok"; else print "no:" b "-" c }' "$FD2/order" 2>/dev/null)"
+ord="$(awk '/--target base/{b=NR} /create .*--name hotbed-imgtest/{c=NR} END{ if(b&&c&&b<c) print "ok"; else print "no:" b "-" c }' "$FD2/order" 2>/dev/null)"
 [[ "$ord" == "ok" ]] \
     && pass "image build happened before the container create" \
     || fail "image build happened before the container create (order=${ord:-empty})"
