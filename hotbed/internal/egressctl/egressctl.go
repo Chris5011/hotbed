@@ -11,12 +11,15 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"hotbed/internal/audit"
+	"hotbed/internal/cfgsync"
 	"hotbed/internal/config"
 	"hotbed/internal/dnsfence"
 	"hotbed/internal/engine"
@@ -49,7 +52,7 @@ func Apply(cfg *config.Config, name, preset string, track bool) (int, error) {
 	switch {
 	case preset == "allowlist":
 		ensureFence(cfg)
-		n, err = engine.ApplyEgressFence(name, preset, cfg.EgressAllowlistFor(name))
+		n, err = engine.ApplyEgressFenceProxies(name, preset, cfg.EgressAllowlistFor(name), proxyEndpoints(cfg, name))
 	case preset == "allow" && track:
 		ensureFence(cfg)
 		err = engine.ApplyDNSTrack(name)
@@ -146,6 +149,46 @@ func DenyDomain(cfg *config.Config, name, domain string) error {
 func Forget(cfg *config.Config, name string) error {
 	_ = dnsfence.ClearSeen(name)
 	return cfg.ForgetEgress(name)
+}
+
+// proxyEndpoints lists the "ip:port" proxy endpoints an allowlist fence
+// must keep open besides the gateway: the URL the sandbox's agents were
+// synced with (any route ResolveProxyURL picked) and the gateway on the
+// configured proxy.port. A hostname (host.docker.internal) is resolved
+// inside the sandbox and also put on the allowlist, so its DNS lookup
+// passes the fence. Loopback (VM ssh tunnels) needs nothing.
+func proxyEndpoints(cfg *config.Config, name string) []string {
+	set := map[string]bool{}
+	if gw := engine.BridgeGateway(); gw != "" && cfg.Proxy.Port != "" {
+		set[net.JoinHostPort(gw, cfg.Proxy.Port)] = true
+	}
+	if tg, ok := cfgsync.Lookup(name); ok {
+		if u, err := url.Parse(tg.BaseURL); err == nil && u.Hostname() != "" {
+			host, port := u.Hostname(), u.Port()
+			if port == "" {
+				port = "80"
+			}
+			if ip := net.ParseIP(host); ip != nil {
+				if !ip.IsLoopback() {
+					set[net.JoinHostPort(ip.String(), port)] = true
+				}
+			} else {
+				for _, ip := range engine.ResolveInSandbox(name, host) {
+					set[net.JoinHostPort(ip, port)] = true
+				}
+				if cfg.AllowlistCovers(name, host) == "" {
+					cfg.SetEgressAllowlist(name, append(append([]string{}, cfg.EgressAllowlistFor(name)...), host))
+					audit.Record("egress.allowlist", name, "proxy host "+host+" added (synced proxy route)")
+				}
+			}
+		}
+	}
+	out := make([]string, 0, len(set))
+	for ep := range set {
+		out = append(out, ep)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // ensureFence makes sure a DNS fence listens where sandboxes DNAT to. On

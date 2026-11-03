@@ -158,7 +158,7 @@ func egressResolverExec(name, script string) error {
 // egressAllowlistScript is the full allowlist iptables setup: base chain +
 // one ACCEPT per pre-resolved IP + nat side. Resolver file ops run via
 // egressResolverExec separately (plain exec, own mount ns).
-func egressAllowlistScript(ips []string, gw string, skipLo bool) string {
+func egressAllowlistScript(ips []string, gw string, skipLo bool, proxies []string) string {
 	var b strings.Builder
 	b.WriteString(egressBinCheck)
 	fmt.Fprintf(&b, "iptables -N %s 2>/dev/null; iptables -F %s 2>/dev/null; ", egressChain, egressChain)
@@ -170,6 +170,17 @@ func egressAllowlistScript(ips []string, gw string, skipLo bool) string {
 	fmt.Fprintf(&b, "iptables -A %s -d %s -p udp --dport %s -j ACCEPT; ", egressChain, gw, dnsFencePort())
 	fmt.Fprintf(&b, "iptables -A %s -d %s -p tcp --dport %s -j ACCEPT; ", egressChain, gw, dnsFencePort())
 	fmt.Fprintf(&b, "iptables -A %s -d %s -p tcp --dport %s -j ACCEPT; ", egressChain, gw, proxyFencePort())
+	// the proxy endpoint(s) the sandbox was actually synced with (WSL IP,
+	// host.docker.internal, a non-default proxy.port) - the gateway rule
+	// above alone cut those sandboxes off at lock-down (issue #3)
+	for _, ep := range proxies {
+		if ep == net.JoinHostPort(gw, proxyFencePort()) {
+			continue // the gateway rule above already covers it
+		}
+		if host, port, err := net.SplitHostPort(ep); err == nil && net.ParseIP(host) != nil {
+			fmt.Fprintf(&b, "iptables -A %s -d %s -p tcp --dport %s -j ACCEPT; ", egressChain, host, port)
+		}
+	}
 	fmt.Fprintf(&b, "iptables -A %s -j DROP; ", egressChain)
 	fmt.Fprintf(&b, "iptables -D OUTPUT -j %s 2>/dev/null; iptables -I OUTPUT 1 -j %s; ", egressChain, egressChain)
 	b.WriteString(egressDNATScript(gw, skipLo))
@@ -214,6 +225,12 @@ func proxyFencePort() string {
 // zero. preset "allowlist" requires domains (from config.EgressAllowlist);
 // other presets ignore domains. Returns the count of resolved IPv4s.
 func ApplyEgressFence(name, preset string, domains []string) (int, error) {
+	return ApplyEgressFenceProxies(name, preset, domains, nil)
+}
+
+// ApplyEgressFenceProxies is ApplyEgressFence plus the "ip:port" proxy
+// endpoints an allowlist fence must keep reachable besides the gateway.
+func ApplyEgressFenceProxies(name, preset string, domains, proxies []string) (int, error) {
 	preset = strings.TrimSpace(preset)
 	if preset == "" {
 		preset = "allow"
@@ -244,7 +261,7 @@ func ApplyEgressFence(name, preset string, domains []string) (int, error) {
 				}
 			}
 		}
-		script := egressAllowlistScript(ips, gw, t.skipLoopback())
+		script := egressAllowlistScript(ips, gw, t.skipLoopback(), proxies)
 		forgetApplied(name) // the chain is rebuilt: keeper must re-open fresh answers
 		if out, err := t.run(script); err != nil {
 			return len(ips), fmt.Errorf("egress %s → allowlist: %w: %s", name, err, strings.TrimSpace(out))

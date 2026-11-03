@@ -17,6 +17,7 @@ package engine
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"sync"
@@ -180,6 +181,35 @@ func (t egressTarget) startID() (id string, running bool, err error) {
 	}
 	r, started, _ := strings.Cut(strings.TrimSpace(out), " ")
 	return started, r == "true", nil
+}
+
+// ResolveInSandbox resolves host from inside the sandbox (its own resolver
+// view: host.docker.internal differs from the host's); IPv4 only.
+func ResolveInSandbox(name, host string) []string {
+	t, err := resolveEgressTarget(name)
+	if err != nil {
+		return nil
+	}
+	var out string
+	if t.kind == "libvirt" {
+		out, err = RunTO(20*time.Second, "ssh", t.sshArgs("getent ahostsv4 "+shQuoteE(host))...)
+	} else {
+		out, err = RunTO(10*time.Second, "docker", "exec", t.container, "getent", "ahostsv4", host)
+	}
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var ips []string
+	for _, ln := range strings.Split(out, "\n") {
+		if f := strings.Fields(ln); len(f) > 0 && !seen[f[0]] {
+			if ip := net.ParseIP(f[0]); ip != nil && ip.To4() != nil {
+				seen[f[0]] = true
+				ips = append(ips, f[0])
+			}
+		}
+	}
+	return ips
 }
 
 // EgressStartID is the restart stamp the daemon's re-applier compares.
