@@ -918,8 +918,8 @@ type createReq struct {
 	Ports         []string          `json:"ports"`
 	Env           map[string]string `json:"env"`
 	Egress        string            `json:"egress"`
-	EgressDomains []string          `json:"egress_domains,omitempty"` // allowlist preset only
-	EgressTrack   bool              `json:"egress_track,omitempty"`   // record DNS lookups (allow/allowlist)
+	EgressDomains []string          `json:"egress_domains,omitempty"` // allowlist / strict only
+	EgressTrack   bool              `json:"egress_track,omitempty"`   // record lookups (allow/allowlist/strict)
 	Agents        []string          `json:"agents,omitempty"`         // agent modules to install (containers)
 	BudgetUSD     *float64          `json:"budget_usd"`
 	BudgetTokens  *int              `json:"budget_tokens"`
@@ -959,6 +959,10 @@ func (s *Server) createRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.Egress != "" && !engine.KnownEgressPreset(in.Egress) {
 		httpError(w, 400, "unknown egress preset "+in.Egress)
+		return
+	}
+	if in.Egress == "strict" && len(in.Ports) > 0 {
+		httpError(w, 400, "egress strict cannot be combined with published ports - they stay reachable from the host even on an isolated network (drop the ports or pick allowlist)")
 		return
 	}
 	mods, err := s.resolveAgents(in.Agents)
@@ -1123,6 +1127,10 @@ func (s *Server) createVM(w http.ResponseWriter, in createReq) {
 		httpError(w, 400, "vm_backend must be \"libvirt\" or \"docker\" (kit has no other backends)")
 		return
 	}
+	if in.Egress == "strict" && backend == "docker" {
+		httpError(w, 400, "egress strict needs the libvirt backend - docker-backend VMs are reached over a published ssh port, which an isolated network cannot carry")
+		return
+	}
 	if backend == "libvirt" && !engine.LibvirtUp() {
 		httpError(w, 503, "libvirt (qemu:///system) not reachable on this host - use vm_backend:\"docker\" (hotbedvmd)")
 		return
@@ -1228,7 +1236,7 @@ func (s *Server) applyCreateEgress(name string, in createReq, installed []string
 	if in.Egress == "" {
 		in.Egress = "allow"
 	}
-	if in.Egress == "allowlist" {
+	if in.Egress == "allowlist" || in.Egress == "strict" {
 		all, _ := agents.Load()
 		for _, m := range all {
 			if m.Builtin && agents.Enabled(s.Cfg, m) || containsStr(installed, m.ID) {

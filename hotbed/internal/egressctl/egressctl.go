@@ -36,10 +36,21 @@ func Apply(cfg *config.Config, name, preset string, track bool) (int, error) {
 		preset = "allow"
 	}
 	if !engine.KnownEgressPreset(preset) {
-		return 0, fmt.Errorf("unknown egress preset %q (allow|proxy-only|none|allowlist)", preset)
+		return 0, fmt.Errorf("unknown egress preset %q (allow|proxy-only|none|allowlist|strict)", preset)
 	}
-	if preset != "allow" && preset != "allowlist" {
+	if preset != "allow" && preset != "allowlist" && preset != "strict" {
 		track = false
+	}
+	if preset == "strict" {
+		// refuse before anything is recorded: a refused sandbox keeps its preset
+		if why := engine.StrictRefusal(name); why != "" {
+			return 0, fmt.Errorf("strict %s refused: %s", name, why)
+		}
+	} else if cfg.EgressMode[name] == "strict" {
+		// leaving: back onto the old network first, then the new preset's rules
+		if err := engine.LeaveStrict(name); err != nil {
+			return 0, err
+		}
 	}
 	// record first: the fence must already know the sandbox's mode when
 	// the DNAT lands, or an `allow`+track sandbox's first lookups would
@@ -50,6 +61,8 @@ func Apply(cfg *config.Config, name, preset string, track bool) (int, error) {
 	n := 0
 	var err error
 	switch {
+	case preset == "strict":
+		err = applyStrict(cfg, name)
 	case preset == "allowlist":
 		ensureFence(cfg)
 		n, err = engine.ApplyEgressFenceProxies(name, preset, cfg.EgressAllowlistFor(name), proxyEndpoints(cfg, name))
@@ -62,6 +75,65 @@ func Apply(cfg *config.Config, name, preset string, track bool) (int, error) {
 	return n, err
 }
 
+// applyStrict brings up the enforcement side (gateway container for
+// containers; the daemon's bridge listener serves libvirt guests) and
+// isolates the sandbox. The daemon's strict watcher re-syncs its agents
+// onto the gateway route (api.StartStrictWatch).
+func applyStrict(cfg *config.Config, name string) error {
+	kind, err := engine.EgressKind(name)
+	if err != nil {
+		return err
+	}
+	if kind == "container" {
+		target, err := llmTarget(cfg)
+		if err != nil {
+			return fmt.Errorf("strict %s: %w", name, err)
+		}
+		if err := engine.EnsureStrictGateway(cfg.Proxy.Port, target); err != nil {
+			return err
+		}
+	}
+	return engine.ApplyStrict(name)
+}
+
+// llmTarget is the LLM proxy as the gateway container (default bridge)
+// reaches it: the in-engine relay on Docker Desktop, else the daemon on
+// the distro's address.
+func llmTarget(cfg *config.Config) (string, error) {
+	if engine.IsDockerDesktop() && !env.RelayDisabled() {
+		gw, err := engine.EnsureRelay(cfg.Proxy.Port)
+		if err != nil {
+			return "", err
+		}
+		return net.JoinHostPort(gw, cfg.Proxy.Port), nil
+	}
+	if ip := cfgsync.HostIP(); ip != "" {
+		return net.JoinHostPort(ip, cfg.Proxy.Port), nil
+	}
+	return "", fmt.Errorf("no address for the LLM proxy outside docker")
+}
+
+// EnsureStrictGateway re-establishes the gateway (daemon boot, new build)
+// when any container sandbox is recorded strict.
+func EnsureStrictGateway(cfg *config.Config) {
+	for name, mode := range cfg.EgressMode {
+		if mode != "strict" {
+			continue
+		}
+		if k, err := engine.EgressKind(name); err != nil || k != "container" {
+			continue
+		}
+		target, err := llmTarget(cfg)
+		if err == nil {
+			err = engine.EnsureStrictGateway(cfg.Proxy.Port, target)
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "\033[33;1mhotbedd:\033[0m strict egress gateway: %v\n", err)
+		}
+		return
+	}
+}
+
 // SetTrack switches DNS tracking for a sandbox, keeping its preset.
 // Turning tracking on/off for an `allow` sandbox changes its netns (DNS
 // DNAT in/out); for allowlist only the fence's record flag flips.
@@ -70,10 +142,10 @@ func SetTrack(cfg *config.Config, name string, on bool) error {
 	if preset == "" {
 		preset = "allow" // never applied through hotbedd: docker default
 	}
-	if preset != "allow" && preset != "allowlist" {
-		return fmt.Errorf("dns tracking needs the allow or allowlist preset (%s is %s)", name, preset)
+	if preset != "allow" && preset != "allowlist" && preset != "strict" {
+		return fmt.Errorf("dns tracking needs the allow, allowlist or strict preset (%s is %s)", name, preset)
 	}
-	if preset == "allowlist" {
+	if preset == "allowlist" || preset == "strict" {
 		if err := cfg.SetEgressState(name, preset, on); err != nil {
 			return err
 		}

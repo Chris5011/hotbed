@@ -148,7 +148,7 @@ func (c *Config) EgressAllowlistFor(name string) []string {
 // sandbox. Tracking only exists for allow/allowlist (the presets whose DNS
 // can ride the fence); it is forced off for the others.
 func (c *Config) SetEgressState(name, preset string, track bool) error {
-	if preset != "allow" && preset != "allowlist" {
+	if preset != "allow" && preset != "allowlist" && preset != "strict" {
 		track = false
 	}
 	if c.EgressMode == nil {

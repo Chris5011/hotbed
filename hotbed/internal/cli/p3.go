@@ -339,6 +339,9 @@ const egressUsage = `usage:
   hotbedd egress NAME allow|proxy-only|none [--track|--no-track]
   hotbedd egress NAME allowlist [DOMAINS...] [--track|--no-track]
                                     (no domains = keep the configured list, may be empty)
+  hotbedd egress NAME strict [--track|--no-track]
+                                    isolated network; out only via the allowlist proxy
+                                    (containers without published ports, libvirt VMs)
   hotbedd egress NAME track on|off                     record DNS lookups (allow / allowlist)
   hotbedd egress NAME seen                             domains the sandbox looked up
   hotbedd egress NAME add|rm DOMAIN...                 edit the allowlist (live on a fenced sandbox)`
@@ -428,6 +431,9 @@ func egressCmd(args []string) error {
 		} else {
 			ok("egress %s → allow (rules removed, docker default; resolver reset to docker internal)\n", name)
 		}
+	case "strict":
+		ok("egress %s → strict: isolated network, outbound only through the allowlist proxy (%d domain(s)%s); agents re-sync onto the gateway within ~10 s\n",
+			name, len(cfg.EgressAllowlistFor(name)), tr)
 	default:
 		ok("egress %s → %s (loopback+established kept; re-applied by the daemon after restarts)\n", name, preset)
 	}
@@ -442,6 +448,19 @@ func egressShow(cfg *config.Config, name string) error {
 	fmt.Printf("%s: preset %s · dns tracking %v\n", name, mode, cfg.EgressTrack[name])
 	if list := cfg.EgressAllowlistFor(name); len(list) > 0 {
 		fmt.Printf("%s: allowlist: %s\n", name, strings.Join(list, ", "))
+	}
+	if mode == "strict" {
+		on, err := engine.StrictInstalled(name)
+		if err != nil {
+			return err
+		}
+		if !on {
+			fmt.Printf("%s: NOT isolated right now (the daemon re-applies strict within ~30 s)\n", name)
+		} else {
+			fmt.Printf("%s: isolated network, outbound only via the allowlist proxy (%s / libvirt %s)\n",
+				name, engine.StrictGateway(), engine.StrictLibvirtNetwork())
+		}
+		return nil
 	}
 	s, err := engine.ShowEgressContainer(name)
 	if err != nil {

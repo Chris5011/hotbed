@@ -421,3 +421,41 @@ func (f *fence) log(sandbox string, ips [][]byte) {
 		_ = enc.Encode(e)
 	}
 }
+
+// Judge exposes the fence's per-sandbox decisions — source attribution,
+// recorded egress mode, allowlist match, lookup tracking — to the strict
+// egress proxy (internal/egressproxy), so both enforcement points judge
+// with exactly the same data and rules.
+type Judge struct{ f *fence }
+
+// NewJudge builds a judge (config + attribution re-read on change) whose
+// tracking flushes into the same dns-seen records as the fence.
+func NewJudge() *Judge {
+	f := &fence{load: config.Load, logged: map[string]time.Time{}, lookups: newSeenLog()}
+	go f.lookups.loop()
+	return &Judge{f: f}
+}
+
+// Sandbox attributes a source IP ("" = unknown: callers fail closed).
+func (j *Judge) Sandbox(ip string) string { return j.f.sandboxOf(ip) }
+
+// Mode is the sandbox's recorded egress preset.
+func (j *Judge) Mode(sandbox string) string {
+	if cfg := j.f.config(); cfg != nil {
+		return cfg.EgressMode[sandbox]
+	}
+	return ""
+}
+
+// Allowed applies the allowlist suffix match.
+func (j *Judge) Allowed(sandbox, host string) bool { return j.f.allowed(sandbox, host) }
+
+// Record counts a request in the DNS tab record when tracking is on.
+func (j *Judge) Record(sandbox, host string, blocked bool) {
+	if cfg := j.f.config(); cfg != nil && cfg.EgressTrack[sandbox] {
+		j.f.lookups.record(sandbox, strings.ToLower(host), blocked)
+	}
+}
+
+// Flush writes pending tracking records now (tests, shutdown).
+func (j *Judge) Flush() { j.f.lookups.flush() }

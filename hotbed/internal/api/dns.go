@@ -8,7 +8,7 @@ package api
 //	POST /api/sandboxes/<kind>/<name>/dns
 //	     {"action":"allow"|"deny","domain":"api.example.com"}
 //	     {"action":"track","on":true}
-//	     {"action":"preset","preset":"allowlist"}   (allow ⇄ allowlist)
+//	     {"action":"preset","preset":"allowlist"}   (allow ⇄ allowlist ⇄ strict)
 //	     {"action":"clear"}                          (drop the lookup record)
 
 import (
@@ -109,8 +109,8 @@ func (s *Server) dnsAction(w http.ResponseWriter, r *http.Request, name string) 
 	case "clear":
 		err = dnsfence.ClearSeen(name)
 	case "preset":
-		if in.Preset != "allow" && in.Preset != "allowlist" {
-			httpError(w, 400, "preset: allow or allowlist")
+		if in.Preset != "allow" && in.Preset != "allowlist" && in.Preset != "strict" {
+			httpError(w, 400, "preset: allow, allowlist or strict")
 			return
 		}
 		_, err = egressctl.Apply(s.Cfg, name, in.Preset, s.Cfg.EgressTrack[name])

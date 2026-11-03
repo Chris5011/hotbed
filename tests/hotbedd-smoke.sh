@@ -900,6 +900,16 @@ if docker info >/dev/null 2>&1; then
         grep -q 'libvirt' <<<"$RVM2" \
             && pass "create: VM unknown backend rejected (libvirt|docker only)" \
             || fail "create: VM unknown backend rejected ($RVM2)"
+        RST1="$(curl -s -X POST http://127.0.0.1:7794/api/create -H 'Content-Type: application/json' \
+            -d '{"name":"strictp","stack":"base","egress":"strict","ports":["8080:80"]}')"
+        grep -q 'cannot be combined with published ports' <<<"$RST1" \
+            && pass "create: egress strict + published ports refused" \
+            || fail "create: egress strict + published ports refused ($RST1)"
+        RST2="$(curl -s -X POST http://127.0.0.1:7794/api/create -H 'Content-Type: application/json' \
+            -d '{"kind":"vm","name":"strictd","vm_backend":"docker","egress":"strict"}')"
+        grep -q 'strict needs the libvirt backend' <<<"$RST2" \
+            && pass "create: egress strict on a docker-backend VM refused" \
+            || fail "create: egress strict on a docker-backend VM refused ($RST2)"
         RVMK="$(curl -s -X POST http://127.0.0.1:7794/api/create -H 'Content-Type: application/json' \
             -d '{"kind":"fisher","name":"x"}')"
         grep -q 'kind must be' <<<"$RVMK" \

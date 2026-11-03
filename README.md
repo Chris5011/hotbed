@@ -1062,6 +1062,49 @@ re-applies them (containers and docker VMs: StartedAt changes; libvirt:
 the guest's boot id). Docker inside a VM routes its containers via FORWARD,
 not OUTPUT — nested containers are not fenced.
 
+**Strict egress** (`strict` preset): the presets above are rules *inside*
+the sandbox (its netns or guest), so whoever is root in there — every agent
+has sudo — can rewrite them. `strict` enforces the allowlist from outside:
+
+```bash
+hotbedd egress NAME strict --track       # isolate; same allowlist / DNS tab
+hotbedd egress NAME add api.example.com   # live, as with allowlist
+hotbedd egress NAME allowlist             # leave strict (back on its network)
+```
+
+- **Containers** leave every docker network and join `hotbed-strict-<id>`,
+  an `--internal` network: no route to the internet, the host or the docker
+  bridge, and no external DNS. Its only other member is the egress gateway
+  container `sbx-egress-<id>` (alias `hotbed-egress`, also on the default
+  bridge; same bind-mounted `hotbedd` binary as the relay, respawned on a
+  new daemon build). It runs the allowlist HTTP(S) proxy on `:3128`
+  (CONNECT host / request host against the sandbox's list, suffix match,
+  no TLS interception) and forwards the LLM proxy port.
+- **libvirt VMs**: the guest NIC is re-pointed live (same MAC) to the
+  isolated libvirt network `hotbed-strict-<id>` (no `<forward>`, a free
+  `192.168.240+.0/24`); the daemon serves the proxy on its bridge address.
+  The LLM proxy keeps riding the ssh tunnel.
+- Inside the sandbox only convenience changes: `HTTP(S)_PROXY` / `NO_PROXY`
+  (plus `NODE_USE_ENV_PROXY=1`) in `/etc/profile.d/hotbed-egress.sh` and
+  `/etc/environment`, apt's proxy config. Removing them just breaks the
+  sandbox's own outbound. Tools that ignore proxy variables cannot get out.
+- Requests are attributed by source address; sources that are not a strict
+  sandbox are refused. With tracking on, every requested host lands in the
+  DNS tab (*Isolate (strict)* there switches an allowlist sandbox over).
+- OpenCode and every agent are re-synced onto the new route automatically
+  (within ~10 s; audit `strict.resync`), also when leaving strict.
+- **Refused**: containers that publish ports (published ports stay reachable
+  from the host even on an internal network) or share another netns, and
+  docker-backend VMs (reached over a published ssh port).
+- Everything goes through the proxy: no DNS from inside, no UDP, no direct
+  TCP. CONNECT works on any port, but only to listed hosts — so `git` over
+  https works, ssh remotes need a `ProxyCommand` (or use https).
+- Limits: strict sandboxes share one isolated network and can reach each
+  other (as on the default bridge). Attribution is by source address, so
+  root in one strict sandbox could take over another strict sandbox's
+  address on that network and get *its* allowlist — never more than the
+  union of the strict sandboxes' lists.
+
 **Audit trail** — `state/audit.jsonl` records the control plane: sandbox
 start/stop/spawn, key mint/revoke, wallet changes, mount recreates, egress
 changes, sweeper stops. `hotbedd audit [N]` renders the last N as a table.

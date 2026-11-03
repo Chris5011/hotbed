@@ -29,6 +29,10 @@ import (
 //	             LLM proxy (gw:proxy_port) is kit-internal, bearer-key
 //	             gated and always accepted here, so a synced opencode
 //	             works without listing its provider domain.
+//	strict       no rules in the sandbox at all: it moves onto an isolated
+//	             network whose only way out is the allowlist egress proxy
+//	             outside it — root in the sandbox cannot lift it
+//	             (strict.go, issue #4)
 //
 // Applied via `docker exec … iptables` when the sandbox can run iptables
 // (has the binary and NET_ADMIN); otherwise through a privileged helper
@@ -50,6 +54,7 @@ var egressPresets = map[string]bool{
 	"proxy-only": true,
 	"none":       true,
 	"allowlist":  true,
+	"strict":     true, // isolated network + egress gateway (strict.go)
 }
 
 const (
@@ -312,6 +317,9 @@ func ApplyDNSTrack(name string) error {
 // rules of a preset (allowlist: filter + nat side; tracked allow: nat side;
 // proxy-only/none: filter chain; allow: nothing to check → true).
 func EgressInstalled(name, preset string, track bool) (bool, error) {
+	if preset == "strict" {
+		return StrictInstalled(name)
+	}
 	out, err := ShowEgressContainer(name)
 	if err != nil {
 		return false, err

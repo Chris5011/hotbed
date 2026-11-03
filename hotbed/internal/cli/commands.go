@@ -164,6 +164,13 @@ func serve(args []string) error {
 	// re-synced once the first inventory scan is in
 	go srv.HealKeys()
 
+	// strict egress (issue #4): gateway container back up for strict
+	// containers, the allowlist proxy on the isolated libvirt bridge, and
+	// agent re-sync whenever a sandbox enters/leaves strict
+	go egressctl.EnsureStrictGateway(cfg)
+	go strictLibvirtListener()
+	srv.StartStrictWatch()
+
 	// dns fence listener (allowlist egress). On Docker Desktop the real
 	// fence runs inside the engine's relay container — a host listener
 	// cannot be reached by sandboxes — but we still serve one for native

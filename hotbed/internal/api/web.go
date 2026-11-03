@@ -1096,7 +1096,7 @@ function renderCreator(){
     '<div class="fm">host folders shared into the sandbox (read-only recommended)</div></div>'+
     '</div>'+
     '<div class="cw-sec"><div class="cw-sec-t">Network</div><div class="cw-grid two">'+
-      '<div class="field"><label for="cw-egress">Egress</label><select id="cw-egress"><option>allow</option><option>allowlist</option><option>proxy-only</option><option>none</option></select><div class="fm" id="cw-egress-fm">outbound fence, re-applied by the daemon after restarts</div></div>'+
+      '<div class="field"><label for="cw-egress">Egress</label><select id="cw-egress"><option>allow</option><option>allowlist</option><option>strict</option><option>proxy-only</option><option>none</option></select><div class="fm" id="cw-egress-fm">outbound fence, re-applied by the daemon after restarts</div></div>'+
       '<div class="field" id="cw-egtrack-row"><label>DNS tracking</label><label class="check"><input type="checkbox" id="cw-eg-track" checked><span class="box"></span>record lookups</label><div class="fm">every domain the sandbox resolves shows up in its DNS tab - allow forgotten ones there afterwards</div></div>'+
       '<div class="field wide" id="cw-egdom-row" style="display:none"><label for="cw-eg-dom">Allowed domains</label><input id="cw-eg-dom" style="width:100%" placeholder="api.openai.com, example.org" autocomplete="off" title="opencode.ai is needed to converse with models: opencode authenticates and fetches its model list from api.opencode.ai; selected agents add their own domains automatically."><div class="fm">comma/space separated; suffix match covers subdomains; DNS goes through the fence, everything else drops. May stay empty with tracking on - allow what the DNS tab shows later. Selected agents add the domains they need.</div></div>'+
     '</div>'+
@@ -1136,9 +1136,12 @@ function renderCreator(){
   // away and back, but is only applied on create when allowlist is active.
   var egressDomUpdate=function(){
     var v=$('cw-egress').value;
-    $('cw-egdom-row').style.display=(v==='allowlist')?'':'none';
-    // tracking needs DNS through the fence: allow and allowlist only
-    $('cw-egtrack-row').style.display=(v==='allow'||v==='allowlist')?'':'none';
+    $('cw-egdom-row').style.display=(v==='allowlist'||v==='strict')?'':'none';
+    // tracking needs the fence (allow, allowlist) or the strict proxy
+    $('cw-egtrack-row').style.display=(v==='allow'||v==='allowlist'||v==='strict')?'':'none';
+    $('cw-egress-fm').textContent=(v==='strict')
+      ? 'isolated network: no route out at all - only the allowlist proxy outside the sandbox (root inside cannot lift it). Containers without published ports and libvirt VMs.'
+      : 'outbound fence, re-applied by the daemon after restarts';
   };
   $('cw-egress').addEventListener('change',egressDomUpdate);
   egressDomUpdate();
@@ -1209,8 +1212,8 @@ function renderCreator(){
           function(x){ return x.getAttribute('data-agent'); }),
         egress: $('cw-egress').value
       };
-      if(payload.egress==='allowlist'){ payload.egress_domains=($('cw-eg-dom').value||'').split(/[\s,]+/).filter(Boolean); }
-      if(payload.egress==='allow'||payload.egress==='allowlist'){ payload.egress_track=$('cw-eg-track').checked; }
+      if(payload.egress==='allowlist'||payload.egress==='strict'){ payload.egress_domains=($('cw-eg-dom').value||'').split(/[\s,]+/).filter(Boolean); }
+      if(payload.egress==='allow'||payload.egress==='allowlist'||payload.egress==='strict'){ payload.egress_track=$('cw-eg-track').checked; }
       if($('cw-usd').value!==''){ payload.budget_usd=parseFloat($('cw-usd').value)||0; }
       if($('cw-tok').value!==''){ payload.budget_tokens=parseInt($('cw-tok').value,10)||0; }
       fetch('/api/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
@@ -1249,10 +1252,10 @@ function renderCreator(){
       env:env, egress:$('cw-egress').value,
       sync:$('cw-sync').checked, provider:($('cw-provider').value||'').trim()
     };
-    if(payload.egress==='allowlist'){
+    if(payload.egress==='allowlist'||payload.egress==='strict'){
       payload.egress_domains=($('cw-eg-dom').value||'').split(/[\s,]+/).filter(Boolean);
     }
-    if(payload.egress==='allow'||payload.egress==='allowlist'){
+    if(payload.egress==='allow'||payload.egress==='allowlist'||payload.egress==='strict'){
       payload.egress_track=$('cw-eg-track').checked;
     }
     payload.agents=Array.prototype.map.call(document.querySelectorAll('#cw-agents input[data-agent]:checked:not(:disabled)'),
@@ -1725,11 +1728,14 @@ function paintDns(sb,j){
   var host=$('dns-body');
   dnsLast=j;
   var recorded=!!j.mode, mode=j.mode||'allow', track=!!j.track;
-  var fenceable=(mode==='allow'||mode==='allowlist');
+  var fenceable=(mode==='allow'||mode==='allowlist'||mode==='strict');
   var sig=mode+'|'+track+'|'+recorded;
   if(host.getAttribute('data-sig')!==sig || !$('dns-tbl')){
     var expl;
-    if(mode==='allowlist'){
+    if(mode==='strict'){
+      expl='<b>strict</b>: this sandbox sits on an isolated network with no route out; its only way to the internet is the hotbed proxy outside it, which lets through the listed domains (subdomains included) and refuses the rest. Nothing inside the sandbox - root included - can change that. Rows here are the hosts it asked the proxy for. Flip a toggle to allow one - it applies live.';
+      if(!track){ expl+=' Tracking is off, so refused requests are not recorded - turn it on to see what the sandbox is missing.'; }
+    } else if(mode==='allowlist'){
       expl='<b>allowlist</b> fence: only listed domains resolve, everything else is refused and dropped. Flip a toggle to allow a domain - it applies live, no restart. Entries match their subdomains too.';
       if(!track){ expl+=' Tracking is off, so refused lookups are not recorded - turn it on to see what the sandbox is missing.'; }
     } else if(mode==='allow'){
@@ -1742,18 +1748,19 @@ function paintDns(sb,j){
     }
     var presetBtn='';
     if(mode==='allow' && track){ presetBtn='<button class="tool" id="dns-lock" title="switch to the allowlist preset using the toggled domains">&#128274; Lock down to allowlist</button>'; }
-    if(mode==='allowlist'){ presetBtn='<button class="tool" id="dns-open" title="switch back to the allow preset (tracking stays as is)">Open egress (allow)</button>'; }
+    if(mode==='allowlist'){ presetBtn='<button class="tool" id="dns-strict" title="move the sandbox onto an isolated network - the same allowlist, enforced outside the sandbox">&#128737; Isolate (strict)</button><button class="tool" id="dns-open" title="switch back to the allow preset (tracking stays as is)">Open egress (allow)</button>'; }
+    if(mode==='strict'){ presetBtn='<button class="tool" id="dns-unstrict" title="back onto its normal network with the in-sandbox allowlist fence">Leave strict (allowlist)</button>'; }
     host.innerHTML=
       '<div class="hint">'+expl+'</div>'+
       '<div class="burnbar">'+
         '<div class="bstat"><div class="v" id="dns-n-dom">0</div><div class="k">domains seen</div></div>'+
         '<div class="bstat"><div class="v" id="dns-n-q">0</div><div class="k">lookups</div></div>'+
-        '<div class="bstat" id="dns-blk-card"><div class="v" id="dns-n-blk">0</div><div class="k">'+(mode==='allowlist'?'blocked domains':'not on the list')+'</div></div>'+
+        '<div class="bstat" id="dns-blk-card"><div class="v" id="dns-n-blk">0</div><div class="k">'+(mode==='allowlist'||mode==='strict'?'blocked domains':'not on the list')+'</div></div>'+
         '<div class="bstat"><div class="v" id="dns-n-list">0</div><div class="k">allowlist entries</div></div>'+
       '</div>'+
       '<div class="dnstools">'+
         '<label title="record every DNS lookup of this sandbox"><span class="ios-toggle"><input type="checkbox" id="dns-track"'+(track?' checked':'')+(fenceable?'':' disabled')+'><span class="track"></span><span class="knob"></span></span>record lookups</label>'+
-        '<label><span class="ios-toggle"><input type="checkbox" id="dns-onlyblk"'+(dnsOnlyBlocked?' checked':'')+'><span class="track"></span><span class="knob"></span></span>only '+(mode==='allowlist'?'blocked':'unlisted')+'</label>'+
+        '<label><span class="ios-toggle"><input type="checkbox" id="dns-onlyblk"'+(dnsOnlyBlocked?' checked':'')+'><span class="track"></span><span class="knob"></span></span>only '+(mode==='allowlist'||mode==='strict'?'blocked':'unlisted')+'</label>'+
         '<input id="dns-filter" type="search" placeholder="filter domains" autocomplete="off" spellcheck="false">'+
         '<span class="grow"></span>'+presetBtn+
         '<button class="tool" id="dns-clear" title="forget the recorded lookups (the allowlist stays)">&#128465; clear record</button>'+
@@ -1774,6 +1781,15 @@ function paintDns(sb,j){
         body:'From now on only the <b>'+n+'</b> listed domain(s) (and the hotbed proxy) stay reachable; every other lookup is refused and dropped. Tracking stays on, so forgotten domains show up here to allow.',
         confirmLabel:'Lock down'}, function(ok){ if(ok) dnsPost(sb,{action:'preset',preset:'allowlist'}); });
     });
+    if($('dns-strict')) $('dns-strict').addEventListener('click',function(){
+      askConfirm({title:'Isolate '+sb.name+' (strict)?',
+        body:'The sandbox moves onto an isolated network: no route out except the hotbed proxy, which lets through exactly its allowlist. Root inside the sandbox can no longer lift the fence. Agents are re-synced onto the new route within seconds. Sandboxes publishing ports (and docker-backend VMs) are refused.',
+        confirmLabel:'Isolate'}, function(ok){ if(ok) dnsPost(sb,{action:'preset',preset:'strict'}); });
+    });
+    if($('dns-unstrict')) $('dns-unstrict').addEventListener('click',function(){
+      askConfirm({title:'Leave strict for '+sb.name+'?', body:'The sandbox goes back onto its normal network with the in-sandbox allowlist fence (same domains). Root inside could lift that fence again.', confirmLabel:'Leave strict', danger:true},
+        function(ok){ if(ok) dnsPost(sb,{action:'preset',preset:'allowlist'}); });
+    });
     if($('dns-open')) $('dns-open').addEventListener('click',function(){
       askConfirm({title:'Open egress for '+sb.name+'?', body:'Removes the fence: the sandbox may reach any address again. The allowlist is kept for a later lock-down.', confirmLabel:'Open egress', danger:true},
         function(ok){ if(ok) dnsPost(sb,{action:'preset',preset:'allow'}); });
@@ -1787,13 +1803,13 @@ function paintDns(sb,j){
   dnsTable(sb,j);
 }
 function dnsTable(sb,j){
-  var mode=j.mode||'allow', fenceable=(mode==='allow'||mode==='allowlist');
+  var mode=j.mode||'allow', fenceable=(mode==='allow'||mode==='allowlist'||mode==='strict');
   var rows=j.domains||[], q=0, blk=0;
   rows.forEach(function(r){ q+=r.count||0; if(!r.allowed && r.count) blk++; });
   $('dns-n-dom').textContent=rows.filter(function(r){return r.count;}).length;
   $('dns-n-q').textContent=q;
   $('dns-n-blk').textContent=blk;
-  $('dns-blk-card').classList.toggle('warn', mode==='allowlist' && blk>0);
+  $('dns-blk-card').classList.toggle('warn', (mode==='allowlist'||mode==='strict') && blk>0);
   $('dns-n-list').textContent=(j.allowlist||[]).length;
   var html='<table class="tbl"><thead><tr><th>allow</th><th>domain</th><th>status</th><th>lookups</th><th>refused</th><th>last seen</th><th>first seen</th></tr></thead><tbody>';
   var shown=0;
@@ -1806,7 +1822,7 @@ function dnsTable(sb,j){
     var tip=via? ' title="allowed via the entry '+esc(via)+'"' : '';
     var st;
     if(r.allowed){ st='<span class="dnsst ok">allowed</span>'; }
-    else if(mode==='allowlist'){ st='<span class="dnsst bad">blocked</span>'; }
+    else if(mode==='allowlist'||mode==='strict'){ st='<span class="dnsst bad">blocked</span>'; }
     else { st='<span class="dnsst">open</span>'; }
     html+='<tr><td class="tg"><span class="ios-toggle"'+tip+'><input type="checkbox" data-i="'+i+'"'+(r.allowed?' checked':'')+dis+'><span class="track"></span><span class="knob"></span></span></td>'+
       '<td>'+esc(r.domain)+(via?'<span class="via">via '+esc(via)+'</span>':'')+'</td><td>'+st+'</td>'+
@@ -1835,7 +1851,7 @@ function renderHelp(){
     '<div style="font-size:.82rem;color:var(--dim);line-height:1.55;max-width:70ch">'+
     '<p><b>hbd</b> makes a disposable Docker container per project dir - your project is bind-mounted at <span class="mono">/workspace</span>, the only host path the agent can touch. <b>hotbedvm</b> is the VM escape hatch (libvirt, or docker-in-docker "hotbedvmd"): snapshots, ssh, full disk. <b>hotbedd</b> is this daemon and dashboard: LLM providers, the proxy (burn ledger, one virtual key per sandbox and agent), wallets, egress fences, agent modules.</p>'+
     '<p>Provider API keys stay on the host in hotbedd only - sandboxes get per-sandbox minted proxy keys, the UI shows them masked everywhere.</p>'+
-    '<p><b>Egress fences</b>: <span class="mono">none</span> keeps only loopback+established (everything else drops, DNS included). <span class="mono">proxy-only</span> additionally keeps private ranges and DNS open so the host-side proxy works while public addresses drop. <span class="mono">allowlist</span> routes all DNS through the fence and only lets the sandbox reach domains from its configured list. With <b>DNS tracking</b> (allow / allowlist) every lookup shows up in the sandbox&rsquo;s DNS tab, where a toggle per domain allows it after the fact.</p>'+
+    '<p><b>Egress fences</b>: <span class="mono">none</span> keeps only loopback+established (everything else drops, DNS included). <span class="mono">proxy-only</span> additionally keeps private ranges and DNS open so the host-side proxy works while public addresses drop. <span class="mono">allowlist</span> routes all DNS through the fence and only lets the sandbox reach domains from its configured list. These fences live inside the sandbox, so root in it could lift them; <span class="mono">strict</span> enforces the same allowlist from outside: the sandbox moves onto an isolated network whose only way out is the hotbed proxy (containers without published ports, libvirt VMs). With <b>DNS tracking</b> (allow / allowlist) every lookup shows up in the sandbox&rsquo;s DNS tab, where a toggle per domain allows it after the fact.</p>'+
     '</div>'+
     hsec('LLM disclosure')+
     '<div style="font-size:.82rem;color:var(--dim);line-height:1.55;max-width:70ch">'+

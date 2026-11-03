@@ -22,6 +22,8 @@ func Dispatch(args []string) error {
 		return serve(args)
 	case "proxy":
 		return proxyCmd(args)
+	case "egress-gateway":
+		return egressGatewayCmd(args)
 	case "ps", "ls":
 		return ps(args)
 	case "stats":

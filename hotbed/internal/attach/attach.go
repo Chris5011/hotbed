@@ -653,6 +653,13 @@ func ResolveProxyURL(sb sandbox.Sandbox, proxyPort string) (string, string, erro
 		}
 		return "http://127.0.0.1:" + proxyPort + "/v1", "ssh tunnel (guest loopback)", nil
 	}
+	if engine.IsStrictContainer(sb.Name) {
+		// strict: no route but the gateway on the isolated network
+		if err := ProbeReach(sb, engine.StrictAlias, proxyPort); err != nil {
+			return "", "", fmt.Errorf("strict %s: egress gateway unreachable: %w", sb.Name, err)
+		}
+		return "http://" + engine.StrictAlias + ":" + proxyPort + "/v1", "strict egress gateway (" + engine.StrictGateway() + ")", nil
+	}
 	var lastErr error
 	lastVia := ""
 	for _, host := range []string{cfgsync.HostIP(), "host.docker.internal"} {
