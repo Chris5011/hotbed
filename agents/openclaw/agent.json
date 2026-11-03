@@ -2,8 +2,8 @@
   "name": "OpenClaw",
   "description": "Self-hosted personal agent with tools and skills. Runs as a local terminal chat (openclaw chat - no gateway service) against an openai-style provider through the hotbed proxy. Needs Node 24 (provisioned on install).",
   "homepage": "https://docs.openclaw.ai",
-  "command": "openclaw chat",
-  "resume": "openclaw chat",
+  "command": "timeout 20 openclaw gateway stop >/dev/null 2>&1; openclaw chat",
+  "resume": "timeout 20 openclaw gateway stop >/dev/null 2>&1; openclaw chat",
   "persist": {
     "links": {
       "~/.openclaw/agents": "agents/"
@@ -17,6 +17,6 @@
     "files": {
       "~/.config/hotbed/agents/openclaw/proxy.json5": "// written by hotbedd sync - merged into ~/.openclaw/openclaw.json\n{\n  models: { providers: { hotbed: {\n    baseUrl: \"{{base}}\",\n    apiKey: \"{{key}}\",\n    api: \"openai-completions\",\n    models: {{models_objects}}\n  } } },\n  agents: { defaults: { model: { primary: \"hotbed/{{model}}\" } } }\n}\n"
     },
-    "setup": "f=\"$HOME/.config/hotbed/agents/openclaw/proxy.json5\"; [ -f \"$f\" ] || exit 0; openclaw config patch --file \"$f\" >/dev/null && openclaw config validate >/dev/null"
+    "setup": "f=\"$HOME/.config/hotbed/agents/openclaw/proxy.json5\"; [ -f \"$f\" ] || exit 0; openclaw config patch --file \"$f\" >/dev/null && openclaw config validate >/dev/null; rc=$?; timeout 20 openclaw gateway stop >/dev/null 2>&1; exit $rc"
   }
 }
