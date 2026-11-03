@@ -233,9 +233,10 @@ func EnsureRelay(proxyPort string) (string, error) {
 	exists, running := relayRunning(name)
 	staleRelay := exists && running && relayOwns(name) && relayOwnsVersion(name) != relayStamp()
 	if staleRelay {
+		old := relayOwnsVersion(name) // read before the rm (it logged "" before)
 		_, _ = RunTO(30*time.Second, "docker", "rm", "-f", name)
 		audit.Record("relay.refresh", name,
-			fmt.Sprintf("relay binary predates the daemon (%s → %s)", relayOwnsVersion(name), relayStamp()))
+			fmt.Sprintf("relay binary predates the daemon (%s → %s)", old, relayStamp()))
 		fmt.Printf("\033[36;1mhotbedd:\033[0m relay respawned for the new daemon build (%s)\n", name)
 		exists = false
 	}

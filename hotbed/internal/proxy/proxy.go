@@ -22,6 +22,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -54,6 +55,36 @@ const (
 )
 
 func newAuthBackoff() *authBackoff { return &authBackoff{fails: map[string]*failRec{}} }
+
+// log401 records an unknown/revoked key with its readable prefix only
+// (hbk-<agent>-<provider>; the random part never hits the journal),
+// at most once per prefix+source a minute — enough to tell "which
+// sandbox lost its key" (issue #5) without letting a retry loop flood.
+func log401(tok, src string) {
+	tag := tok
+	if i := strings.LastIndex(tok, "-"); i > 0 {
+		tag = tok[:i]
+	}
+	if len(tag) > 64 {
+		tag = tag[:64]
+	}
+	key := tag + "|" + src
+	seen401Mu.Lock()
+	last, dup := seen401[key]
+	now := time.Now()
+	if dup && now.Sub(last) < time.Minute {
+		seen401Mu.Unlock()
+		return
+	}
+	seen401[key] = now
+	seen401Mu.Unlock()
+	fmt.Fprintf(os.Stderr, "hotbedd proxy: 401 unknown or revoked key %s-… from %s\n", tag, src)
+}
+
+var (
+	seen401Mu sync.Mutex
+	seen401   = map[string]time.Time{}
+)
 
 func remoteHost(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -169,6 +200,7 @@ func (p *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	k, ok := p.Keys.ByToken(tok)
 	if !ok {
 		p.bo.onFail(r)
+		log401(tok, remoteHost(r))
 		writeErr(w, 401, "hotbedd proxy: unknown or revoked key")
 		return
 	}

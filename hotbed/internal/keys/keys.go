@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"hotbed/internal/audit"
@@ -71,9 +72,10 @@ func (s *Store) load() (file, error) {
 	return f, nil
 }
 
+// save replaces keys.json atomically (temp file + rename): a reader — the
+// proxy or the relay, which re-read per request — never sees a half
+// written file. Callers hold lock().
 func (s *Store) save(f file) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
 		return err
 	}
@@ -81,7 +83,46 @@ func (s *Store) save(f file) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.path, b, 0o600)
+	tmp := s.path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.path)
+}
+
+// lock serializes every read-modify-write of keys.json — across goroutines
+// (mu) AND processes (flock on keys.json.lock): daemon, CLI and a second
+// daemon used to load, change and save concurrently, and the later save
+// silently dropped keys the earlier one had just minted (issue #5: those
+// sandboxes got 401 "unknown key").
+func (s *Store) lock() (func(), error) {
+	s.mu.Lock()
+	unlock, err := FileLock(s.path)
+	if err != nil {
+		s.mu.Unlock()
+		return nil, err
+	}
+	return func() { unlock(); s.mu.Unlock() }, nil
+}
+
+// FileLock takes an exclusive advisory lock on path+".lock" (blocking).
+// Exported for the other keys.json writer (config.MigrateFromKeys).
+func FileLock(path string) (func(), error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+	lf, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX); err != nil {
+		lf.Close()
+		return nil, err
+	}
+	return func() {
+		_ = syscall.Flock(int(lf.Fd()), syscall.LOCK_UN)
+		lf.Close()
+	}, nil
 }
 
 // Open loads the store (stateless; kept for API compat).
@@ -105,6 +146,11 @@ func (s *Store) EnsureAgentKey(sandbox, agent, provider string) (Key, bool, erro
 // re-activated and re-bound to this sandbox instead of minting a fresh
 // token. A key still active for another sandbox is never shared.
 func (s *Store) EnsureWorkspaceKey(sandbox, agent, provider, workspace string) (Key, bool, error) {
+	unlock, err := s.lock()
+	if err != nil {
+		return Key{}, false, err
+	}
+	defer unlock()
 	f, err := s.load()
 	if err != nil {
 		return Key{}, false, err
@@ -167,6 +213,11 @@ func tokenTag(agent, provider string) string {
 
 // Revoke kills a sandbox's active keys (next EnsureKey mints fresh).
 func (s *Store) Revoke(sandbox string) (int, error) {
+	unlock, err := s.lock()
+	if err != nil {
+		return 0, err
+	}
+	defer unlock()
 	f, err := s.load()
 	if err != nil {
 		return 0, err

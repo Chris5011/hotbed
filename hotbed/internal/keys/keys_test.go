@@ -1,6 +1,7 @@
 package keys
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -32,6 +33,41 @@ func TestAgentKeys(t *testing.T) {
 	}
 	if n, _ := s.Revoke("sb"); n != 3 {
 		t.Errorf("revoke = %d, want 3", n)
+	}
+}
+
+// TestConcurrentWritersLoseNothing (issue #5): two independent store views
+// (each with its own lock fd, like two processes) minting in parallel must
+// not drop each other's keys.
+func TestConcurrentWritersLoseNothing(t *testing.T) {
+	t.Setenv("HOTBEDD_DATA_DIR", t.TempDir())
+	t.Setenv("HOTBEDD_STATE_DIR", t.TempDir())
+	a, b := New(), New()
+	const n = 40
+	toks := make(chan string, 2*n)
+	done := make(chan struct{})
+	for _, st := range []*Store{a, b} {
+		go func(st *Store, tag string) {
+			for i := 0; i < n; i++ {
+				k, _, err := st.EnsureAgentKey(fmt.Sprintf("sb-%s-%d", tag, i), "codex", "up")
+				if err != nil {
+					t.Error(err)
+				}
+				toks <- k.Token
+			}
+			done <- struct{}{}
+		}(st, fmt.Sprintf("%p", st))
+	}
+	<-done
+	<-done
+	close(toks)
+	for tok := range toks {
+		if _, ok := New().ByToken(tok); !ok {
+			t.Fatalf("minted token %s… lost by a concurrent writer", tok[:16])
+		}
+	}
+	if got := len(New().List()); got != 2*n {
+		t.Errorf("store holds %d keys, want %d", got, 2*n)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 
 	"hotbed/internal/audit"
 	"hotbed/internal/env"
+	"hotbed/internal/keys"
 )
 
 // Provider is one upstream LLM endpoint entry.
@@ -655,6 +656,13 @@ func (c *Config) ImportHostOpenCode() (int, error) {
 // number of sandboxes migrated.
 func MigrateFromKeys() (int, error) {
 	p := filepath.Join(env.DataDir(), "keys.json")
+	// same cross-process lock as the key store: this rewrite must not race
+	// a daemon minting keys (issue #5)
+	unlock, err := keys.FileLock(p)
+	if err != nil {
+		return 0, err
+	}
+	defer unlock()
 	b, err := os.ReadFile(p)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -697,7 +705,10 @@ func MigrateFromKeys() (int, error) {
 	if err != nil {
 		return n, err
 	}
-	return n, os.WriteFile(p, b2, 0o600)
+	if err := os.WriteFile(p+".tmp", b2, 0o600); err != nil {
+		return n, err
+	}
+	return n, os.Rename(p+".tmp", p)
 }
 
 func dedupe(in []string) []string {

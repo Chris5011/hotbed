@@ -160,6 +160,10 @@ func serve(args []string) error {
 	// rules of fenced and DNS-tracked sandboxes — put them back.
 	egressctl.StartReapplier()
 
+	// key self-heal: a sandbox holding a key the store lost (issue #5) is
+	// re-synced once the first inventory scan is in
+	go srv.HealKeys()
+
 	// dns fence listener (allowlist egress). On Docker Desktop the real
 	// fence runs inside the engine's relay container — a host listener
 	// cannot be reached by sandboxes — but we still serve one for native
