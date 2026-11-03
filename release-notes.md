@@ -1,3 +1,45 @@
+# Hotbed v0.7.3 — proxy access you can rely on
+
+Fixes for issues #5 and #3.
+
+## Fixes
+
+- **Virtual keys no longer get lost (#5)** — every key change rewrote
+  `keys.json` as a whole, guarded only inside one process: two writers at
+  the same time (the daemon syncing a sandbox while a CLI command or a
+  second daemon minted a key) silently dropped each other's new keys, and
+  the affected sandboxes got `401 unknown key` from the proxy. Writes are
+  now serialized across processes (file lock) and atomic (temp + rename).
+  A test that reproduces the lost write fails on v0.7.2 and passes now.
+- **Lost keys heal themselves** — at daemon start every running sandbox's
+  keys (OpenCode + every agent) are checked against the store; a sandbox
+  holding an unknown key is re-synced automatically (audit `key.heal`).
+  Agents already running in an open session pick the new key up on
+  their next start.
+- **Diagnosable 401s** — the proxy logs unknown keys with their readable
+  prefix (`hbk-<agent>-<provider>-…`, never the secret part) and source,
+  rate-limited.
+- **Lock-down keeps the proxy route the sandbox actually uses (#3)** — the
+  allowlist fence only allowed the proxy on the bridge gateway; a sandbox
+  synced over another route (WSL IP, `host.docker.internal`, a
+  non-default `proxy.port`) was cut off from the proxy when locked down.
+  The fence now also allows exactly the synced endpoint; a proxy
+  hostname is resolved inside the sandbox and put on the allowlist.
+- Relay refresh audit entries show the old version again (it was read
+  after the relay was removed).
+
+## Upgrade from v0.7.2
+
+```bash
+cd ~/hotbed
+scripts/update.sh --yes
+```
+
+Locked-down sandboxes pick up the #3 fix on their next fence re-apply
+(any preset change, or a restart).
+
+---
+
 # Hotbed v0.7.2 — no more orphaned agents
 
 A bugfix release on top of v0.7.1.
