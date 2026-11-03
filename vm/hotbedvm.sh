@@ -411,6 +411,7 @@ write_files:
 # activates on any boot (with the full kernel installed by packages:).
 runcmd:
   - mkdir -p /workspace /home/dev/go
+  - chown dev:dev /workspace  # VM-local workspace (a --share mount covers it)
   - usermod -aG docker dev
   - systemctl enable docker$([[ -n "${2:-}" ]] && printf ' workspace.mount')
   - systemctl enable hotbed-opencode-install.service

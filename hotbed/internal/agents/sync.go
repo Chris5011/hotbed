@@ -21,6 +21,13 @@ func EnvPath(home, id string) string { return home + "/.config/hotbed/agents/" +
 // sandbox on the same folder resumes them. Git-ignored by its own file.
 const WorkspaceState = "/workspace/.hotbed"
 
+// ownWorkspace makes a VM-local /workspace (no host share: cloud-init
+// created it as root) the sandbox user's. A mounted workspace (container
+// bind mount, 9p share) is never touched — its ownership is the host's.
+const ownWorkspace = `[ -w /workspace ] || mountpoint -q /workspace 2>/dev/null || ` +
+	`sudo -n chown "$(id -u):$(id -g)" /workspace 2>/dev/null || true
+`
+
 // StateDir is one agent's persistent folder ({{state}} in manifests).
 func StateDir(id string) string { return WorkspaceState + "/agents/" + id }
 
@@ -192,6 +199,7 @@ func ApplyPersist(b Box, m Module) error {
 	}
 	state := StateDir(m.ID)
 	var sc strings.Builder
+	sc.WriteString(ownWorkspace)
 	fmt.Fprintf(&sc, `set -e
 mkdir -p %[1]s
 g=%[2]s/.gitignore; [ -f "$g" ] || printf '# hotbed agent state (sessions, history) - not project code\n*\n' > "$g"
@@ -234,7 +242,7 @@ link_file() {  # SRC DST
 // folder, /workspace/.hotbed/id — "" when the workspace is not writable.
 // It ties virtual keys to the folder rather than to one sandbox.
 func WorkspaceID(b Box) string {
-	out, err := b.RunUser(`set -e; d=`+WorkspaceState+`; mkdir -p "$d"
+	out, err := b.RunUser(ownWorkspace+`set -e; d=`+WorkspaceState+`; mkdir -p "$d"
 [ -f "$d/.gitignore" ] || printf '# hotbed agent state (sessions, history) - not project code\n*\n' > "$d/.gitignore"
 [ -s "$d/id" ] || cat /proc/sys/kernel/random/uuid > "$d/id"
 cat "$d/id"`, 20*time.Second)
