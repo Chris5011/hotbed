@@ -1,3 +1,35 @@
+# Hotbed v0.7.2 — no more orphaned agents
+
+A bugfix release on top of v0.7.1.
+
+## Fixes
+
+- **Agents no longer block their own next launch** — closing an agent's
+  tmux session (killing it, a hard terminal close, a WSL restart) did not
+  stop the agent inside the container: `docker exec` keeps its program
+  running. The orphan kept holding the agent's state lock, so the next
+  launch failed — OpenClaw: "state database is busy … holder N is alive,
+  stop it first". Every agent launch now records its process group; the
+  next launch of the same agent ends a verified leftover first (command
+  line checked, so a reused PID is never hit). Applies to every agent
+  module (OpenClaw, Hermes, Codex, Claude Code, Aider).
+- **No zombie processes in sandboxes** — new sandboxes run with Docker's
+  init as PID 1, so ended processes are reaped instead of piling up as
+  `<defunct>` entries (`sleep infinity` never reaped them). Applies to
+  sandboxes created from v0.7.2 on (wizard, recipes, `hbd`, mount
+  recreates).
+- OpenClaw additionally runs `openclaw gateway stop` before launching, so
+  a gateway left running by hand cannot block the local TUI either.
+
+## Upgrade from v0.7.1
+
+```bash
+cd ~/hotbed
+scripts/update.sh --yes
+```
+
+---
+
 # Hotbed v0.7.1 — steady Burn tab
 
 A focused fix release on top of v0.7.0.
