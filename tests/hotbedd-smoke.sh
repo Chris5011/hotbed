@@ -932,6 +932,19 @@ if docker info >/dev/null 2>&1; then
         grep -q 'VM image nope not found' <<<"$RIMV" \
             && pass "create: unknown VM base image rejected" \
             || fail "create: unknown VM base image rejected ($RIMV)"
+        RDNS="$(curl -s http://127.0.0.1:7794/api/dns)"
+        grep -q '"sandboxes":\[' <<<"$RDNS" && grep -q '"domains":' <<<"$RDNS" \
+            && pass "research: /api/dns answers the consolidated record" \
+            || fail "research: /api/dns answers the consolidated record ($RDNS)"
+        curl -s http://127.0.0.1:7794/api/dns.csv | head -1 | grep -q '^sandbox,stale,domain,lookups,blocked' \
+            && pass "research: DNS CSV export (header)" || fail "research: DNS CSV export (header)"
+        curl -s -D - -o /dev/null http://127.0.0.1:7794/api/usage.csv | grep -qi 'content-disposition: attachment; filename="hotbed-burn-all-' \
+            && pass "research: burn CSV is a download" || fail "research: burn CSV is a download"
+        curl -s 'http://127.0.0.1:7794/api/usage.csv?group=day' | head -1 | grep -q '^date_utc,sandbox,stale,calls' \
+            && pass "research: daily burn CSV (header)" || fail "research: daily burn CSV (header)"
+        RDP="$(curl -s -X POST http://127.0.0.1:7794/api/dns/purge -H 'Content-Type: application/json' -d '{}')"
+        grep -q 'nothing to purge' <<<"$RDP" && pass "research: DNS purge needs a target" \
+            || fail "research: DNS purge needs a target ($RDP)"
         RST2="$(curl -s -X POST http://127.0.0.1:7794/api/create -H 'Content-Type: application/json' \
             -d '{"kind":"vm","name":"strictd","vm_backend":"docker","egress":"strict"}')"
         grep -q 'strict needs the libvirt backend' <<<"$RST2" \

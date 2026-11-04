@@ -21,7 +21,6 @@ import (
 	"hotbed/internal/audit"
 	"hotbed/internal/cfgsync"
 	"hotbed/internal/config"
-	"hotbed/internal/dnsfence"
 	"hotbed/internal/engine"
 	"hotbed/internal/env"
 )
@@ -217,9 +216,10 @@ func DenyDomain(cfg *config.Config, name, domain string) error {
 	return err
 }
 
-// Forget drops a deleted sandbox's egress records and tracking history.
+// Forget drops a deleted sandbox's egress records. Its DNS tracking history
+// stays (research data, like the burn ledger) until purged on the DNS page
+// or via POST /api/dns/purge.
 func Forget(cfg *config.Config, name string) error {
-	_ = dnsfence.ClearSeen(name)
 	return cfg.ForgetEgress(name)
 }
 

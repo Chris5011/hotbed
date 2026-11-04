@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -183,4 +184,20 @@ func trackableDomain(d string) bool {
 		}
 	}
 	return true
+}
+
+// ListSeen returns every sandbox's tracking file — including sandboxes that
+// no longer exist: the record outlives the sandbox (like the burn ledger)
+// until it is purged.
+func ListSeen() []SeenFile {
+	files, _ := filepath.Glob(filepath.Join(env.StateDir(), SeenDir, "*.json"))
+	out := make([]SeenFile, 0, len(files))
+	for _, f := range files {
+		name := strings.TrimSuffix(filepath.Base(f), ".json")
+		if s := ReadSeen(name); len(s.Domains) > 0 {
+			out = append(out, s)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Sandbox < out[j].Sandbox })
+	return out
 }

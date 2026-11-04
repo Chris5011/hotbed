@@ -34,6 +34,7 @@ const indexHTML = `<!doctype html>
     <div class="items" id="items-vd"></div>
     <div id="sidebar-foot">
       <a href="#" id="lnk-burn">Burn - tokens &amp; budget</a>
+      <a href="#" id="lnk-dnsall">DNS - lookups of all sandboxes</a>
       <a href="#" id="lnk-config">LLM providers</a>
       <a href="#" id="lnk-modules">Agent modules</a>
       <a href="#" id="lnk-images">Images</a>
@@ -96,6 +97,8 @@ const indexHTML = `<!doctype html>
       <div id="tab-burn" class="tabpane">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--s2)">
           <div class="hint" style="flex:1">Per-sandbox token ledger from the proxy, split per agent (each agent calls with its own virtual key). Upstream-reported usage where the provider gives it; a bytes/4 estimate (marked est) where it doesn't. Auto-updates every 5 s.</div>
+          <a class="tool" id="burn-csv" href="#" download title="every proxied call of this sandbox">&#11015; CSV calls</a>
+          <a class="tool" id="burn-csvday" href="#" download title="calls, tokens and $ per day">&#11015; CSV per day</a>
           <button class="tool" id="burn-reload" title="re-read the burn ledger now">&#8635; reload</button>
         </div>
         <div id="burn-hbd"></div>
@@ -302,6 +305,8 @@ button.busy::after{content:"";display:inline-block;width:.85em;height:.85em;marg
 button.danger:hover{border-color:var(--red);color:var(--red);background:rgba(229,72,77,.08)}
 button:disabled{opacity:.4;cursor:default;pointer-events:none}
 button.tool{background:var(--bg3);border:1px solid var(--line2);border-radius:var(--r1);padding:.28rem .6rem;font-size:.74rem}
+a.tool{display:inline-block;background:var(--bg3);border:1px solid var(--line2);border-radius:var(--r1);padding:.28rem .6rem;font-size:.74rem;color:var(--fg);text-decoration:none;white-space:nowrap}
+a.tool:hover{border-color:var(--acc)}
 .iconbtn{background:none;border:none;color:var(--faint);font-size:.8rem;padding:.3rem .5rem;border-radius:var(--r1);line-height:1}
 .iconbtn:hover{color:var(--red);background:rgba(229,72,77,.1);border:none}
 input,select,textarea{font-family:var(--sans)}
@@ -621,14 +626,16 @@ function clearTimers(){
   if(burnTimer){ clearInterval(burnTimer); burnTimer=null; }
   if(dnsTimer){ clearInterval(dnsTimer); dnsTimer=null; }
   if(imagesTimer){ clearTimeout(imagesTimer); imagesTimer=null; }
+  if(dnsAllTimer){ clearTimeout(dnsAllTimer); dnsAllTimer=null; }
 }
 function showGlobal(kind){
   clearTimers();
   state.view=kind; state.sel=null; closeLogs();
   renderList();
   $('pane').hidden=true; $('empty').hidden=true; $('global').hidden=false;
-  var titles={images:'Images - custom stacks and VM base images', modules:'Agent modules - coding agents for new sandboxes', overview:'Overview - host & sandboxes', burn:'Burn - token & dollar ledger', create:'Create sandbox', config:'LLM providers - upstream endpoints for every agent', help:'Help - quick start & CLI reference'};
+  var titles={dnsall:'DNS - lookups of all sandboxes', images:'Images - custom stacks and VM base images', modules:'Agent modules - coding agents for new sandboxes', overview:'Overview - host & sandboxes', burn:'Burn - token & dollar ledger', create:'Create sandbox', config:'LLM providers - upstream endpoints for every agent', help:'Help - quick start & CLI reference'};
   var subs={
+    dnsall:'Every domain any sandbox looked up (DNS tracking) - including deleted sandboxes, whose records stay until purged. CSV downloads per sandbox and in total.',
     images:'Start new sandboxes from more than the kit stacks: declarative images, saved containers and generalized VM disks.',
     modules:'Switch a module on to offer it in the create wizard. Modules are folders under agents/ - add your own without touching the daemon.',
     overview:'Machine stats and every sandbox on this host. Updates every 5 seconds.',
@@ -647,6 +654,7 @@ function showGlobal(kind){
   else if(kind==='help'){ renderHelp(); }
   else if(kind==='modules'){ renderModules(); }
   else if(kind==='images'){ renderImages(); }
+  else if(kind==='dnsall'){ renderDnsAll(); }
   else { renderConfigGlobal(); }
   saveView();
 }
@@ -900,6 +908,8 @@ function paintBurn(rows, body){
       '<label><span class="ios-toggle"><input type="checkbox" id="burn-show-stale"'+(burnShowStale?' checked':'')+'><span class="track"></span><span class="knob"></span></span>show stale rows</label>'+
       '<button class="tool" id="burn-purge">🗑 purge stale history'+(staleUnseen?' ('+staleUnseen+')':'')+'</button>'+
       '<span class="hint">stale = sandbox deleted · ★ pinned histories stay visible and survive the bulk purge</span>'+
+      '<span class="grow"></span>'+csvLink('/api/usage.csv','CSV all calls','every proxied call of every sandbox (whole history)')+
+      csvLink('/api/usage.csv?group=day','CSV per day','calls, tokens and $ per day and sandbox - the burn rate over time')+
     '</div>';
   var tbl='<table class="tbl" id="burntbl"><thead><tr><th></th><th>sandbox</th><th>state</th><th>today $</th><th>total $</th><th>calls</th><th>tok today</th><th>budget $</th><th>budget tok</th><th></th></tr></thead><tbody>';
   rows.forEach(function(r){
@@ -915,12 +925,13 @@ function paintBurn(rows, body){
           '<td><input class="money" data-tok="'+esc(r.sandbox)+'" value="'+(r.budget_tokens>0? r.budget_tokens : '')+'"></td>';
     }
     var acts;
+    var csv=csvLink('/api/usage.csv?sandbox='+encodeURIComponent(r.sandbox),'CSV','every call of '+r.sandbox);
     if(stale){
-      acts='<button class="tool trowdel" data-hbd="'+esc(r.sandbox)+'">delete records</button>';
+      acts=csv+'<button class="tool trowdel" data-hbd="'+esc(r.sandbox)+'">delete records</button>';
     }else{
       acts='<button class="tool tbud" data-hbd="'+esc(r.sandbox)+'">set</button>'+
            '<button class="tool tdrill" data-hbd="'+esc(r.sandbox)+'">detail</button>'+
-           '<button class="tool tsync" data-hbd="'+esc(r.sandbox)+'">sync</button>';
+           '<button class="tool tsync" data-hbd="'+esc(r.sandbox)+'">sync</button>'+csv;
     }
     tbl+='<tr'+dim+(hidden?' data-hidden="1" hidden':'')+' data-hbd="'+esc(r.sandbox)+'"><td>'+pin+'</td><td>'+esc(r.sandbox)+'&nbsp;&nbsp;'+burnChip(stale)+'</td>'+
       '<td>$'+(r.today_usd||0).toFixed(4)+'</td><td>$'+(r.total_usd||0).toFixed(4)+'</td><td>'+(r.calls||0)+'</td><td>'+fmtTok(r.tokens_today)+'</td>'+
@@ -1493,6 +1504,10 @@ function agentCell(a){
 
 function renderBurnTab(sb){
   var host=$('burn-hbd');
+  if(sb){
+    $('burn-csv').href='/api/usage.csv?sandbox='+encodeURIComponent(sb.name);
+    $('burn-csvday').href='/api/usage.csv?group=day&sandbox='+encodeURIComponent(sb.name);
+  }
   if(!sb){ host.innerHTML='<div class="hint">no sandbox selected</div>'; host.removeAttribute('data-sb'); host.removeAttribute('data-sig'); return; }
   // the detail burn tab polls on the shared lease too: while THIS sandbox's
   // detail view is open the cards/table stay live; ticks skip while the user
@@ -1560,6 +1575,73 @@ function renderBurnTab(sb){
 }
 
 /* ---------- agent modules ---------- */
+/* ---------- DNS - all sandboxes (research view + CSV) ---------- */
+var dnsAllTimer=null, dnsAllStale=true, dnsAllFilter='', dnsAllLast=null;
+function csvLink(href, label, title){
+  return '<a class="tool" href="'+esc(href).split('"').join('&quot;')+'" download title="'+esc(title||'download as CSV')+'">&#11015; '+esc(label)+'</a>';
+}
+function renderDnsAll(){
+  var body=$('glob-body');
+  if(!$('dnsall-wrap')){
+    body.innerHTML=
+      '<div class="burntools">'+
+        '<label><span class="ios-toggle"><input type="checkbox" id="dnsall-stale"'+(dnsAllStale?' checked':'')+'><span class="track"></span><span class="knob"></span></span>include deleted sandboxes</label>'+
+        '<input id="dnsall-filter" type="search" placeholder="filter domains / sandboxes" autocomplete="off" spellcheck="false">'+
+        '<span class="grow"></span>'+
+        csvLink('/api/dns.csv','DNS CSV (all sandboxes)','every sandbox and domain: lookups, blocked, first/last seen')+
+        '<button class="tool" id="dnsall-purge">&#128465; purge deleted sandboxes</button>'+
+      '</div>'+
+      '<div class="hint">Records come from DNS tracking (DNS tab of a sandbox, or <span class="mono">--track</span>); under <span class="mono">strict</span> they are the hosts a sandbox asked the egress proxy for. A deleted sandbox&rsquo;s record stays here as <i>stale</i> until it is purged.</div>'+
+      '<div id="dnsall-wrap"><div class="hint">loading…</div></div>';
+    $('dnsall-stale').addEventListener('change',function(){ dnsAllStale=this.checked; renderDnsAll(); });
+    $('dnsall-filter').value=dnsAllFilter;
+    $('dnsall-filter').addEventListener('input',function(){ dnsAllFilter=this.value.trim().toLowerCase(); if(dnsAllLast) paintDnsAll(dnsAllLast); });
+    $('dnsall-purge').addEventListener('click',function(){
+      askConfirm({title:'Purge DNS records of deleted sandboxes?', body:'Drops the lookup records of every sandbox that no longer exists. Records of existing sandboxes stay. Download the CSV first if you still need them.', confirmLabel:'Purge', danger:true},
+        function(ok){ if(!ok) return;
+          fetch('/api/dns/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stale_only:true})})
+            .then(function(r){return r.json();}).then(function(j){
+              if(j.error){ toast('purge: '+j.error,'err'); return; }
+              toast((j.purged||[]).length+' record(s) purged','ok'); renderDnsAll();
+            }).catch(function(e){ toast('purge: '+e,'err'); });
+        });
+    });
+  }
+  fetch('/api/dns'+(dnsAllStale?'':'?stale=0')).then(function(r){return r.json();}).then(function(j){
+    if(state.view!=='dnsall') return;
+    dnsAllLast=j; paintDnsAll(j);
+    if(dnsAllTimer) clearTimeout(dnsAllTimer);
+    dnsAllTimer=setTimeout(function(){ if(state.view==='dnsall') renderDnsAll(); }, 10000);
+  }).catch(function(){ $('dnsall-wrap').innerHTML='<div class="hint">DNS records unavailable (daemon restarting?)</div>'; });
+}
+function paintDnsAll(j){
+  var q=dnsAllFilter, sbs=j.sandboxes||[], doms=j.domains||[];
+  var stale={}; sbs.forEach(function(x){ stale[x.sandbox]=x.stale; });
+  var html='<div class="cw-sec"><div class="cw-sec-t">Sandboxes ('+sbs.length+')</div>';
+  if(!sbs.length){ html+='<div class="hint">No DNS records yet - turn on tracking in a sandbox&rsquo;s DNS tab.</div>'; }
+  else {
+    html+='<table class="tbl"><thead><tr><th>sandbox</th><th>domains</th><th>lookups</th><th>refused</th><th>last lookup</th><th></th></tr></thead><tbody>'+
+      sbs.filter(function(x){ return !q || x.sandbox.toLowerCase().indexOf(q)>=0; }).map(function(x){
+        return '<tr'+(x.stale?' class="rowdim"':'')+'><td>'+esc(x.sandbox)+'&nbsp;&nbsp;'+burnChip(x.stale)+'</td><td>'+x.domains+'</td><td>'+x.lookups+'</td><td>'+x.blocked+'</td><td>'+dnsWhen(x.last)+'</td>'+
+          '<td style="text-align:right">'+csvLink('/api/dns.csv?sandbox='+encodeURIComponent(x.sandbox),'CSV','DNS record of '+x.sandbox)+'</td></tr>';
+      }).join('')+'</tbody></table>';
+  }
+  html+='</div><div class="cw-sec"><div class="cw-sec-t">Domains ('+doms.length+')</div>';
+  var shown=doms.filter(function(d){
+    return !q || d.domain.indexOf(q)>=0 || (d.sandboxes||[]).some(function(n){ return n.toLowerCase().indexOf(q)>=0; });
+  });
+  if(!shown.length){ html+='<div class="hint">'+(doms.length?'no domains match the filter':'nothing recorded yet')+'</div>'; }
+  else {
+    html+='<table class="tbl"><thead><tr><th>domain</th><th>lookups</th><th>refused</th><th>sandboxes</th><th>first seen</th><th>last seen</th></tr></thead><tbody>'+
+      shown.slice(0,1500).map(function(d){
+        return '<tr><td>'+esc(d.domain)+'</td><td>'+d.lookups+'</td><td>'+(d.blocked?'<span class="dnsst bad">'+d.blocked+'</span>':'0')+'</td>'+
+          '<td>'+(d.sandboxes||[]).map(function(n){ return '<span class="dnsst"'+(stale[n]?' style="opacity:.55" title="deleted sandbox"':'')+'>'+esc(n)+'</span>'; }).join(' ')+'</td>'+
+          '<td>'+dnsWhen(d.first)+'</td><td>'+dnsWhen(d.last)+'</td></tr>';
+      }).join('')+'</tbody></table>'+(shown.length>1500?'<div class="hint">first 1500 of '+shown.length+' shown - the CSV has all</div>':'');
+  }
+  html+='</div>';
+  $('dnsall-wrap').innerHTML=html;
+}
 /* ---------- images: custom container + VM images (issue #1) ---------- */
 var imagesTimer=null;
 function renderImages(){
@@ -1884,6 +1966,7 @@ function paintDns(sb,j){
         '<label><span class="ios-toggle"><input type="checkbox" id="dns-onlyblk"'+(dnsOnlyBlocked?' checked':'')+'><span class="track"></span><span class="knob"></span></span>only '+(mode==='allowlist'||mode==='strict'?'blocked':'unlisted')+'</label>'+
         '<input id="dns-filter" type="search" placeholder="filter domains" autocomplete="off" spellcheck="false">'+
         '<span class="grow"></span>'+presetBtn+
+        csvLink('/api/dns.csv?sandbox='+encodeURIComponent(sb.name),'CSV','this sandbox\'s DNS record')+
         '<button class="tool" id="dns-clear" title="forget the recorded lookups (the allowlist stays)">&#128465; clear record</button>'+
       '</div>'+
       '<div id="dns-tbl"></div>';
@@ -2472,6 +2555,7 @@ function init(){
   $('brand').addEventListener('click', function(){ showGlobal('overview'); });
   $('burn-reload').addEventListener('click', function(){ var sb=currentSB(); if(sb) renderBurnTab(sb); });
   $('lnk-burn').addEventListener('click', function(ev){ ev.preventDefault(); showGlobal('burn'); });
+  $('lnk-dnsall').addEventListener('click', function(ev){ ev.preventDefault(); showGlobal('dnsall'); });
   var lc=$('lnk-create');
   if(lc){ lc.addEventListener('click', function(ev){ ev.preventDefault(); showGlobal('create'); }); }
   Array.prototype.forEach.call(document.querySelectorAll('[data-create]'), function(el){

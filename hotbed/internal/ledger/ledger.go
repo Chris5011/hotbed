@@ -421,3 +421,29 @@ func (l *Ledger) Purge(names map[string]bool) (int, error) {
 	}
 	return dropped, nil
 }
+
+// Each streams every journal entry in file order — the whole history, not
+// the maxScan window the summaries use (exports). fn returning false stops.
+func (l *Ledger) Each(fn func(Entry) bool) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	f, err := os.Open(l.path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for sc.Scan() {
+		var e Entry
+		if json.Unmarshal(sc.Bytes(), &e) == nil && e.Sandbox != "" {
+			if !fn(e) {
+				break
+			}
+		}
+	}
+	return sc.Err()
+}

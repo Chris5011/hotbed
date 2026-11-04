@@ -1047,6 +1047,23 @@ hotbedd egress NAME allowlist             # lock down to the collected list
 hotbedd egress NAME track off
 ```
 
+**Research views and CSV exports.** The sidebar's **DNS** page lists every
+domain any sandbox looked up, consolidated (lookups, refused, which
+sandboxes, first/last seen) plus a per-sandbox summary. DNS records now
+outlive their sandbox, like the burn ledger: a deleted sandbox's record
+stays (marked *stale*) until you purge it there or via
+`POST /api/dns/purge {"stale_only":true}`. Downloads (all UTC, complete
+history, formula-safe cells):
+
+| CSV | Endpoint | Rows |
+|---|---|---|
+| DNS, all / one sandbox | `/api/dns.csv[?sandbox=NAME]` | sandbox, stale, domain, lookups, blocked, first/last seen |
+| Burn, every call | `/api/usage.csv[?sandbox=NAME]` | ts, sandbox, stale, agent, provider, model, tokens in/out, estimated, cost, duration, status |
+| Burn per day | `/api/usage.csv?group=day[&sandbox=NAME]` | date, sandbox, stale, calls, tokens in/out, estimated calls, cost |
+
+Buttons: DNS page and Burn page (totals and one per row), and a sandbox's
+DNS and Burn tabs.
+
 Tracking routes DNS to the fence's upstream (`HOTBEDD_DNS_UPSTREAM`,
 default `1.1.1.1:53`) instead of Docker's resolver — set it if your network
 requires its own DNS.
