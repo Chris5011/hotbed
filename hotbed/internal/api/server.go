@@ -540,6 +540,8 @@ func (s *Server) actionDelete(w http.ResponseWriter, r *http.Request) {
 	attach.KillTunnel(sb.Name)
 	if sb.Kind == sandbox.KindVM {
 		ide.ForgetVM(sb.Name) // VS Code host alias + pinned host key
+	} else {
+		ide.ForgetContainer(sb.Name) // VS Code attach config
 	}
 	if err := egressctl.Forget(s.Cfg, sb.Name); err != nil {
 		notes = append(notes, "egress records removal failed: "+err.Error())

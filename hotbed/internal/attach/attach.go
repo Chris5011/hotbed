@@ -175,6 +175,27 @@ func opencodePersistFlags(sb sandbox.Sandbox) string {
 	return b.String()
 }
 
+// ContainerShellEnv is the environment hotbed's own shell attach gives a
+// container (see EnsureSession): the synced OpenCode config dir (per-sandbox
+// key, kept out of the host-mounted config) and OpenCode's session DB in
+// the workspace. Editors attaching to the container get the same.
+func ContainerShellEnv(sb sandbox.Sandbox) map[string]string {
+	out := map[string]string{}
+	if tg, ok := cfgsync.Lookup(sb.Name); ok && tg.XDGOverride {
+		out["XDG_CONFIG_HOME"], _ = cnXdgValue(sb.Name)
+	}
+	if m, err := agents.Get("opencode"); err == nil {
+		if env := agents.PersistEnv(m); len(env) > 0 {
+			if _, err := engine.Run("docker", "exec", sb.Name, "test", "-d", agents.StateDir(m.ID)); err == nil {
+				for k, v := range env {
+					out[k] = v
+				}
+			}
+		}
+	}
+	return out
+}
+
 // vmOpencode is the guest-side OpenCode start: the persistent DB env is
 // exported when the workspace state folder exists.
 func vmOpencode(args string) string {

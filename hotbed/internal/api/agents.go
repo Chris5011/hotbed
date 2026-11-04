@@ -211,6 +211,16 @@ func (s *Server) syncAgents(sb sandbox.Sandbox, only ...string) ([]agents.SyncRe
 		}
 		res = append(res, r)
 	}
+	// every installed agent, not just the synced subset: the file is whole
+	var all []agents.Module
+	for _, id := range agents.Installed(box) {
+		if m, err := agents.Get(id); err == nil {
+			all = append(all, m)
+		}
+	}
+	if e := agents.WriteShellWrappers(box, all); e != nil {
+		errs = append(errs, e.Error())
+	}
 	if len(errs) > 0 {
 		return res, fmt.Errorf("agent sync: %v", errs)
 	}

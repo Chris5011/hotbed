@@ -41,7 +41,9 @@ func (s *Server) StartStrictWatch() {
 				mode := s.Cfg.EgressMode[sb.Name]
 				p, seen := prev[sb.Name]
 				stale := s.strictRouteStale(sb, mode)
-				if seen && p == mode && !stale {
+				// only entering/leaving strict changes the route (a preset
+				// change elsewhere, or a deleted sandbox's records, does not)
+				if seen && (p == "strict") == (mode == "strict") && !stale {
 					continue
 				}
 				if !seen && !stale && mode != "strict" {

@@ -1282,6 +1282,20 @@ The **VS Code** button in a sandbox's header (or `hotbedd ide NAME`,
 - **Containers** — Dev Containers *attach to running container*. Needs the
   `ms-vscode-remote.remote-containers` extension; hotbed only reports it
   missing (and copies `code --install-extension …`), it never installs it.
+  Before opening, hotbed writes the extension's per-container file
+  (`globalStorage/ms-vscode-remote.remote-containers/nameConfigs/<container>.json`,
+  looked up before the per-image one; your own keys in it are kept):
+  `remoteUser` = the sandbox user (the images default to root, which has
+  none of the agents' hotbed config), `workspaceFolder` and `remoteEnv` =
+  what *Open Terminal* sets (`XDG_CONFIG_HOME` → the synced OpenCode config,
+  `OPENCODE_DB` → sessions in the workspace). Deleting the container
+  removes the file.
+- **Agents in terminals** — agent sync writes `~/.config/hotbed/agents/shell.sh`
+  (sourced from `~/.bashrc`): one wrapper per installed agent that loads
+  only that agent's env file in a subshell, so `claude`, `codex`, … typed in
+  any terminal (VS Code, ssh, exec) get their own virtual key and proxy URL.
+  The env files cannot all be sourced at once — several agents use
+  `OPENAI_API_KEY` with different keys.
 - **VMs** — Remote-SSH (`ms-vscode-remote.remote-ssh`) to the host alias
   `hotbed-<vm>`. hotbed writes its own `~/.ssh/hotbed.conf` and adds one
   `Include hotbed.conf` line at the top of your `~/.ssh/config` (backed up

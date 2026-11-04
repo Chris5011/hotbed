@@ -84,3 +84,12 @@ func TestReplaceBlock(t *testing.T) {
 }
 
 const bom = string(rune(0xFEFF))
+
+func TestDevContainerName(t *testing.T) {
+	if got := devContainerName("/hotbed-x"); got != "hotbed-x" {
+		t.Fatalf("got %q", got)
+	}
+	if got := devContainerName("a:b/c%d"); got != "a%3ab%2fc%25d" {
+		t.Fatalf("got %q", got)
+	}
+}

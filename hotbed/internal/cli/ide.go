@@ -30,7 +30,11 @@ func ideCmd(args []string) error {
 	if len(sb.Ports) > 0 {
 		port = strings.TrimPrefix(sb.Ports[0], "127.0.0.1:")
 	}
-	r, err := ide.Open(*sb, func() (agents.Box, error) { return attach.BoxFor(*sb, port) }, !hasFlag(args, "--print"))
+	var env map[string]string
+	if sb.Kind == "container" {
+		env = attach.ContainerShellEnv(*sb)
+	}
+	r, err := ide.Open(*sb, func() (agents.Box, error) { return attach.BoxFor(*sb, port) }, env, !hasFlag(args, "--print"))
 	if err != nil {
 		return err
 	}

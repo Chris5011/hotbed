@@ -21,6 +21,7 @@ package ide
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -387,7 +388,8 @@ type Result struct {
 // Open prepares a running sandbox for VS Code and, with launch, opens it.
 // A missing extension is reported (with its install command), never
 // installed; the URI is returned either way.
-func Open(sb sandbox.Sandbox, boxFor func() (agents.Box, error), launch bool) (Result, error) {
+// env is the container's shell environment (attach.ContainerShellEnv).
+func Open(sb sandbox.Sandbox, boxFor func() (agents.Box, error), env map[string]string, launch bool) (Result, error) {
 	if sb.State != "running" {
 		return Result{}, fmt.Errorf("%s is %s - start it first", sb.Name, sb.State)
 	}
@@ -396,6 +398,9 @@ func Open(sb sandbox.Sandbox, boxFor func() (agents.Box, error), launch bool) (R
 	switch sb.Kind {
 	case sandbox.KindContainer:
 		r.URI = ContainerURI(sb.Name)
+		if err := EnsureAttachConfig(sb.Name, env); err != nil {
+			return r, fmt.Errorf("VS Code attach config: %w", err)
+		}
 	case sandbox.KindVM:
 		b, err := boxFor()
 		if err != nil {
@@ -420,4 +425,107 @@ func Open(sb sandbox.Sandbox, boxFor func() (agents.Box, error), launch bool) (R
 		r.Launched = true
 	}
 	return r, nil
+}
+
+// ------------------------------------------------- dev containers config ---
+
+// attachUser is the container's sandbox user (HBD_UID's passwd name): the
+// images default to root - the entrypoint drops privileges only for its own
+// process - so Dev Containers would attach as root, without the agents'
+// hotbed config in that user's home.
+func attachUser(container string) (string, error) {
+	out, err := engine.RunTO(15*time.Second, "docker", "exec", container, "sh", "-c",
+		`getent passwd "${HBD_UID:-1000}" | cut -d: -f1`)
+	u := strings.TrimSpace(out)
+	if err != nil || u == "" || strings.ContainsAny(u, " \t\n/") {
+		return "", fmt.Errorf("sandbox user of %s: %v %s", container, err, u)
+	}
+	return u, nil
+}
+
+// devContainersDir is the extension's storage folder on the editor side.
+func devContainersDir() (string, error) {
+	if !OnWSL() {
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, ".config", "Code", "User", "globalStorage", "ms-vscode-remote.remote-containers"), nil
+	}
+	ad, err := win(20*time.Second, "echo", "%APPDATA%")
+	ad = strings.TrimSpace(ad)
+	if err != nil || ad == "" || strings.Contains(ad, "%") {
+		return "", fmt.Errorf("windows APPDATA: %v %s", err, ad)
+	}
+	lp, err := exec.Command("wslpath", "-u", ad).Output()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(strings.TrimSpace(string(lp)), "Code", "User", "globalStorage", "ms-vscode-remote.remote-containers"), nil
+}
+
+// devContainerName encodes a container name the way the extension names
+// its per-container files (":", "/", "%" percent-encoded, lowercase hex).
+func devContainerName(n string) string {
+	var b strings.Builder
+	for _, r := range strings.TrimPrefix(n, "/") {
+		if r == ':' || r == '/' || r == '%' {
+			fmt.Fprintf(&b, "%%%x", r)
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// EnsureAttachConfig writes the Dev Containers per-container ("named")
+// configuration - looked up before the per-image one - so VS Code attaches
+// as the sandbox user and opens /workspace. Other keys in an existing file
+// (the user's own settings) are kept.
+func EnsureAttachConfig(container string, env map[string]string) error {
+	user, err := attachUser(container)
+	if err != nil {
+		return err
+	}
+	dir, err := devContainersDir()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "nameConfigs"), 0o755); err != nil {
+		return err
+	}
+	p := filepath.Join(dir, "nameConfigs", devContainerName(container)+".json")
+	cfg := map[string]any{}
+	if b, err := os.ReadFile(p); err == nil {
+		if json.Unmarshal(b, &cfg) != nil {
+			return fmt.Errorf("%s is not plain JSON - leaving it alone (set \"remoteUser\": %q there)", p, user)
+		}
+	}
+	cfg["remoteUser"], cfg["workspaceFolder"] = user, Folder
+	// remoteEnv: ours set/cleared, the user's other entries kept
+	re, _ := cfg["remoteEnv"].(map[string]any)
+	if re == nil {
+		re = map[string]any{}
+	}
+	for _, k := range []string{"XDG_CONFIG_HOME", "OPENCODE_DB"} {
+		delete(re, k)
+	}
+	for k, v := range env {
+		re[k] = v
+	}
+	if len(re) > 0 {
+		cfg["remoteEnv"] = re
+	} else {
+		delete(cfg, "remoteEnv")
+	}
+	b, _ := json.MarshalIndent(cfg, "", "\t")
+	tmp := p + ".tmp"
+	if err := os.WriteFile(tmp, append(b, '\n'), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, p)
+}
+
+// ForgetContainer drops a deleted container's named configuration.
+func ForgetContainer(container string) {
+	if dir, err := devContainersDir(); err == nil {
+		_ = os.Remove(filepath.Join(dir, "nameConfigs", devContainerName(container)+".json"))
+	}
 }

@@ -26,7 +26,11 @@ func (s *Server) ideRoute(w http.ResponseWriter, r *http.Request, sb sandbox.San
 		Launch bool `json:"launch"`
 	}
 	_ = json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&in)
-	res, err := ide.Open(sb, func() (agents.Box, error) { return attach.BoxFor(sb, sshPort(sb)) }, in.Launch)
+	var env map[string]string
+	if sb.Kind == sandbox.KindContainer {
+		env = attach.ContainerShellEnv(sb)
+	}
+	res, err := ide.Open(sb, func() (agents.Box, error) { return attach.BoxFor(sb, sshPort(sb)) }, env, in.Launch)
 	if err != nil {
 		httpError(w, 500, err.Error())
 		return
