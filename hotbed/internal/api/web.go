@@ -2021,8 +2021,18 @@ function renderHelp(){
       ['hotbedd sync NAME|all','push proxy wiring (OpenCode + every installed agent, each with its own virtual key) into sandbox(es)'],
       ['hotbedd mount ls|add|rm','host bind mounts of a container (add/rm recreates it)'],
       ['hotbedd recipe print|up|validate / hotbedd egress','declarative hbd.yaml sandboxes / outbound fence'],
-      ['hotbedd audit [N]','control-plane audit trail']
+      ['hotbedd audit [N]','control-plane audit trail'],
+      ['hotbedd ide NAME [--print]','open the sandbox in VS Code (--print: only the folder URI)'],
+      ['hotbedd image ls|build|save|save-vm|rm','custom container images and VM base images (Images page)']
     ])+
+    hsec('VS Code')+
+    '<div style="font-size:.82rem;color:var(--dim);line-height:1.55;max-width:70ch">'+
+    '<p>Select a running sandbox and press <b>VS Code</b> in its header (or run <code>hotbedd ide NAME</code>). VS Code opens the sandbox&rsquo;s <span class="mono">/workspace</span>; its terminals, extensions and language servers run inside the sandbox, not on your machine.</p>'+
+    '<p><b>Containers</b> open through the <b>Dev Containers</b> extension (<span class="mono">ms-vscode-remote.remote-containers</span>, &ldquo;attach to running container&rdquo;). hotbed never installs extensions: when it is missing the button copies the install command - run it once, then press the button again.</p>'+
+    '<p><b>VMs</b> open through <b>Remote-SSH</b> (<span class="mono">ms-vscode-remote.remote-ssh</span>) to the host <span class="mono">hotbed-&lt;vm&gt;</span>. The first time, hotbed prepares the connection: it writes its own <span class="mono">~/.ssh/hotbed.conf</span> and <span class="mono">hotbed_known_hosts</span> (the VM&rsquo;s host key, pinned) and adds one line, <span class="mono">Include hotbed.conf</span>, to the top of your <span class="mono">~/.ssh/config</span> (the original is saved once as <span class="mono">config.hotbed-bak</span>; your own entries stay untouched). Afterwards the VM is also listed in VS Code&rsquo;s Remote Explorer and reachable with plain <code>ssh hotbed-&lt;vm&gt;</code>. If VS Code asks for the remote platform, pick <b>Linux</b>.</p>'+
+    '<p><b>On Windows with WSL</b> the editor is your Windows VS Code. The files above live in <span class="mono">%USERPROFILE%\\.ssh</span>, hotbed creates a separate key there (<span class="mono">hotbed_ide</span>) and authorizes it in each VM you open - the VM key never leaves the distro. Libvirt guest addresses do not route to Windows, so the connection runs through <span class="mono">hotbedd ide-pipe</span> inside WSL (ssh ProxyCommand); it keeps working when a VM changes address, e.g. after switching to strict egress.</p>'+
+    '<p>Proxy settings of the sandbox (for example strict egress) apply in VS Code terminals too. Deleting a VM removes its host entry and pinned key; a VM must be running to open it.</p>'+
+    '</div>'+
     hsec('How burn is counted')+
     '<div style="font-size:.8rem;color:var(--dim);line-height:1.55;max-width:70ch">'+
     '<ul style="margin:.2rem 0 .2rem 1.1rem;padding:0">'+
