@@ -6,16 +6,21 @@
 #   scripts/update.sh --yes --tls  # restart AND flip HOTBEDD_TLS (https) in the same shot
 #   scripts/update.sh v0.2.5       # pin a tag
 #
-# Order matters: tree first (gh via git the repo is auth'd with), then the
-# release ASSET for the binary (tagged, SHA-summed, never a rebuild), then
-# wrappers/prereqs via install.sh, then optionally the daemon restart.
+# Order matters: tree first (git pull), then the release ASSET for the binary
+# (tagged, SHA-summed, never a rebuild), then wrappers/prereqs via
+# install.sh, then optionally the daemon restart.
+#
+# No gh CLI needed: releases come from the GitHub REST API with curl,
+# anonymously for the public repo. A token is used when one is around
+# (GITHUB_TOKEN / GH_TOKEN, or `gh auth token` if gh happens to be logged
+# in) - that keeps private forks working, same as quick-install.sh.
 #
 # Your local working tree is preserved automatically: `git pull --autostash`
 # stashes uncommitted edits in tracked files and pops them back after the
 # merge -- no manual `git stash` dance anymore.
 #
-# Fresh boxes: the bootstrap fetches THIS script (`gh api ... | base64 -d >
-# scripts/update.sh`) BEFORE any git pull exists, so the file lands untracked
+# Fresh boxes: a bootstrap may fetch THIS script (e.g. curl from the raw
+# URL into scripts/update.sh) BEFORE any git pull exists, so the file lands untracked
 # and the later merge refuses to write the now-tracked file over it. That is
 # not divergence -- the script detects untracked files the incoming merge
 # wants to write, moves them aside, merges, and reconciles:
@@ -42,7 +47,7 @@ say()  { printf '\033[36;1mupdate:\033[0m %s\n' "$*"; }
 warn() { printf '\033[33;1mupdate:\033[0m %s\n' "$*"; }
 fail() { printf '\033[31;1mupdate:\033[0m %s\n' "$*" >&2; exit 1; }
 
-command -v gh >/dev/null 2>&1 || fail "gh CLI required (gh auth login once)"
+command -v curl >/dev/null 2>&1 || fail "curl required"
 command -v git >/dev/null 2>&1 || fail "git required"
 [[ -f vm/hotbedvm.sh && -f bin/hbd && -f hotbed/go.mod ]] || fail "run from the kit tree"
 
@@ -52,7 +57,37 @@ case "$(uname -m)" in
     aarch64) KA=arm64 ;;
     *)       fail "unsupported arch $(uname -m) (assets: amd64/arm64)" ;;
 esac
-TAG="${TAG:-$(gh release list --limit 1 --json tagName --jq '.[0].tagName')}"
+# owner/repo from the clone's origin (forks update from themselves)
+REPO="$(git remote get-url origin 2>/dev/null | sed -E 's#^.*github\.com[:/]##; s#\.git$##')"
+[[ "$REPO" == */* ]] || REPO="Chris5011/hotbed"
+TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+if [[ -z "$TOKEN" ]] && command -v gh >/dev/null 2>&1; then
+    TOKEN="$(gh auth token 2>/dev/null || true)"
+fi
+api() { # api PATH — GitHub REST call, authenticated only when we have a token
+    curl -fsSL ${TOKEN:+-H "Authorization: Bearer $TOKEN"} \
+         -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO$1"
+}
+json_field() { # json_field KEY < json — first "KEY": "value" (no jq; sed quits
+    # at the first match, so pipefail never sees a SIGPIPE)
+    sed -n "/\"$1\": *\"/{s/.*\"$1\": *\"\([^\"]*\)\".*/\1/p;q;}"
+}
+fetch_asset() { # fetch_asset NAME DEST — release asset via the API (public + private)
+    local id
+    # one line per JSON object; an asset's "url" (the API url) precedes its
+    # nested "uploader" object, so the line naming the asset holds its url
+    id="$(printf '%s' "$REL_JSON" | tr -d '\n' | tr '{' '\n' | grep -F "\"name\": \"$1\"" | json_field url | sed 's#.*/assets/##')" || true
+    [[ -n "$id" ]] || return 1
+    curl -fsSL ${TOKEN:+-H "Authorization: Bearer $TOKEN"} -H "Accept: application/octet-stream" \
+        -o "$2" "https://api.github.com/repos/$REPO/releases/assets/$id"
+}
+if [[ -n "${TAG:-}" ]]; then
+    REL_JSON="$(api "/releases/tags/$TAG" 2>/dev/null || true)"
+else
+    REL_JSON="$(api /releases/latest 2>/dev/null || true)"
+    TAG="$(printf '%s' "$REL_JSON" | json_field tag_name || true)"
+fi
+[[ -n "$REL_JSON" ]] || fail "no release info from github.com/$REPO (offline? private fork without GITHUB_TOKEN?)"
 [[ "$TAG" == v* ]] || fail "weird tag: $TAG"
 say "target release: $TAG"
 
@@ -123,15 +158,16 @@ git rev-parse -q --verify "refs/tags/$TAG" >/dev/null \
 mkdir -p dist
 rm -f "dist/hotbedd-$TAG-linux-$KA" "dist/SHA256SUMS"
 say "downloading release asset (hotbedd-$TAG-linux-$KA + SHA256SUMS)..."
-gh release download "$TAG" --repo "$(gh repo view --json nameWithOwner --jq .nameWithOwner)" \
-    --pattern "hotbedd-$TAG-linux-$KA" --pattern SHA256SUMS --dir dist --clobber
+fetch_asset "hotbedd-$TAG-linux-$KA" "dist/hotbedd-$TAG-linux-$KA" \
+    || fail "release $TAG has no asset hotbedd-$TAG-linux-$KA"
+fetch_asset SHA256SUMS dist/SHA256SUMS || fail "release $TAG has no SHA256SUMS"
 ( cd dist && sha256sum -c SHA256SUMS --ignore-missing ) >/dev/null 2>&1 \
     || fail "SHA256SUMS verification failed -- refusing to install the binary"
 install -m 755 "dist/hotbedd-$TAG-linux-$KA" hotbed/bin/hotbedd
 say "daemon binary installed: hotbed/bin/hotbedd <- dist/hotbedd-$TAG-linux-$KA"
 
 # ---- prereqs, wrappers, base image pre-build -----------------------------------
-./install.sh --yes
+bash ./install.sh --yes   # bash: works even where the exec bit got lost
 
 # ---- optional daemon restart (bind + TLS preserved via honest detection) ---------
 # lsn prints "<addr>:<port> <pid>" for the given port's listener; the pid rides
