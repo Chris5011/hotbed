@@ -1,3 +1,36 @@
+# Hotbed v0.9.3 — research views and CSV exports
+
+## New
+
+- **DNS page** (sidebar): every domain any sandbox looked up,
+  consolidated — lookups, refused, which sandboxes, first/last seen — plus
+  a per-sandbox summary, a filter and an include-deleted toggle.
+- **DNS records outlive their sandbox**, like the burn ledger: deleting a
+  sandbox no longer erases its lookup history. Stale records stay until
+  you purge them on the DNS page (or `POST /api/dns/purge
+  {"stale_only":true}`). Records of sandboxes deleted before this release
+  were already removed.
+- **CSV downloads** (complete history, UTC, spreadsheet-formula safe):
+
+  | CSV | Endpoint |
+  |---|---|
+  | DNS, all / one sandbox | `/api/dns.csv[?sandbox=NAME]` |
+  | Burn, every proxied call | `/api/usage.csv[?sandbox=NAME]` |
+  | Burn per day and sandbox (burn rate) | `/api/usage.csv?group=day[&sandbox=NAME]` |
+
+  Buttons on the DNS and Burn pages (totals and per row) and in a
+  sandbox's DNS and Burn tabs. The burn export reads the whole ledger, not
+  only the window the dashboard summaries use.
+
+## Upgrade from v0.9.2
+
+```bash
+cd ~/hotbed
+bash scripts/update.sh --yes
+```
+
+---
+
 # Hotbed v0.9.2 — `lan` preset, boot restarts, readable mounts
 
 ## Changed
