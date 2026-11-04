@@ -65,12 +65,51 @@ network", not "prison".
 | ------- | --------- | ---------- |
 | Proxy binds `0.0.0.0` by design | WSL2 NAT and multi-machine LANs need it; single-user trust model | 128-bit tokens + revocation + auth backoff; set `proxy.bind: "127.0.0.1"` in config to hard-bind loopback-only |
 | No TLS on either listener | Localhost/desktop scope; certs would be self-signed anyway | Both listeners are localhost-only by default; rely on loopback/network trust boundary |
-| Egress fence is convenience, not a boundary | The script says so; kernel/dns/tunnel escapes exist | `egress: none` drops all non-loopback traffic from the netns; treat as OpSec convenience |
+| Egress fences `proxy-only` / `none` / `allowlist` are convenience, not a boundary | They are rules inside the sandbox; on VMs root in the guest can flush them | `strict` (v0.8.0) enforces the allowlist outside the sandbox (isolated network + egress proxy); see §4a |
+| Default egress `allow` reaches private networks | Sandbox traffic leaves through the host, so it reaches whatever the host can: LAN, VPN tunnels, the host's own services (§4a) | Pick `strict` or `allowlist` for agent workloads; `proxy-only` keeps private ranges open by design and does **not** help here |
+| Root inside every sandbox | Agents install packages and hotbed manages VMs through the sandbox user's sudo; the container/VM is the boundary, not the user account | VM `dev` / container user have passwordless sudo, VM `dev` is in the `docker` group — treat everything inside as root-controlled (§4a) |
 | Budget enforcement may overshoot on concurrent bursts | Check-then-forward race inside the proxy; tiny window per request | Small overshoot bounded by in-flight requests per wallet; acceptable for a personal burn limiter |
 | Upstream key custody rests with config.json I/O | One file holds all provider secrets | `0600`/`0700` perms, masked API GET/merge round-trip; disk encryption is the real control |
 | Dashboard GET endpoints are side-effect free but unauthenticated | Loopback listener; origin guard covers mutations | Keep `dashboard.bind` on loopback (default) if the LAN is untrusted |
 | Foreign-named docker containers inherit hotbedd CLI steering | `hotbedd` names are requested, not enforced against `docker run` by hand | Arg-list exec + charset validation make this inert; deliberate choice |
 | `~/.ssh/hotbedvm_key` used for VM ssh | Kit-generated dev key | Read-only by code in the daemon path; `accept-new` host-key policy scoped to 127.0.0.1 |
+
+## 4a. What a sandbox can reach, and who is root in it
+
+Verified 2026-11-04 on the dev box (Windows 11 + WSL2 NAT, Docker Desktop,
+libvirt VM on the default NAT network, egress preset `allow`, a WireGuard
+tunnel active on Windows). An agent inside the VM ran its own escape sweep;
+the host side was then probed from the VM:
+
+| From a sandbox (egress `allow`) | Reachable | Why |
+| ------------------------------- | --------- | --- |
+| Public internet | yes | default NAT |
+| hotbed LLM proxy (`:7775` on the bridge gateway) | yes | intended; every request needs a minted key |
+| hotbed dashboard (`:7770`) | **no** | loopback-only |
+| Services the host binds on all interfaces (e.g. a container publishing `0.0.0.0:5000`, the DNS fence `:15353`) | yes | the sandbox's gateway is the host |
+| Windows itself (WSL gateway: SMB `445`, RPC `135`) | yes | WSL NAT routes through Windows |
+| The home LAN (router, NAS, …) | yes | routed via Windows' default route |
+| VPN networks the Windows host has up (WireGuard) | yes | routed via Windows like any other destination |
+
+In short: **a sandbox with egress `allow` can reach everything the host can.**
+For agent workloads use `strict` (containers without published ports,
+libvirt VMs: an isolated network whose only way out is the allowlist proxy,
+enforced outside the sandbox) or at least `allowlist` (in-sandbox fence;
+root in a VM guest could lift it). `proxy-only` keeps RFC1918 ranges open by
+design — it stops public egress, not lateral movement. Container fences hold
+against root in the container (no `NET_ADMIN`); VM guest fences do not.
+
+**Root inside.** The VM user `dev` and the container sandbox user have
+passwordless `sudo`; `dev` is also in the guest's `docker` group (the docker
+daemon is the guest's own — "docker escape" yields guest root, not the
+host). This is by design: agents install packages, and hotbed manages VMs
+through `dev`'s sudo. Consequently everything inside a sandbox — files,
+the agent's tools, any in-sandbox fence — must be considered under the
+control of whatever runs there. The containment is the VM (kernel/KVM
+isolation; keep the host kernel and QEMU patched) or the container (shared
+host kernel: weaker than a VM), plus host-side controls: `strict` egress,
+loopback-only dashboard, key-gated proxy. `/dev/kvm` and vsock devices in
+VMs come from nested virtualization being enabled.
 
 ## 5. Alpha release checklist
 

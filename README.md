@@ -1327,6 +1327,16 @@ from a login shell (ssh session / Dev Containers' login-shell probe), so
 - A synced sandbox config is written into a *shared-write* path the kit
   already mounts for VMs, or a container-only XDG shim path — never over a
   location the kit mounts writable for other purposes.
+- **A sandbox with egress `allow` (the default) reaches everything the host
+  can**: the internet, but also your LAN, VPN tunnels the host has up, the
+  host's own services and — on WSL — Windows (SMB/RPC). For agent workloads
+  use `strict` (enforced outside the sandbox) or `allowlist`; `proxy-only`
+  keeps private ranges open and does not stop lateral movement.
+- **Everything inside a sandbox is root-controlled by design**: the VM user
+  `dev` and the container user have passwordless sudo (`dev` is also in the
+  guest's docker group). The boundary is the VM / container, not the user
+  account — in-sandbox fences and files are only as safe as that boundary.
+  Details and the verified reach table: [SECURITY.md §4a](SECURITY.md).
 
 #### Not on the roadmap by design
 
