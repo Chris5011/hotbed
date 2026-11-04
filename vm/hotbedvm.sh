@@ -25,7 +25,8 @@ OCCODE_URL="https://github.com/sst/opencode/releases/download/v1.19.4/opencode-l
 SSH_KEY="${HOME}/.ssh/hotbedvm_key"
 VIRSH=(virsh --connect qemu:///system)
 VIRT_INSTALL=(virt-install)
-VERSION="0.1.0"
+VERSION="$(sed -n 's/^VERSION ?= //p' "$HOTBED_ROOT/Makefile" 2>/dev/null)"  # the kit's version
+VERSION="${VERSION:-unknown}"
 
 # --- backend selection --------------------------------------------------------
 # SBXVM_BACKEND=docker  → qemu inside a container (image hotbedvmd, one container

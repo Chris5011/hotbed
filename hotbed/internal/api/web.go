@@ -2197,7 +2197,7 @@ function detailCards(sb, j){
     }
     if(d.mounts && d.mounts.length){
       extras.push({t:'mounts',v:'<ul>'+d.mounts.map(function(m){
-        return '<li>'+esc((m.rw?'rw ':'ro ')+m.target+' ← '+short(m.source))+'</li>'; }).join('')+'</ul>'});
+        return '<li>'+esc((m.rw?'rw ':'ro ')+m.target+' ← '+short(m.source_display||m.source))+'</li>'; }).join('')+'</ul>'});
     }
     if(d.workdir) extras.push({t:'workdir',v:esc(d.workdir)});
     if(d.env && d.env.length){

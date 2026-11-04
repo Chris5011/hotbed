@@ -238,6 +238,9 @@ type Mount struct {
 	Target string `json:"target"`
 	Type   string `json:"type"`
 	RW     bool   `json:"rw"`
+	// Display is the original host path when Source is a Docker Desktop
+	// bind-mount mirror (DisplaySource)
+	Display string `json:"source_display,omitempty"`
 }
 
 // InspectContainer collects details for one docker container.
@@ -290,6 +293,9 @@ func InspectContainer(name string) (*Detail, error) {
 			}
 			if s, ok := mm2["Source"].(string); ok {
 				mo.Source = s
+				if d := DisplaySource(s); d != s {
+					mo.Display = d
+				}
 			}
 			if s, ok := mm2["Destination"].(string); ok {
 				mo.Target = s

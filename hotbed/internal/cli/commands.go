@@ -164,6 +164,12 @@ func serve(args []string) error {
 	// re-synced once the first inventory scan is in
 	go srv.HealKeys()
 
+	// Docker Desktop may start sandboxes before WSL published their bind
+	// sources; those fail once and are never retried by docker
+	go engine.BootRestartFailedMounts(func(s string) {
+		fmt.Printf("\033[36;1mhotbedd:\033[0m %s\n", s)
+	})
+
 	// strict egress (issue #4): gateway container back up for strict
 	// containers, the allowlist proxy on the isolated libvirt bridge, and
 	// agent re-sync whenever a sandbox enters/leaves strict
