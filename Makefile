@@ -11,7 +11,7 @@
 # VERSION stamps the binary via -ldflags "-X hotbed/internal/env.Version=…"
 # (the source default remains archival). Bump this default alongside the tag.
 
-VERSION ?= 0.8.0
+VERSION ?= 0.9.0
 
 GO     ?= go
 GOFMT  ?= gofmt

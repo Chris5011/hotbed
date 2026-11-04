@@ -1,3 +1,52 @@
+# Hotbed v0.9.0 — images and VS Code
+
+Implements issues #1 (image builder) and #2 (IDE integration).
+
+## New
+
+- **Custom images (#1)** — new sandboxes can start from more than the kit
+  stacks (dashboard **Images** page, `hotbedd image …`):
+  - **declarative images**: `hotbedd image build NAME --from STACK --apt …
+    --run … --env …` → stack `custom:NAME` in the wizard, recipes and API;
+    the spec is kept for `image rebuild`
+  - **save a container as an image**: the sandbox is copied (never
+    changed), the copy is scrubbed of secrets (hotbed keys, agent logins,
+    OpenCode auth, credential files, shell history, token-shaped values),
+    verified and flattened so no layer keeps what was deleted
+  - **save a VM as a base image** (shut down first): flattened standalone
+    qcow2, generalized with virt-sysprep (machine-id, ssh host keys,
+    cloud-init state) and scrubbed the same way; new VMs pick it as
+    *Base image* in the wizard or `hotbedvm create NAME --image IMG`, on
+    both backends
+  - *Save as image* button on every sandbox; removal is refused while a
+    sandbox still uses an image
+  - Limit: the scrub knows file locations and token formats — a secret in
+    an unknown format stays; review images you share
+- **VS Code (#2)** — *VS Code* button / `hotbedd ide NAME` opens a
+  sandbox's `/workspace`:
+  - containers via Dev Containers attach (a missing extension is reported
+    with its install command, never installed by hotbed)
+  - VMs via Remote-SSH to the host alias `hotbed-<vm>`: hotbed keeps its own
+    `hotbed.conf` + pinned host keys and adds a single `Include hotbed.conf`
+    line to your ssh config (backed up once). Works from Windows VS Code on
+    WSL through a `hotbedd ide-pipe` ProxyCommand with a separate
+    Windows-side key; the VM key stays in the distro
+
+## Fixes
+
+- VMs created from a saved image no longer share one machine-id
+- cloud-init no longer reports `error` on VMs whose cloud kernel was
+  already removed (seed purge step)
+
+## Upgrade from v0.8.0
+
+```bash
+cd ~/hotbed
+scripts/update.sh --yes
+```
+
+---
+
 # Hotbed v0.8.0 — strict egress
 
 Implements issue #4: an egress allowlist that the sandbox itself cannot
