@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"hotbed/internal/attach"
 	"hotbed/internal/sandbox"
@@ -47,6 +48,33 @@ func sortEntries(list []fileEnt) {
 			return al < bl
 		}
 		return a.Name < b.Name
+	})
+}
+
+// lsKey is how `ls -1` orders names in an en_US.UTF-8 / de_*.UTF-8 locale
+// (glibc collation): case-insensitive, punctuation (dots, dashes,
+// underscores) ignored at first, then the full name decides
+// ("my-dir" before "my_dir"). No folders-first - like ls.
+func lsKey(n string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(n) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func lsSort(list []fileEnt) {
+	sort.SliceStable(list, func(i, j int) bool {
+		a, b := list[i].Name, list[j].Name
+		if ka, kb := lsKey(a), lsKey(b); ka != kb {
+			return ka < kb
+		}
+		if la, lb := strings.ToLower(a), strings.ToLower(b); la != lb {
+			return la < lb
+		}
+		return a < b
 	})
 }
 
@@ -121,7 +149,7 @@ func parseListing(out string) ([]fileEnt, bool, error) {
 	if truncated {
 		list = list[:filesMax]
 	}
-	sortEntries(list)
+	lsSort(list)
 	return list, truncated, nil
 }
 

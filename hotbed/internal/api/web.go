@@ -104,7 +104,7 @@ const indexHTML = `<!doctype html>
       </div>
 
       <div id="tab-conn" class="tabpane" hidden>
-        <div class="hint">Primary = SSH (paste anywhere). Persistent tmux session survives detachment; &ldquo;Open Terminal&rdquo; attaches to it in Windows Terminal.</div>
+        <div class="hint"><i>Open Terminal</i> runs this in Windows Terminal. The session lives in tmux inside hotbed, so closing the window keeps it running - Open Terminal re-attaches to it.</div>
         <div id="conn-rows"></div>
       </div>
 
@@ -368,7 +368,15 @@ select{appearance:none;-webkit-appearance:none;padding-right:1.6rem;background-i
 .kvt td{padding:.18rem .9rem .18rem 0;vertical-align:top;color:var(--fg);word-break:break-all}
 .kvt td.kvt-m{color:var(--faint);width:2.2rem}
 .kvt td.kvt-s{color:var(--dim)}
-.ftools{margin-bottom:var(--s2)}
+.ftools{margin-bottom:var(--s3)}
+.ftools label{display:inline-flex;align-items:center;gap:.4rem;color:var(--dim);font-size:.78rem;cursor:pointer;user-select:none}
+.fbox{border:1px solid var(--line2);border-radius:var(--r2);background:var(--bg2);overflow:hidden}
+.fbox .ftbl th{background:var(--bg3);border-bottom-color:var(--line2);position:sticky;top:0}
+.fbox .ftbl td,.fbox .ftbl th{padding-left:var(--s4);padding-right:var(--s4)}
+.fbox .ftbl tbody tr:last-child td{border-bottom:none}
+.fbox .ftbl tr.fdir:hover td{background:var(--bg3)}
+.ftbl tr.fup td.fname{color:var(--dim)}
+.fempty{padding:var(--s4);color:var(--dim);font-size:.8rem}
 .ftools #files-jump{width:280px;max-width:100%;font-family:var(--mono)}
 .fcrumbs{font:.8rem var(--mono);color:var(--dim);display:flex;flex-wrap:wrap;align-items:center;gap:2px}
 .fcrumbs a{color:var(--dim);text-decoration:none;padding:.1rem .25rem;border-radius:var(--r1)}
@@ -405,6 +413,9 @@ select{appearance:none;-webkit-appearance:none;padding-right:1.6rem;background-i
 /* ---------- connection rows ---------- */
 #conn-rows .row{display:flex;align-items:center;gap:var(--s3);background:var(--bg2);border:1px solid var(--line);border-radius:var(--r2);padding:.55rem .7rem;margin-bottom:var(--s2)}
 #conn-rows .lbl{min-width:150px;color:var(--faint);font-size:.78rem;font-weight:500}
+#conn-rows .connmore{margin-top:var(--s3)}
+#conn-rows .connmore summary{cursor:pointer;color:var(--dim);font-size:.8rem;margin-bottom:var(--s2);user-select:none}
+#conn-rows .connmore summary:hover{color:var(--fg)}
 #conn-rows code{flex:1;font:.76rem var(--mono);overflow-x:auto;white-space:nowrap;color:var(--fg)}
 
 /* ---------- tables (burn etc.) ---------- */
@@ -1319,9 +1330,8 @@ function renderCreator(){
         .then(function(res){
           cwIdle();
           if(res.error){ msg.innerHTML='<span class="err">'+esc('create: '+res.error)+'</span>'; toast('create: '+res.error,'err'); return; }
-          var w=res.warn?' (warnings: '+res.warn+')':'';
-          toast('created VM '+res.vm,'ok');
-          jumpToCreated('vm', res.vm, 'created VM '+res.vm+' ('+res.backend+' backend)'+w);
+          toast('created VM '+res.vm+' ('+res.backend+' backend)','ok');
+          jumpToCreated('vm', res.vm, res.warn?'warnings: '+res.warn:'');
         })
         .catch(function(){ cwIdle(); msg.textContent='create failed (network) - the VM may still be provisioned by an earlier attempt; check hotbedd ps'; });
       return;
@@ -1367,9 +1377,8 @@ function renderCreator(){
       .then(function(res){
         cwIdle();
         if(res.error){ msg.innerHTML='<span class="err">'+esc('create: '+res.error)+'</span>'; toast('create: '+res.error,'err'); return; }
-        var w=res.warn?' (warnings: '+res.warn+')':'';
         toast('created '+res.container,'ok');
-        jumpToCreated('container', res.container, 'created '+res.container+w);
+        jumpToCreated('container', res.container, res.warn?'warnings: '+res.warn:'');
       })
       .catch(function(){ cwIdle(); msg.textContent='create failed (network)'; });
   });
@@ -2373,6 +2382,8 @@ function fmtStamp(iso){
 
 /* ---------- Files tab: browse a running sandbox (listing only) ---------- */
 var filesPath={}; // sandbox key -> directory on screen
+var filesHidden=false; // show dot-files (remembered per browser)
+try{ filesHidden=localStorage.getItem('hotbed-files-hidden')==='1'; }catch(e){}
 function humanSize(n){
   n=Number(n)||0; if(n<1024) return n+' B';
   var u=['KB','MB','GB','TB'], i=-1; do{ n/=1024; i++; }while(n>=1024 && i<u.length-1);
@@ -2387,36 +2398,40 @@ function renderFilesTab(sb, dir){
     .then(function(r){ return r.json(); }).then(function(j){
       if(host.getAttribute('data-sb')!==key || activeTab!=='files') return;
       if(j.error){
-        host.innerHTML=filesBar(sb, dir, '')+'<div class="hint err">'+esc(j.error)+'</div>';
+        host.innerHTML=filesBar(sb, dir, '', 0)+'<div class="fbox"><div class="fempty err">'+esc(j.error)+'</div></div>';
         filesWire(sb, host); return;
       }
       filesPath[key]=j.path;
-      var rows=(j.entries||[]).map(function(e){
+      var all=j.entries||[], hiddenN=0;
+      var shown=all.filter(function(e){ var h=e.name.charAt(0)==='.'; if(h) hiddenN++; return filesHidden||!h; });
+      var up=j.parent?'<tr class="fdir fup" data-go="'+esc(j.parent).split('"').join('&quot;')+'"><td class="fname">..</td><td class="fnum"></td><td class="fnum"></td></tr>':'';
+      var rows=shown.map(function(e){
         var hidden=e.name.charAt(0)==='.';
         var name=esc(e.name)+(e.type==='link'?' <span class="flink">→ '+esc(e.link||'')+'</span>':'')+(e.dir?'/':'');
         return '<tr class="'+(e.dir?'fdir':'ffile')+(hidden?' fhid':'')+'"'+(e.dir?' data-go="'+esc(j.path.replace(/\/$/,'')+'/'+e.name).split('"').join('&quot;')+'"':'')+'>'+
           '<td class="fname">'+name+'</td><td class="fnum">'+(e.dir?'':humanSize(e.size))+'</td>'+
           '<td class="fnum">'+(e.mtime?esc(fmtStamp(new Date(e.mtime*1000).toISOString())):'')+'</td></tr>';
       }).join('');
-      host.innerHTML=filesBar(sb, j.path, j.parent)+
-        (rows?'<table class="tbl ftbl"><thead><tr><th>name</th><th class="fnum">size</th><th class="fnum">modified</th></tr></thead><tbody>'+rows+'</tbody></table>'
-             :'<div class="hint">empty directory</div>')+
+      host.innerHTML=filesBar(sb, j.path, j.parent, hiddenN)+
+        '<div class="fbox"><table class="tbl ftbl"><thead><tr><th>name</th><th class="fnum">size</th><th class="fnum">modified</th></tr></thead><tbody>'+up+rows+
+        (!shown.length?'<tr><td colspan="3" class="fempty">'+(all.length?'only hidden entries here - turn on "show hidden files"':'empty directory')+'</td></tr>':'')+
+        '</tbody></table></div>'+
         (j.truncated?'<div class="hint">only the first 5000 entries are listed</div>':'');
       filesWire(sb, host);
     }).catch(function(e){ host.innerHTML='<div class="hint err">listing failed: '+esc(e)+'</div>'; });
 }
-function filesBar(sb, path, parent){
+function filesBar(sb, path, parent, hiddenN){
   var crumbs='<a href="#" data-go="/">/</a>', acc='';
   path.split('/').filter(Boolean).forEach(function(p, i, all){
     acc+='/'+p;
     crumbs+=(i?'<span class="fsep">/</span>':'')+(i===all.length-1?'<b>'+esc(p)+'</b>':'<a href="#" data-go="'+esc(acc).split('"').join('&quot;')+'">'+esc(p)+'</a>');
   });
   return '<div class="dnstools ftools">'+
-    '<button class="tool" data-go="'+esc(parent||'').split('"').join('&quot;')+'"'+(parent?'':' disabled')+'>Up</button>'+
-    '<button class="tool" data-go="/workspace">Workspace</button>'+
     '<span class="fcrumbs">'+crumbs+'</span><span class="grow"></span>'+
+    '<label title="dot-files and dot-folders"><span class="ios-toggle"><input type="checkbox" id="files-hidden"'+(filesHidden?' checked':'')+'><span class="track"></span><span class="knob"></span></span>show hidden files'+(hiddenN&&!filesHidden?' ('+hiddenN+')':'')+'</label>'+
+    '<button class="tool" data-go="/workspace">Workspace</button>'+
     '<input id="files-jump" type="text" spellcheck="false" autocomplete="off" placeholder="go to path" value="'+esc(path).split('"').join('&quot;')+'">'+
-    '</div><div class="hint">Read-only view of the sandbox filesystem (listed as root, so everything present shows up). Folders first; hidden entries after the rest.</div>';
+    '</div>';
 }
 function filesWire(sb, host){
   host.onclick=function(ev){
@@ -2427,6 +2442,12 @@ function filesWire(sb, host){
   };
   var jump=$('files-jump');
   if(jump){ jump.onkeydown=function(ev){ if(ev.key==='Enter'){ var v=jump.value.trim(); if(v) renderFilesTab(sb, v); } }; }
+  var hid=$('files-hidden');
+  if(hid){ hid.onchange=function(){
+    filesHidden=hid.checked;
+    try{ localStorage.setItem('hotbed-files-hidden', filesHidden?'1':'0'); }catch(e){}
+    renderFilesTab(sb);
+  }; }
 }
 
 /* ---------- connection tab ---------- */
@@ -2436,19 +2457,26 @@ function renderConn(sb){
   fetch('/api/sandboxes/'+sb.kind+'/'+sb.name+'/connect?mode=shell')
    .then(function(r){return r.json();})
    .then(function(ci){
-      var rows=[];
-      if(ci.shellCmd)    rows.push({l:sb.kind==='vm'?'ssh (primary)':'shell (primary)', v:ci.shellCmd, copy:ci.shellCmd});
-      if(ci.backendCmd && sb.kind==='container') rows.push({l:'opencode one-shot', v:ci.backendCmd, copy:ci.backendCmd});
-      if(ci.wtCommand)   rows.push({l:'Windows Terminal', v:ci.wtCommand, copy:ci.wtCommand});
-      if(ci.tmuxAttach)  rows.push({l:'re-attach tmux session', v:ci.tmuxAttach, copy:ci.tmuxAttach});
-      if(ci.tmuxSession) rows.push({l:'tmux session', v:ci.tmuxSession});
-      rows.forEach(function(r){
+      // the one most people need first: Windows Terminal (WSL) or the plain
+      // shell; the rest is copy-only detail behind "More ways to connect"
+      var main=[], more=[];
+      if(ci.wtCommand) main.push({l:'Windows Terminal', v:ci.wtCommand, copy:ci.wtCommand});
+      if(ci.shellCmd)  (ci.wtCommand?more:main).push({l:sb.kind==='vm'?'ssh':'shell', v:ci.shellCmd, copy:ci.shellCmd});
+      if(ci.backendCmd && sb.kind==='container') more.push({l:'OpenCode, one-shot', v:ci.backendCmd, copy:ci.backendCmd});
+      if(ci.tmuxAttach) more.push({l:'tmux re-attach', v:ci.tmuxAttach, copy:ci.tmuxAttach});
+      var mk=function(r, into){
         var row=h('div',{class:'row'},
           '<div class="lbl">'+esc(r.l)+'</div><code>'+esc(r.v)+'</code>'+
-          (r.copy? '<button data-copy="'+esc(r.copy)+'">copy</button>':''));
-        host.appendChild(row);
+          (r.copy? '<button>Copy</button>':''));
+        into.appendChild(row);
         if(r.copy){ row.querySelector('button').addEventListener('click', function(){ copy(r.copy); }); }
-      });
+      };
+      main.forEach(function(r){ mk(r, host); });
+      if(more.length){
+        var det=h('details',{class:'connmore'},'<summary>More ways to connect</summary>');
+        more.forEach(function(r){ mk(r, det); });
+        host.appendChild(det);
+      }
    });
 }
 function fillDetailConn(ci){ /* reserved */ }
