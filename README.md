@@ -1228,6 +1228,52 @@ telemetry question on first start (sharing is off by default either way).
 A VM created with agents installs them in the background after boot — a
 daemon restart in that window drops the queue (use `＋ Agent`).
 
+### Images — custom stacks and VM base images
+
+New sandboxes can start from more than the kit stacks (dashboard **Images**
+page, `hotbedd image …`). Every container image is used as stack
+`custom:<name>` — in the create wizard, in recipes (`stack: custom:tools`)
+and over the API; VM images are a *Base image* choice for new VMs
+(`hotbedvm create NAME --image IMG` on either backend).
+
+```bash
+hotbedd image build tools --from python --apt jq,ripgrep --run 'npm i -g pnpm' --env TZ=UTC
+hotbedd image rebuild tools               # from the stored spec (config dir images/)
+hotbedd image save hotbed-myproj myproj   # running container -> custom:myproj
+hotbedd image save-vm myvm devbox         # shut-off VM -> VM image devbox
+hotbedd image ls
+hotbedd image rm myproj                   # --vm for VM images; refused while in use
+```
+
+- **Declarative images** are built `FROM` the kit stack (or another custom
+  image) with Debian packages, root shell steps and env, as
+  `hotbed-custom:<name>`; they share their kit stack's cache volume.
+- **Saving a container** never changes the sandbox: it is committed
+  (paused for the copy) into a throwaway, network-less container that is
+  scrubbed — hotbed's agent env files (virtual keys), synced OpenCode
+  config/auth, agent logins (`~/.claude`, `~/.codex`, …), credential files
+  (`.git-credentials`, `.netrc`, `.npmrc`, …), the strict egress settings,
+  shell history, temp files and a non-mounted `/workspace` — and then every
+  remaining file holding a token-shaped value (hotbed keys, `sk-ant-…`,
+  `sk-proj-…`, GitHub tokens, JSON refresh/access token values) is deleted
+  and listed. The result is verified and **flattened** (`docker export |
+  docker import`), so no lower layer still holds the deleted files; env and
+  entrypoint come from the image the sandbox ran, never from the
+  sandbox's own `--env`. Bind-mounted host folders (`~/.ssh`, OpenCode
+  config, the workspace) are never part of an image. Flattening costs layer
+  sharing: a saved image is as large as the whole filesystem.
+- **Saving a VM** needs it shut down. Its disk is copied into a standalone
+  qcow2 (no backing file), generalized offline with `virt-sysprep`
+  (machine-id, ssh host keys, user ssh dirs, logs), cloud-init's instance
+  state is dropped so new VMs provision from their own seed, and the same
+  scrub runs inside the copy; a verification pass on a throwaway overlay
+  deletes the image on any leak. The source VM keeps its identity. Images
+  live in `vm/images/custom/`; docker-backend VMs get a copy in the
+  hotbedvmd store on first use. A new VM's disk is at least the image's size.
+- The scrub works on known paths plus token *shapes*: a secret in a format
+  it does not know (a plain password in some app config) stays — review
+  what goes into a shared image.
+
 ### VS Code — open a sandbox in your editor
 
 The **VS Code** button in a sandbox's header (or `hotbedd ide NAME`,

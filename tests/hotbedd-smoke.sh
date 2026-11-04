@@ -905,6 +905,21 @@ if docker info >/dev/null 2>&1; then
         grep -q 'cannot be combined with published ports' <<<"$RST1" \
             && pass "create: egress strict + published ports refused" \
             || fail "create: egress strict + published ports refused ($RST1)"
+        RIMG="$(curl -s -X POST http://127.0.0.1:7794/api/create -H 'Content-Type: application/json' \
+            -d '{"name":"imgx","stack":"custom:does-not-exist"}')"
+        grep -q 'unknown stack custom:does-not-exist' <<<"$RIMG" \
+            && pass "create: unknown custom image stack rejected" \
+            || fail "create: unknown custom image stack rejected ($RIMG)"
+        RIMB="$(curl -s -X POST http://127.0.0.1:7794/api/images/build -H 'Content-Type: application/json' \
+            -d '{"name":"x","from":"base","apt":["jq; rm -rf /"]}')"
+        grep -q 'is not a package name' <<<"$RIMB" \
+            && pass "images: build spec with a shell-injected package refused" \
+            || fail "images: build spec with a shell-injected package refused ($RIMB)"
+        RIMV="$(curl -s -X POST http://127.0.0.1:7794/api/create -H 'Content-Type: application/json' \
+            -d '{"kind":"vm","name":"imgv","vm_backend":"docker","vm_image":"nope"}')"
+        grep -q 'VM image nope not found' <<<"$RIMV" \
+            && pass "create: unknown VM base image rejected" \
+            || fail "create: unknown VM base image rejected ($RIMV)"
         RST2="$(curl -s -X POST http://127.0.0.1:7794/api/create -H 'Content-Type: application/json' \
             -d '{"kind":"vm","name":"strictd","vm_backend":"docker","egress":"strict"}')"
         grep -q 'strict needs the libvirt backend' <<<"$RST2" \

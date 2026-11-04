@@ -109,6 +109,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/fs", s.fsRoute)
 	mux.HandleFunc("/api/config", s.configRoute)
 	mux.HandleFunc("/api/agents", s.agentsRoute)
+	mux.HandleFunc("/api/images", s.imagesRoute)
+	mux.HandleFunc("/api/images/", s.imagesRoute)
 	mux.HandleFunc("/api/config/import", s.configImport)
 	mux.HandleFunc("/", s.index)
 	mux.HandleFunc("/static/", s.static)
@@ -920,6 +922,7 @@ type createReq struct {
 	VMMemMB       int               `json:"vm_mem_mb"`
 	VMDiskGB      int               `json:"vm_disk_gb"`
 	VMShare       string            `json:"vm_share"`
+	VMImage       string            `json:"vm_image,omitempty"` // vm only: custom base image ("" = Debian master)
 	Mounts        []engine.Bind     `json:"mounts"`
 	Ports         []string          `json:"ports"`
 	Env           map[string]string `json:"env"`
@@ -959,8 +962,8 @@ func (s *Server) createRoute(w http.ResponseWriter, r *http.Request) {
 	if in.Stack == "" {
 		in.Stack = "go"
 	}
-	if _, isStack := engine.RecipeStacks[in.Stack]; !isStack && in.Stack != "base" {
-		httpError(w, 400, "unknown stack "+in.Stack+" (go|node|python|rust|base)")
+	if !engine.KnownStack(in.Stack) {
+		httpError(w, 400, "unknown stack "+in.Stack+" (go|node|python|rust|base, or custom:<image> of an existing custom image)")
 		return
 	}
 	if in.Egress != "" && !engine.KnownEgressPreset(in.Egress) {
@@ -1133,6 +1136,10 @@ func (s *Server) createVM(w http.ResponseWriter, in createReq) {
 		httpError(w, 400, "vm_backend must be \"libvirt\" or \"docker\" (kit has no other backends)")
 		return
 	}
+	if in.VMImage != "" && !engine.VMImageExists(in.VMImage) {
+		httpError(w, 400, "VM image "+in.VMImage+" not found (hotbedd image ls)")
+		return
+	}
 	if in.Egress == "strict" && backend == "docker" {
 		httpError(w, 400, "egress strict needs the libvirt backend - docker-backend VMs are reached over a published ssh port, which an isolated network cannot carry")
 		return
@@ -1182,7 +1189,7 @@ func (s *Server) createVM(w http.ResponseWriter, in createReq) {
 			return
 		}
 	}
-	if err := engine.VMCreateSpawn(name, backend, cpu, mem, disk, share); err != nil {
+	if err := engine.VMCreateSpawn(name, backend, cpu, mem, disk, share, in.VMImage); err != nil {
 		httpError(w, 500, "VM create failed: "+err.Error())
 		return
 	}

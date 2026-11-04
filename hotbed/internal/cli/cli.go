@@ -24,6 +24,8 @@ func Dispatch(args []string) error {
 		return proxyCmd(args)
 	case "egress-gateway":
 		return egressGatewayCmd(args)
+	case "image", "images":
+		return imageCmd(args)
 	case "ide", "code":
 		return ideCmd(args)
 	case "ide-pipe":

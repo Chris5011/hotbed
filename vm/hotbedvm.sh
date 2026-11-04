@@ -82,6 +82,22 @@ ensure_ssh_key() {
 domain() { printf 'hotbedvm-%s' "$1"; }
 vmdir()  { printf '%s/%s' "$VMS_DIR" "$1"; }
 
+# custom VM base images (hotbedd image save-vm): standalone qcow2 files
+CUSTOM_DIR="${IMAGES_DIR}/custom"
+custom_image() {  # NAME -> path (dies when missing)
+    [[ "$1" =~ ^[a-z][a-z0-9._-]{0,39}$ ]] || die "bad image name '$1'"
+    local f="$CUSTOM_DIR/$1.qcow2"
+    [[ -f "$f" ]] || die "VM image '$1' not found ($f) - list them with: hotbedd image ls"
+    printf '%s' "$f"
+}
+# disk_floor IMG GB -> GB, at least the image's virtual size (an overlay
+# smaller than its backing file would cut the filesystem off)
+disk_floor() {
+    local vs gb; vs="$(qemu-img info --output=json "$1" | sed -n 's/.*"virtual-size": *\([0-9]*\).*/\1/p' | head -1)"
+    gb=$(( (vs + 1073741823) / 1073741824 ))
+    if (( gb > $2 )); then warn "disk raised to ${gb}G (the image's size)"; printf '%s' "$gb"; else printf '%s' "$2"; fi
+}
+
 # =================== docker backend (hotbedvmd: qemu-in-container) ==============
 # One container = one VM; lifecycle is plain docker run/stop/rm; the storage
 # lives in a named volume so the qcow2 files get native ext4 I/O (no Desktop
@@ -417,7 +433,7 @@ runcmd:
   - systemctl enable hotbed-opencode-install.service
   # make the full kernel the (only) GRUB default: both flavors may share the
   # same version — grub would keep the cloud one otherwise
-  - [ "sh", "-c", 'PKGS=\$(dpkg -l | awk ''/linux-image-[0-9].*cloud-amd64 / {print \$2}''); [ -n "\$PKGS" ] && DEBIAN_FRONTEND=noninteractive apt-get purge -y \$PKGS' ]
+  - [ "sh", "-c", 'PKGS=\$(dpkg -l | awk ''/linux-image-[0-9].*cloud-amd64 / {print \$2}''); [ -z "\$PKGS" ] || DEBIAN_FRONTEND=noninteractive apt-get purge -y \$PKGS' ]
 EOF
 }
 
@@ -480,13 +496,14 @@ fetch_image() {
 dcreate() {
     ensure_ssh_key
 
-    local name="" cpu=4 mem=6144 disk=20 share="" a
+    local name="" cpu=4 mem=6144 disk=20 share="" image="" a
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --cpu)  cpu="$2";  shift 2 ;;
             --mem)  mem="$2";  shift 2 ;;
             --disk) disk="$2"; shift 2 ;;
             --share) share="$2"; shift 2 ;;
+            --image) image="$2"; shift 2 ;;
             *) name="$1"; shift ;;
         esac
     done
@@ -521,6 +538,16 @@ dcreate() {
     cp "$ud" "$dir/seedwork/user-data"
     cp "$dir/meta-data.yaml" "$dir/seedwork/meta-data"
 
+    if [[ -n "$image" ]]; then
+        local base; base="$(custom_image "$image")"
+        disk="$(disk_floor "$base" "$disk")"
+        info "base image: $image (copied into the store once, overlay disk on top)"
+        docker run --rm -v "$SBXVMD_STORE:/store" -v "$CUSTOM_DIR:/custom:ro" "$SBXVMD_IMAGE" \
+            sh -c "mkdir -p /store/images /store/vms/$name && \
+                   { [ -f /store/images/$image.qcow2 ] && [ /store/images/$image.qcow2 -nt /custom/$image.qcow2 ] || cp /custom/$image.qcow2 /store/images/$image.qcow2; } && \
+                   qemu-img create -f qcow2 -o backing_file=/store/images/$image.qcow2,backing_fmt=qcow2 /store/vms/$name/disk.qcow2 ${disk}G >/dev/null" \
+            || die "preparing the disk on image '$image' failed"
+    fi
     info "starting container hotbedvmd-$name"
     local -a run=(
         docker run -d --name "hotbedvmd-$name"
@@ -575,13 +602,14 @@ create() {
     require_image
     ensure_ssh_key
 
-    local name="" cpu=4 mem=6144 disk=20 share="" a
+    local name="" cpu=4 mem=6144 disk=20 share="" image="" a
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --cpu)  cpu="$2";  shift 2 ;;
             --mem)  mem="$2";  shift 2 ;;
             --disk) disk="$2"; shift 2 ;;
             --share) share="$2"; shift 2 ;;
+            --image) image="$2"; shift 2 ;;
             *) name="$1"; shift ;;
         esac
     done
@@ -610,9 +638,15 @@ create() {
     mkdir -p "$dir"
     chmod 0755 "$VM_ROOT" "$VMS_DIR" "$dir"
 
-    info "creating overlay disk (${disk}G) on top of the master image"
+    local base="$MASTER_IMG"
+    if [[ -n "$image" ]]; then
+        base="$(custom_image "$image")"
+        disk="$(disk_floor "$base" "$disk")"
+        info "base image: $image"
+    fi
+    info "creating overlay disk (${disk}G) on top of the base image"
     qemu-img create -f qcow2 \
-        -o backing_file="$MASTER_IMG",backing_fmt=qcow2 \
+        -o backing_file="$base",backing_fmt=qcow2 \
         "$dir/disk.qcow2" "${disk}G" | tail -1
     chmod 0666 "$dir/disk.qcow2"
 
@@ -957,7 +991,7 @@ SSH via a dedicated key, host directory shared at /workspace via 9p.
 USAGE: hotbedvm COMMAND ...
 
   fetch-image                 download the Debian cloud master image (once)
-  create NAME [opts]          create + boot a VM (––cpu N ––mem MB ––disk GB ––share DIR)
+  create NAME [opts]          create + boot a VM (––cpu N ––mem MB ––disk GB ––share DIR ––image NAME)
   postboot NAME               finish a daemon-spawned create (wait ssh + stage opencode + sync)
   ssh NAME [-] command        ssh as dev@ (interactive shell if no command)
   shell NAME                  alias of ssh NAME

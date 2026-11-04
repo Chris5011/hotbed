@@ -278,13 +278,16 @@ func runKitVMTO(backend string, args []string, to time.Duration, extraEnv ...str
 	return err
 }
 
-func kitVMCreateArgs(name string, cpu, memMB, diskGB int, share string) []string {
+func kitVMCreateArgs(name string, cpu, memMB, diskGB int, share, image string) []string {
 	args := []string{"create", name,
 		"--cpu", strconv.Itoa(cpu),
 		"--mem", strconv.Itoa(memMB),
 		"--disk", strconv.Itoa(diskGB)}
 	if s := strings.TrimSpace(share); s != "" {
 		args = append(args, "--share", s)
+	}
+	if image != "" { // custom base image (VMImageDir)
+		args = append(args, "--image", image)
 	}
 	return args
 }
@@ -297,8 +300,8 @@ func kitVMCreateArgs(name string, cpu, memMB, diskGB int, share string) []string
 // the guest console is captured to vm/vms/<name>/serial.log — the dashboard
 // Logs tab tails that capture (docker-backed VMs capture by design inside
 // the hotbedvmd image; this flag covers the libvirt backend).
-func VMCreate(name, backend string, cpu, memMB, diskGB int, share string) error {
-	if err := runKitVMTO(backend, kitVMCreateArgs(name, cpu, memMB, diskGB, share),
+func VMCreate(name, backend string, cpu, memMB, diskGB int, share, image string) error {
+	if err := runKitVMTO(backend, kitVMCreateArgs(name, cpu, memMB, diskGB, share, image),
 		15*time.Minute, "SBXVM_SERIAL_FILE=1"); err != nil {
 		return err
 	}
@@ -317,14 +320,17 @@ func VMCreate(name, backend string, cpu, memMB, diskGB int, share string) error 
 // the create API call must not idle the creation page until the machine
 // finished booting; the remaining boot continues in a background
 // goroutine via VMPostBoot. Same serial-capture flag as VMCreate.
-func VMCreateSpawn(name, backend string, cpu, memMB, diskGB int, share string) error {
-	if err := runKitVMTO(backend, kitVMCreateArgs(name, cpu, memMB, diskGB, share),
+func VMCreateSpawn(name, backend string, cpu, memMB, diskGB int, share, image string) error {
+	if err := runKitVMTO(backend, kitVMCreateArgs(name, cpu, memMB, diskGB, share, image),
 		10*time.Minute, "SBXVM_SPAWN_ONLY=1", "SBXVM_SERIAL_FILE=1"); err != nil {
 		return err
 	}
 	shareTxt := strings.TrimSpace(share)
 	if shareTxt == "" {
 		shareTxt = "(vm-local /workspace)"
+	}
+	if image != "" {
+		shareTxt += " image=" + image
 	}
 	audit.Record("sandbox.spawn", name, fmt.Sprintf("VM spawned (%s backend, cpu=%d mem=%dMB disk=%dGB share=%s) — boot continues in background", backend, cpu, memMB, diskGB, shareTxt))
 	return nil

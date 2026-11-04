@@ -36,6 +36,7 @@ const indexHTML = `<!doctype html>
       <a href="#" id="lnk-burn">Burn - tokens &amp; budget</a>
       <a href="#" id="lnk-config">LLM providers</a>
       <a href="#" id="lnk-modules">Agent modules</a>
+      <a href="#" id="lnk-images">Images</a>
       <a href="#" id="lnk-help">Help &amp; CLI</a>
     </div>
   </aside>
@@ -59,6 +60,7 @@ const indexHTML = `<!doctype html>
           <button id="btn-oc">OpenCode in tmux</button>
           <span id="d-agentbtns" class="agentbtns"></span>
           <button id="btn-copy">Copy Connection</button>
+          <button id="btn-saveimg" title="save this sandbox as a reusable image (secrets scrubbed; VMs: shut down first)">Save as image</button>
           <button id="btn-ide" title="open /workspace in VS Code (containers: Dev Containers attach, VMs: Remote-SSH)">VS Code</button>
           <button id="btn-start">Start</button>
           <button id="btn-stop" class="danger">Stop</button>
@@ -618,14 +620,16 @@ function clearTimers(){
   if(hostTimer){ clearInterval(hostTimer); hostTimer=null; }
   if(burnTimer){ clearInterval(burnTimer); burnTimer=null; }
   if(dnsTimer){ clearInterval(dnsTimer); dnsTimer=null; }
+  if(imagesTimer){ clearTimeout(imagesTimer); imagesTimer=null; }
 }
 function showGlobal(kind){
   clearTimers();
   state.view=kind; state.sel=null; closeLogs();
   renderList();
   $('pane').hidden=true; $('empty').hidden=true; $('global').hidden=false;
-  var titles={modules:'Agent modules - coding agents for new sandboxes', overview:'Overview - host & sandboxes', burn:'Burn - token & dollar ledger', create:'Create sandbox', config:'LLM providers - upstream endpoints for every agent', help:'Help - quick start & CLI reference'};
+  var titles={images:'Images - custom stacks and VM base images', modules:'Agent modules - coding agents for new sandboxes', overview:'Overview - host & sandboxes', burn:'Burn - token & dollar ledger', create:'Create sandbox', config:'LLM providers - upstream endpoints for every agent', help:'Help - quick start & CLI reference'};
   var subs={
+    images:'Start new sandboxes from more than the kit stacks: declarative images, saved containers and generalized VM disks.',
     modules:'Switch a module on to offer it in the create wizard. Modules are folders under agents/ - add your own without touching the daemon.',
     overview:'Machine stats and every sandbox on this host. Updates every 5 seconds.',
     burn:'Proxy traffic per sandbox and in total. Provider keys stay on the host.',
@@ -642,6 +646,7 @@ function showGlobal(kind){
   else if(kind==='overview'){ renderHostOverview(); }
   else if(kind==='help'){ renderHelp(); }
   else if(kind==='modules'){ renderModules(); }
+  else if(kind==='images'){ renderImages(); }
   else { renderConfigGlobal(); }
   saveView();
 }
@@ -1082,6 +1087,7 @@ function renderCreator(){
       '<div class="field"><label for="cw-vmcpu">vCPUs</label><select id="cw-vmcpu"><option>1</option><option selected>2</option><option>4</option><option>8</option><option>16</option></select><div class="fm">1–16</div></div>'+
       '<div class="field"><label for="cw-vmmem">Memory</label><select id="cw-vmmem"><option value="2048">2 GB</option><option value="4096" selected>4 GB</option><option value="6144">6 GB</option><option value="8192">8 GB</option><option value="16384">16 GB</option></select><div class="fm">guest RAM, only while running</div></div>'+
       '<div class="field"><label for="cw-vmdisk">Disk (GB)</label><input id="cw-vmdisk" class="money big" value="20" inputmode="numeric"><div class="fm">growable qcow2, 10–512</div></div>'+
+      '<div class="field"><label for="cw-vmimage">Base image</label><select id="cw-vmimage"><option value="">Debian 13 (kit master)</option></select><div class="fm">saved VM images (Images page)</div></div>'+
       '</div>'+
     '</div>'+
     '<div class="cw-sec"><div class="cw-sec-t">Workspace</div>'+
@@ -1144,6 +1150,12 @@ function renderCreator(){
       ? 'isolated network: no route out at all - only the allowlist proxy outside the sandbox (root inside cannot lift it). Containers without published ports and libvirt VMs.'
       : 'outbound fence, re-applied by the daemon after restarts';
   };
+  // custom images (Images page) join the stack list / VM base image list
+  fetch('/api/images').then(function(r){return r.json();}).then(function(j){
+    var st=$('cw-stack'), vi=$('cw-vmimage');
+    (j.containers||[]).forEach(function(c){ if(st){ st.appendChild(h('option',{value:'custom:'+c.name},'custom:'+esc(c.name))); } });
+    (j.vms||[]).forEach(function(v){ if(vi){ vi.appendChild(h('option',{value:v.name},esc(v.name)+' (from '+esc(v.from||'?')+')')); } });
+  }).catch(function(){});
   $('cw-egress').addEventListener('change',egressDomUpdate);
   egressDomUpdate();
   // VM size presets fill the three fields; editing a field un-highlights
@@ -1209,6 +1221,7 @@ function renderCreator(){
         vm_mem_mb: parseInt($('cw-vmmem').value,10)||4096,
         vm_disk_gb: parseInt($('cw-vmdisk').value,10)||20,
         vm_share: ($('cw-vmshare').value||'').trim(),
+        vm_image: ($('cw-vmimage')||{}).value||'',
         agents: Array.prototype.map.call(document.querySelectorAll('#cw-agents input[data-agent]:checked:not(:disabled)'),
           function(x){ return x.getAttribute('data-agent'); }),
         egress: $('cw-egress').value
@@ -1545,6 +1558,111 @@ function renderBurnTab(sb){
 }
 
 /* ---------- agent modules ---------- */
+/* ---------- images: custom container + VM images (issue #1) ---------- */
+var imagesTimer=null;
+function renderImages(){
+  var body=$('glob-body');
+  if(!$('img-wrap')){
+    body.innerHTML='<div id="img-wrap"><div class="hint">loading…</div></div>'+
+      '<div class="cw-sec"><div class="cw-sec-t">Build an image from a stack</div>'+
+      '<div class="cw-grid two">'+
+        '<div class="field"><label for="img-name">Name</label><input id="img-name" placeholder="mytools" maxlength="40" spellcheck="false" autocomplete="off"><div class="fm">becomes stack <span class="mono">custom:&lt;name&gt;</span></div></div>'+
+        '<div class="field"><label for="img-from">From</label><select id="img-from"></select><div class="fm">a kit stack or another custom image</div></div>'+
+        '<div class="field wide"><label for="img-apt">Debian packages</label><input id="img-apt" style="width:100%" placeholder="jq ripgrep postgresql-client" spellcheck="false"><div class="fm">space/comma separated</div></div>'+
+        '<div class="field wide"><label for="img-run">Run steps</label><textarea id="img-run" rows="3" style="width:100%" placeholder="one shell step per line, as root (e.g. npm i -g pnpm)" spellcheck="false"></textarea></div>'+
+        '<div class="field wide"><label for="img-env">Env</label><textarea id="img-env" rows="2" style="width:100%" placeholder="KEY=value per line" spellcheck="false"></textarea><div class="fm">baked into the image - no secrets here</div></div>'+
+      '</div><button class="primary" id="img-build">Build image</button></div>'+
+      '<div class="hint" style="margin-top:var(--s4)"><b>Save a sandbox as an image</b>: the <i>Save as image</i> button in a sandbox\'s header. Containers are copied while running (the sandbox itself is never changed), scrubbed of secrets (hotbed keys, agent logins, OpenCode auth, shell history, the workspace) on a throwaway copy, verified and flattened. VMs must be shut down; their disk is copied, generalized with virt-sysprep (machine-id, ssh host keys, cloud-init state) and scrubbed the same way. New VMs pick a base image in the create wizard.</div>';
+    $('img-build').addEventListener('click',function(){
+      var lines=function(id){ return ($(id).value||'').split('\n').map(function(x){return x.trim();}).filter(Boolean); };
+      var env={}; lines('img-env').forEach(function(l){ var i=l.indexOf('='); if(i>0){ env[l.slice(0,i).trim()]=l.slice(i+1); } });
+      var spec={name:($('img-name').value||'').trim(), from:$('img-from').value,
+        apt:($('img-apt').value||'').split(/[\s,]+/).filter(Boolean), run:lines('img-run'), env:env};
+      imagePost('build',spec,function(){ $('img-name').value=''; });
+    });
+  }
+  fetch('/api/images').then(function(r){return r.json();}).then(function(j){
+    if(state.view!=='images') return;
+    paintImages(j);
+    if(imagesTimer) clearTimeout(imagesTimer);
+    var busy=(j.jobs||[]).some(function(x){return x.state==='running';});
+    imagesTimer=setTimeout(function(){ if(state.view==='images') renderImages(); }, busy?2000:8000);
+  }).catch(function(){ $('img-wrap').innerHTML='<div class="hint">images unavailable (daemon restarting?)</div>'; });
+}
+function imagePost(action, payload, done){
+  fetch('/api/images/'+action,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+    .then(function(r){return r.json();}).then(function(res){
+      if(res.error){ toast(action+': '+res.error,'err'); return; }
+      toast(action==='rm'?'image removed':'job started - progress on the Images page','ok');
+      if(done){ done.call(null); }
+      if(state.view==='images') renderImages();
+    }).catch(function(e){ toast(action+': '+e,'err'); });
+}
+function paintImages(j){
+  var cs=j.containers||[], vs=j.vms||[], jobs=j.jobs||[];
+  var sel=$('img-from');
+  if(sel){
+    var keep=sel.value;
+    sel.innerHTML=['base','go','node','python','rust'].map(function(s){return '<option>'+s+'</option>';}).join('')+
+      cs.map(function(c){ return '<option value="custom:'+esc(c.name)+'">custom:'+esc(c.name)+'</option>'; }).join('');
+    if(keep) sel.value=keep;
+  }
+  var html='';
+  if(jobs.length){
+    html+='<div class="cw-sec"><div class="cw-sec-t">Jobs</div>'+jobs.map(function(x){
+      var st=x.state==='running'?'<span class="dnsst">running</span>':(x.state==='done'?'<span class="dnsst ok">done</span>':'<span class="dnsst bad">failed</span>');
+      var log=(x.log||[]).slice(-6).map(esc).join('<br>');
+      return '<div class="hint"><b>'+esc(x.kind)+' '+esc(x.name)+'</b>'+(x.source?' from '+esc(x.source):'')+' '+st+
+        (x.error?'<br><span class="bad">'+esc(x.error)+'</span>':'')+
+        ((x.scrubbed||[]).length?'<br>scrubbed: <span class="mono">'+x.scrubbed.map(esc).join(', ')+'</span>':'')+
+        (x.state==='running'&&log?'<div class="mono" style="font-size:.72rem;opacity:.8;margin-top:4px">'+log+'</div>':'')+'</div>';
+    }).join('')+'</div>';
+  }
+  html+='<div class="cw-sec"><div class="cw-sec-t">Container images</div>';
+  if(!cs.length){ html+='<div class="hint">None yet - build one below or save a running container.</div>'; }
+  else {
+    html+='<table class="tbl"><thead><tr><th>stack</th><th>origin</th><th>base</th><th>from</th><th>size</th><th>created</th><th></th></tr></thead><tbody>'+
+      cs.map(function(c){
+        return '<tr><td class="mono">custom:'+esc(c.name)+'</td><td>'+esc(c.origin||'')+'</td><td>'+esc(c.base||'')+'</td><td>'+esc(c.from||'')+'</td><td>'+esc(c.size)+'</td><td>'+esc((c.created||'').slice(0,16))+'</td>'+
+          '<td style="text-align:right">'+(c.has_spec?'<button class="tool" data-rebuild="'+esc(c.name)+'">rebuild</button> ':'')+
+          '<button class="tool" data-rm="'+esc(c.name)+'">delete</button></td></tr>';
+      }).join('')+'</tbody></table>';
+  }
+  html+='</div><div class="cw-sec"><div class="cw-sec-t">VM images</div>';
+  if(!vs.length){ html+='<div class="hint">None yet - shut a VM down and use <i>Save as image</i> on it.</div>'; }
+  else {
+    html+='<table class="tbl"><thead><tr><th>image</th><th>from VM</th><th>backend</th><th>size</th><th>created</th><th></th></tr></thead><tbody>'+
+      vs.map(function(v){
+        return '<tr><td class="mono">'+esc(v.name)+'</td><td>'+esc(v.from||'')+'</td><td>'+esc(v.backend||'')+'</td><td>'+esc(String(v.size_mb||0))+' MiB</td><td>'+esc((v.created||'').slice(0,16))+'</td>'+
+          '<td style="text-align:right"><button class="tool" data-rmvm="'+esc(v.name)+'">delete</button></td></tr>';
+      }).join('')+'</tbody></table>';
+  }
+  html+='</div>';
+  var wrap=$('img-wrap'); wrap.innerHTML=html;
+  wrap.onclick=function(ev){
+    var t=ev.target; if(!t||!t.getAttribute) return;
+    var rb=t.getAttribute('data-rebuild'), rm=t.getAttribute('data-rm'), rv=t.getAttribute('data-rmvm');
+    if(rb){ imagePost('rebuild',{name:rb}); }
+    if(rm||rv){
+      askConfirm({title:'Delete image '+(rm||rv)+'?', body:'Removes the '+(rv?'VM base image':'container image')+'. Refused while a sandbox still uses it.', confirmLabel:'Delete', danger:true},
+        function(ok){ if(ok) imagePost('rm',{name:rm||rv, vm:!!rv}); });
+    }
+  };
+}
+function saveAsImage(sb){
+  ensureAsk();
+  var isVM=sb.kind==='vm';
+  askConfirm({title:'Save '+sb.name+' as an image',
+    body:(isVM?'The VM must be <b>shut down</b>. Its disk is copied and generalized; the VM itself stays as it is.':'The container is copied while it runs (paused for a moment); the sandbox itself stays as it is.')+
+      ' Secrets are scrubbed from the copy (hotbed keys, agent logins, OpenCode auth, shell history, the workspace) and the result is verified.'+
+      '<div class="field" style="margin-top:var(--s3)"><label for="ask-imgname">Image name</label><input id="ask-imgname" maxlength="40" spellcheck="false" autocomplete="off" placeholder="lowercase, e.g. '+esc(sb.name.replace(/^hotbed-/,'').toLowerCase().replace(/[^a-z0-9._-]/g,'-'))+'"></div>',
+    confirmLabel:'Save image'}, function(ok){
+      if(!ok) return;
+      var n=(($('ask-imgname')||{}).value||'').trim();
+      if(!n){ n=sb.name.replace(/^hotbed-/,'').toLowerCase().replace(/[^a-z0-9._-]/g,'-'); }
+      imagePost('save',{sandbox:sb.name, kind:sb.kind, name:n});
+    });
+}
 function renderModules(){
   var body=$('glob-body');
   body.innerHTML='<div class="hint">loading…</div>';
@@ -2324,6 +2442,8 @@ function init(){
   });
   $('lnk-config').addEventListener('click', function(ev){ ev.preventDefault(); showGlobal('config'); });
   $('lnk-modules').addEventListener('click', function(ev){ ev.preventDefault(); showGlobal('modules'); });
+  $('lnk-images').addEventListener('click', function(ev){ ev.preventDefault(); showGlobal('images'); });
+  $('btn-saveimg').addEventListener('click', function(){ var sb=currentSB(); if(sb) saveAsImage(sb); });
   restoreBoot(); // start page: whatever the user left open (fallback: overview)
 }
 document.addEventListener('DOMContentLoaded', init);

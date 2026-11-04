@@ -22,7 +22,12 @@ import (
 )
 
 // RecipeImageName is the kit image for a stack ("hotbed:<stack>").
-func RecipeImageName(stack string) string { return "hotbed:" + stack }
+func RecipeImageName(stack string) string {
+	if n, ok := CustomStack(stack); ok {
+		return CustomImageRef(n)
+	}
+	return "hotbed:" + stack
+}
 
 // RecipeImageExists reports whether the kit image for a stack is built.
 func RecipeImageExists(stack string) bool {
@@ -39,6 +44,10 @@ func RecipeImageExists(stack string) bool {
 func RecipeImageEnsure(stack string) error {
 	if _, err := RunTO(15*time.Second, "docker", "image", "inspect", RecipeImageName(stack)); err == nil {
 		return nil
+	}
+	if n, ok := CustomStack(stack); ok { // never auto-built: a spec or a snapshot made it
+		return fmt.Errorf("custom image %s not found - build it (`hotbedd image build %s`) or pick another stack",
+			CustomImageRef(n), n)
 	}
 	root := env.Root()
 	df := filepath.Join(root, "containers", "Dockerfile")
@@ -127,14 +136,14 @@ func SpawnRecipeContainer(s RecipeSpawn) (string, string, error) {
 	}
 	uid, gid, home := homeUIDGID()
 	if s.Stack == "" {
-		return cn, "", fmt.Errorf("stack: required to spawn (`stack: go|node|python|rust|base`)")
+		return cn, "", fmt.Errorf("stack: required to spawn (`stack: go|node|python|rust|base|custom:<image>`)")
 	}
 	existed := RecipeImageExists(s.Stack)
 	if err := RecipeImageEnsure(s.Stack); err != nil {
 		return cn, "", err
 	}
 	warn := ""
-	if existed {
+	if _, custom := CustomStack(s.Stack); existed && !custom {
 		if st := imageRecipeStamp(RecipeImageName(s.Stack)); st != recipeStamp() {
 			if st == "" {
 				warn = fmt.Sprintf("image %s predates recipe stamping (no provenance label) — if provisioning looks stale, rebuild it once: bin/hbd build %s --no-cache",
@@ -146,7 +155,8 @@ func SpawnRecipeContainer(s RecipeSpawn) (string, string, error) {
 			audit.Record("image.stale", RecipeImageName(s.Stack), "serving from a "+(map[bool]string{true: "drifted", false: "unstamped"}[st != ""])+" image")
 		}
 	}
-	if v, ok := RecipeStacks[s.Stack]; ok {
+	root := rootStack(s.Stack) // custom images share their kit stack's cache
+	if v, ok := RecipeStacks[root]; ok {
 		if _, err := RunTO(10*time.Second, "docker", "volume", "inspect", v); err != nil {
 			if _, e2 := RunTO(10*time.Second, "docker", "volume", "create", v); e2 != nil {
 				return cn, warn, fmt.Errorf("cache volume %s: %w", v, e2)
@@ -180,8 +190,8 @@ func SpawnRecipeContainer(s RecipeSpawn) (string, string, error) {
 	if d := home + "/.ssh"; dirExists(d) {
 		args = append(args, "--volume", d+":/home/hbd/.ssh:ro")
 	}
-	if v, ok := RecipeStacks[s.Stack]; ok {
-		args = append(args, "--volume", v+":/"+cachePath(s.Stack))
+	if v, ok := RecipeStacks[root]; ok {
+		args = append(args, "--volume", v+":/"+cachePath(root))
 	}
 	for _, m := range s.Mounts {
 		spec := m.Source + ":" + m.Target
