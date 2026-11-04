@@ -1,3 +1,35 @@
+# Hotbed v0.9.1 — updates without gh, security notes
+
+## Fixes
+
+- **`scripts/update.sh` no longer needs the gh CLI** — it required `gh`
+  (and a login) from the time the repository was private. Releases now come
+  from the GitHub API with `curl`, anonymously for the public repo; a token
+  is still used when one is around (`GITHUB_TOKEN` / `GH_TOKEN`, or a
+  logged-in `gh`), so private forks keep working. The checksum check is
+  unchanged. It also runs `install.sh` through `bash`, so a lost exec bit
+  can no longer stop an update.
+
+## Docs
+
+- **What a sandbox can reach** (SECURITY.md §4a, README, Help page): with
+  the default egress `allow`, a sandbox reaches everything the host can —
+  your LAN, VPN tunnels the host has up, host services on all interfaces
+  and, on WSL, Windows itself (SMB/RPC). `proxy-only` keeps private ranges
+  open; use `strict` (or at least `allowlist`) for agent workloads.
+- **Root inside every sandbox is by design**: the VM user `dev` and the
+  container user have passwordless sudo; the boundary is the VM or
+  container, not the user account.
+
+## Upgrade from v0.9.0
+
+```bash
+cd ~/hotbed
+bash scripts/update.sh --yes
+```
+
+---
+
 # Hotbed v0.9.0 — images and VS Code
 
 Implements issues #1 (image builder) and #2 (IDE integration).
