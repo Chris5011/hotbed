@@ -236,7 +236,9 @@ func strictNetsPath(name string) string {
 // Containers: in-netns rules from an earlier preset are reset first (a DNS
 // DNAT to the old fence would break the alias lookup), then every docker
 // network is swapped for the strict one.
-func ApplyStrict(name string) error {
+// proxyPort is the configured LLM proxy port (the libvirt guest's ssh -R
+// tunnel listens on it and is handed over at the switch).
+func ApplyStrict(name, proxyPort string) error {
 	if why := StrictRefusal(name); why != "" {
 		return fmt.Errorf("strict %s refused: %s", name, why)
 	}
@@ -245,7 +247,7 @@ func ApplyStrict(name string) error {
 		return err
 	}
 	if t.kind == "libvirt" {
-		return applyStrictLibvirt(t)
+		return applyStrictLibvirt(t, proxyPort)
 	}
 	if out, err := t.run(egressResetScript()); err != nil {
 		return fmt.Errorf("strict %s: clearing old rules: %w: %s", name, err, strings.TrimSpace(out))
@@ -291,13 +293,13 @@ func ApplyStrict(name string) error {
 
 // LeaveStrict puts a strict sandbox back on its previous networks (default
 // bridge when unknown) and removes the proxy env. A no-op when not strict.
-func LeaveStrict(name string) error {
+func LeaveStrict(name, proxyPort string) error {
 	t, err := resolveEgressTarget(name)
 	if err != nil {
 		return err
 	}
 	if t.kind == "libvirt" {
-		return leaveStrictLibvirt(t)
+		return leaveStrictLibvirt(t, proxyPort)
 	}
 	if t.kind != "container" {
 		return nil

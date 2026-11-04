@@ -162,16 +162,21 @@ func repoint(dom, mac, src string) (string, error) {
 // keep holding 127.0.0.1:<proxy port> in the guest (verified), so every
 // new tunnel fails "remote port forwarding failed" until it times out.
 // The host-side ssh sees the close and exits; the re-sync builds a new one.
-func dropTunnelScript() string {
+// port is the configured proxy.port - the tunnel listens on that, not on
+// the default (with a custom port the old listener used to survive).
+func dropTunnelScript(port string) string {
+	if port == "" {
+		port = proxyFencePort()
+	}
 	return fmt.Sprintf("for p in $(ss -ltnpH 'sport = :%s' 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u); do "+
-		"case \"$(cat /proc/$p/comm 2>/dev/null)\" in sshd*) kill $p;; esac; done; true", proxyFencePort())
+		"case \"$(cat /proc/$p/comm 2>/dev/null)\" in sshd*) kill $p;; esac; done; true", port)
 }
 
 func strictPrevNetPath(name string) string {
 	return filepath.Join(env.StateDir(), "strict", name+".libvirt")
 }
 
-func applyStrictLibvirt(t egressTarget) error {
+func applyStrictLibvirt(t egressTarget, proxyPort string) error {
 	dom := env.VMStdPrefix + t.name
 	if err := ensureStrictLibvirtNetwork(); err != nil {
 		return err
@@ -193,7 +198,7 @@ func applyStrictLibvirt(t egressTarget) error {
 		return fmt.Errorf("strict %s: proxy env: %w: %s", t.name, err, strings.TrimSpace(out))
 	}
 	if src != StrictLibvirtNetwork() {
-		_, _ = t.run(dropTunnelScript())
+		_, _ = t.run(dropTunnelScript(proxyPort))
 		_ = os.MkdirAll(filepath.Dir(strictPrevNetPath(t.name)), 0o755)
 		_ = os.WriteFile(strictPrevNetPath(t.name), []byte(src), 0o600)
 		ip, err := repoint(dom, mac, StrictLibvirtNetwork())
@@ -208,7 +213,7 @@ func applyStrictLibvirt(t egressTarget) error {
 	return nil
 }
 
-func leaveStrictLibvirt(t egressTarget) error {
+func leaveStrictLibvirt(t egressTarget, proxyPort string) error {
 	dom := env.VMStdPrefix + t.name
 	mac, src, err := guestIface(dom)
 	if err != nil || src != StrictLibvirtNetwork() {
@@ -219,7 +224,7 @@ func leaveStrictLibvirt(t egressTarget) error {
 		back = strings.TrimSpace(string(b))
 	}
 	_, _ = t.run(strictEnvScript(nil))
-	_, _ = t.run(dropTunnelScript())
+	_, _ = t.run(dropTunnelScript(proxyPort))
 	if _, err := repoint(dom, mac, back); err != nil {
 		return err
 	}

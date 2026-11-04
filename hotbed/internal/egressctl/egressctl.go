@@ -47,7 +47,7 @@ func Apply(cfg *config.Config, name, preset string, track bool) (int, error) {
 		}
 	} else if cfg.EgressMode[name] == "strict" {
 		// leaving: back onto the old network first, then the new preset's rules
-		if err := engine.LeaveStrict(name); err != nil {
+		if err := engine.LeaveStrict(name, cfg.Proxy.Port); err != nil {
 			return 0, err
 		}
 	}
@@ -92,7 +92,7 @@ func applyStrict(cfg *config.Config, name string) error {
 			return err
 		}
 	}
-	return engine.ApplyStrict(name)
+	return engine.ApplyStrict(name, cfg.Proxy.Port)
 }
 
 // llmTarget is the LLM proxy as the gateway container (default bridge)
