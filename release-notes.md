@@ -1,3 +1,40 @@
+# Hotbed v0.9.2 — `lan` preset, boot restarts, readable mounts
+
+## Changed
+
+- **`proxy-only` is now called `lan`** — same rules: the public internet
+  is blocked, but your LAN, VPN tunnels the host has up and the host itself
+  stay reachable (as does DNS). The old name suggested an isolation it
+  never had. `proxy-only` keeps working everywhere (CLI, API, recipes) and
+  is recorded as `lan`; existing sandboxes keep their rules.
+
+## Fixes
+
+- **Sandboxes that failed to start at boot are started again** — Docker
+  Desktop can start containers before WSL has published their bind
+  sources; a sandbox mounting a *file* (e.g. `~/.gitconfig`) then dies with
+  "error mounting … not a directory" (exit 127), and docker never retries
+  it. At daemon start hotbed now starts exactly those again (restart policy
+  set, last start failed on a mount), retrying for a few minutes; a
+  sandbox you stopped yourself is never touched (audit
+  `sandbox.boot-restart`).
+- **Readable mount paths** — on Docker Desktop the overview showed the
+  engine's mirror paths (`/run/desktop/mnt/host/wsl/…/<hash>`); it now shows
+  the original WSL path (resolved exactly: the mirror name is the sha256 of
+  the path).
+- `hbd version` / `hotbedvm version` print the kit version instead of
+  long-forgotten constants (0.5.0 / 0.1.0).
+- Removed the stale session `HANDOFF.md`.
+
+## Upgrade from v0.9.1
+
+```bash
+cd ~/hotbed
+bash scripts/update.sh --yes
+```
+
+---
+
 # Hotbed v0.9.1 — updates without gh, security notes
 
 ## Fixes
