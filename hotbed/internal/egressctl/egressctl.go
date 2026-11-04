@@ -31,12 +31,12 @@ import (
 // allowlist uses the domains already in cfg.EgressAllowlist (may be empty).
 // Returns the count of pre-resolved IPs (allowlist only).
 func Apply(cfg *config.Config, name, preset string, track bool) (int, error) {
-	preset = strings.TrimSpace(preset)
+	preset = engine.NormalizeEgressPreset(preset) // "proxy-only" is recorded as "lan"
 	if preset == "" {
 		preset = "allow"
 	}
 	if !engine.KnownEgressPreset(preset) {
-		return 0, fmt.Errorf("unknown egress preset %q (allow|proxy-only|none|allowlist|strict)", preset)
+		return 0, fmt.Errorf("unknown egress preset %q (allow|lan|none|allowlist|strict)", preset)
 	}
 	if preset != "allow" && preset != "allowlist" && preset != "strict" {
 		track = false

@@ -16,7 +16,7 @@ import (
 // Egress presets for containers.
 //
 //	allow        no rules (Docker default: all outbound permitted)
-//	proxy-only   loopback + established + private ranges (RFC1918, docker
+//	lan          loopback + established + private ranges (RFC1918, docker
 //	             bridge) + DNS stay open; public destinations drop — LLM
 //	             traffic must ride the hbd proxy on the host side
 //	none         loopback + established only; everything else drops
@@ -46,15 +46,30 @@ import (
 
 // KnownEgressPreset reports whether the preset string is valid ("" = allow).
 func KnownEgressPreset(preset string) bool {
-	return egressPresets[strings.TrimSpace(preset)]
+	return egressPresets[NormalizeEgressPreset(preset)]
+}
+
+// egressAliases maps deprecated preset names to their current one.
+// "proxy-only" was renamed "lan" (v0.9.2): it blocks the public internet
+// but keeps every private range open - LAN, VPN tunnels, the host - and the
+// old name suggested an isolation it never had.
+var egressAliases = map[string]string{"proxy-only": "lan"}
+
+// NormalizeEgressPreset trims a preset name and resolves aliases.
+func NormalizeEgressPreset(preset string) string {
+	p := strings.TrimSpace(preset)
+	if a, ok := egressAliases[p]; ok {
+		return a
+	}
+	return p
 }
 
 var egressPresets = map[string]bool{
-	"allow":      true,
-	"proxy-only": true,
-	"none":       true,
-	"allowlist":  true,
-	"strict":     true, // isolated network + egress gateway (strict.go)
+	"allow":     true,
+	"lan":       true, // was "proxy-only" (alias kept, see egressAliases)
+	"none":      true,
+	"allowlist": true,
+	"strict":    true, // isolated network + egress gateway (strict.go)
 }
 
 const (
@@ -70,7 +85,7 @@ const (
 // egressScript installs the chain for a preset, idempotently: fresh chain
 // (create-or-flush), fill, then (re)install the OUTPUT jump at position 1.
 func egressScript(preset, gw string, skipLo bool) string {
-	preset = strings.TrimSpace(preset)
+	preset = NormalizeEgressPreset(preset)
 	if preset == "" {
 		preset = "allow"
 	}
@@ -79,7 +94,7 @@ func egressScript(preset, gw string, skipLo bool) string {
 		"-o lo -j ACCEPT",
 		"-m state --state ESTABLISHED,RELATED -j ACCEPT")
 	switch preset {
-	case "proxy-only":
+	case "lan":
 		// docker bridge ranges + RFC1918 internals + DNS stay reachable
 		rules = append(rules,
 			"-d 172.16.0.0/12 -j ACCEPT",
@@ -315,7 +330,7 @@ func ApplyDNSTrack(name string) error {
 
 // EgressInstalled reports whether the sandbox netns currently carries the
 // rules of a preset (allowlist: filter + nat side; tracked allow: nat side;
-// proxy-only/none: filter chain; allow: nothing to check → true).
+// lan/none: filter chain; allow: nothing to check → true).
 func EgressInstalled(name, preset string, track bool) (bool, error) {
 	if preset == "strict" {
 		return StrictInstalled(name)
@@ -404,12 +419,12 @@ func ApplyEgressContainer(name, preset string) error {
 // applyEgress handles the plain (domain-less) presets.
 func applyEgress(t egressTarget, preset string) error {
 	name := t.name
-	preset = strings.TrimSpace(preset)
+	preset = NormalizeEgressPreset(preset)
 	if preset == "" {
 		preset = "allow"
 	}
 	if !egressPresets[preset] {
-		return fmt.Errorf("unknown egress preset %q (allow|proxy-only|none|allowlist)", preset)
+		return fmt.Errorf("unknown egress preset %q (allow|lan|none|allowlist|strict)", preset)
 	}
 	if preset == "allowlist" {
 		return fmt.Errorf("egress %s: allowlist needs domains — `hotbedd egress %s allowlist DOMAINS...`", name, name)

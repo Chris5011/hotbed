@@ -73,7 +73,7 @@ type Config struct {
 	// `hotbedd egress NAME allowlist DOMAINS...` (list only = show).
 	EgressAllowlist map[string][]string `json:"egress_allowlist,omitempty"`
 	// EgressMode records the egress preset last applied per sandbox
-	// (allow|proxy-only|none|allowlist). The DNS fence reads it to tell a
+	// (allow|lan|none|allowlist|strict; "proxy-only" is read as "lan"). The DNS fence reads it to tell a
 	// tracked-but-open sandbox (allow: pass every lookup, just record it)
 	// from a fenced one, and the daemon re-applies it after restarts.
 	EgressMode map[string]string `json:"egress_mode,omitempty"`
@@ -234,6 +234,11 @@ func Load() (*Config, error) {
 }
 
 func (c *Config) sane() {
+	for n, m := range c.EgressMode { // renamed preset (v0.9.2), same rules
+		if m == "proxy-only" {
+			c.EgressMode[n] = "lan"
+		}
+	}
 	if c.Proxy.Port == "" {
 		c.Proxy.Port = env.DefaultProxyPort
 	}

@@ -336,7 +336,9 @@ func mountRm(args []string) error {
 
 const egressUsage = `usage:
   hotbedd egress NAME                                  show preset, tracking, allowlist, rules
-  hotbedd egress NAME allow|proxy-only|none [--track|--no-track]
+  hotbedd egress NAME allow|lan|none [--track|--no-track]
+                                    lan: public internet blocked, private networks (LAN,
+                                    VPN, host) open - "proxy-only" is the old name
   hotbedd egress NAME allowlist [DOMAINS...] [--track|--no-track]
                                     (no domains = keep the configured list, may be empty)
   hotbedd egress NAME strict [--track|--no-track]
@@ -401,9 +403,12 @@ func egressCmd(args []string) error {
 		ok("egress %s allowlist: %s\n", name, strings.Join(cfg.EgressAllowlistFor(name), ", "))
 		return nil
 	}
-	preset := verb
-	if !engine.KnownEgressPreset(preset) {
-		return fmt.Errorf("unknown egress preset %q\n%s", preset, egressUsage)
+	if !engine.KnownEgressPreset(verb) {
+		return fmt.Errorf("unknown egress preset %q\n%s", verb, egressUsage)
+	}
+	preset := engine.NormalizeEgressPreset(verb)
+	if preset != verb {
+		fmt.Printf("\033[33;1mhotbedd:\033[0m egress preset %q is now called %q (same rules)\n", verb, preset)
 	}
 	track := cfg.EgressTrack[name]
 	if trackFlag != 0 {
@@ -431,6 +436,8 @@ func egressCmd(args []string) error {
 		} else {
 			ok("egress %s → allow (rules removed, docker default; resolver reset to docker internal)\n", name)
 		}
+	case "lan":
+		ok("egress %s → lan: public internet blocked; LAN, VPN and host networks stay reachable (re-applied after restarts)\n", name)
 	case "strict":
 		ok("egress %s → strict: isolated network, outbound only through the allowlist proxy (%d domain(s)%s); agents re-sync onto the gateway within ~10 s\n",
 			name, len(cfg.EgressAllowlistFor(name)), tr)

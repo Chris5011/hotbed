@@ -968,7 +968,7 @@ env:
 ports: ["8080:8080"]  # published for real at container create
 budget: 5             # USD wallet
 budget_tokens: 250000
-egress: proxy-only    # config-time fence, see below
+egress: lan           # config-time fence, see below ("proxy-only" = old name)
 sync: true            # opencode → hbd proxy wiring after spawn
 attach: --oc          # extra flags for the suggested attach command
 ```
@@ -992,9 +992,13 @@ original mounts carried, state in named volumes/paths keeps) and skipping
 refuse live recreation with an explanation.
 
 **Egress presets** — a convenience fence (not a security boundary):
-`hotbedd egress NAME proxy-only` fences public addresses out of the sandbox
+`hotbedd egress NAME lan` fences public addresses out of the sandbox
 netns (iptables OUTPUT chain HBD_EGRESS; loopback, established flows, RFC1918
-and DNS stay open) so LLM traffic must ride the hbd proxy on the host.
+and DNS stay open): the sandbox keeps your LAN, VPN tunnels and the host, but
+not the internet. Formerly `proxy-only` — the old name still works, and
+recorded sandboxes read as `lan` (same rules). DNS stays open on purpose:
+resolvers on the LAN forward anything, so `lan` is no defence against DNS
+tunnelling.
 `hotbedd egress NAME none` is stricter: only loopback+established stay —
 no DNS, no private ranges, everything else drops. `allow` resets to the
 Docker default. Needs no restart: rules live in the netns, so re-apply
@@ -1002,9 +1006,9 @@ after any recreate. Containers that already run iptables get it via plain
 exec; everything else uses a tiny auto-built helper image (`hotbedd-egress-helper:1`, built once on first use).
 
 Their difference in one sentence: **none** cuts a sandbox off everything
-except its own loopback (even DNS), while **proxy-only** additionally
-leaves the private/docker-internal network and plain DNS reachable so the
-host-side burn-ledger proxy works while the public internet still drops.
+except its own loopback (even DNS), while **lan** additionally leaves the
+private networks (LAN, VPN, host, docker-internal) and DNS reachable while
+the public internet drops.
 
 **Domain allowlist** (`allowlist` preset, host-based egress firewall):
 `hotbedd egress NAME allowlist api.openai.com example.org` stores the
@@ -1330,8 +1334,8 @@ from a login shell (ssh session / Dev Containers' login-shell probe), so
 - **A sandbox with egress `allow` (the default) reaches everything the host
   can**: the internet, but also your LAN, VPN tunnels the host has up, the
   host's own services and — on WSL — Windows (SMB/RPC). For agent workloads
-  use `strict` (enforced outside the sandbox) or `allowlist`; `proxy-only`
-  keeps private ranges open and does not stop lateral movement.
+  use `strict` (enforced outside the sandbox) or `allowlist`; `lan`
+  keeps private ranges open on purpose and does not stop lateral movement.
 - **Everything inside a sandbox is root-controlled by design**: the VM user
   `dev` and the container user have passwordless sudo (`dev` is also in the
   guest's docker group). The boundary is the VM / container, not the user

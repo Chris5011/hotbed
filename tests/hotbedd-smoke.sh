@@ -676,15 +676,22 @@ if docker info >/dev/null 2>&1 && docker image inspect hotbedd-egress-helper:1 >
     # control run: outbound must work unfenced, else the network env is
     # broken and egress assertions would be meaningless — skip them.
     if docker exec "$ECON" wget -T 5 -q -O /dev/null http://1.1.1.1/ 2>/dev/null; then
-        "${p2env[@]}" "$HOTBEDD" egress "$ECON" proxy-only >/dev/null 2>&1
+        "${p2env[@]}" "$HOTBEDD" egress "$ECON" lan >/dev/null 2>&1
         show="$("${p2env[@]}" "$HOTBEDD" egress "$ECON" 2>&1)"
-        echo "$show" | grep -q 'HBD_EGRESS' && pass "egress proxy-only installs the chain" \
-            || fail "egress proxy-only installs the chain (got: $show)"
+        echo "$show" | grep -q 'HBD_EGRESS' && pass "egress lan installs the chain" \
+            || fail "egress lan installs the chain (got: $show)"
+        echo "$show" | grep -q 'preset lan' && pass "egress lan is recorded as lan" \
+            || fail "egress lan is recorded as lan (got: $show)"
         if docker exec "$ECON" wget -T 4 -q -O /dev/null http://1.1.1.1/ 2>/dev/null; then
-            fail "egress proxy-only blocks public outbound"
+            fail "egress lan blocks public outbound"
         else
-            pass "egress proxy-only blocks public outbound"
+            pass "egress lan blocks public outbound"
         fi
+        alias_out="$("${p2env[@]}" "$HOTBEDD" egress "$ECON" proxy-only 2>&1)"
+        show="$("${p2env[@]}" "$HOTBEDD" egress "$ECON" 2>&1)"
+        echo "$alias_out" | grep -q 'now called "lan"' && echo "$show" | grep -q 'preset lan' \
+            && pass "egress proxy-only (old name) still works and records lan" \
+            || fail "egress proxy-only alias (out: $alias_out / show: $show)"
         "${p2env[@]}" "$HOTBEDD" egress "$ECON" allow >/dev/null 2>&1
         show="$("${p2env[@]}" "$HOTBEDD" egress "$ECON" 2>&1)"
         echo "$show" | grep -q 'HBD_EGRESS' && fail "egress allow removes the chain" \
@@ -757,6 +764,9 @@ echo "$plan" | grep -q 'hotbed-recipe-suite' >/dev/null \
 sed -i 's/^egress: proxy-only/egress: banana/' "$R/hbd.yaml"
 "$HOTBEDD" recipe validate "$R/hbd.yaml" >/dev/null 2>&1 \
     && fail "recipe: bad egress rejected" || pass "recipe: bad egress rejected"
+sed 's/^egress: banana/egress: lan/' "$R/hbd.yaml" > "$R/hbd-lan.yaml"
+"$HOTBEDD" recipe validate "$R/hbd-lan.yaml" >/dev/null 2>&1     && pass "recipe: egress lan accepted" || fail "recipe: egress lan accepted"
+rm -f "$R/hbd-lan.yaml"
 # up without --yes on a non-TTY must abort WITHOUT spawning
 sed -i 's/^egress: banana/egress: proxy-only/' "$R/hbd.yaml"
 out="$(echo n | "${renv[@]}" "$HOTBEDD" recipe up "$R/hbd.yaml" 2>&1)"

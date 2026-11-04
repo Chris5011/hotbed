@@ -65,8 +65,8 @@ network", not "prison".
 | ------- | --------- | ---------- |
 | Proxy binds `0.0.0.0` by design | WSL2 NAT and multi-machine LANs need it; single-user trust model | 128-bit tokens + revocation + auth backoff; set `proxy.bind: "127.0.0.1"` in config to hard-bind loopback-only |
 | No TLS on either listener | Localhost/desktop scope; certs would be self-signed anyway | Both listeners are localhost-only by default; rely on loopback/network trust boundary |
-| Egress fences `proxy-only` / `none` / `allowlist` are convenience, not a boundary | They are rules inside the sandbox; on VMs root in the guest can flush them | `strict` (v0.8.0) enforces the allowlist outside the sandbox (isolated network + egress proxy); see §4a |
-| Default egress `allow` reaches private networks | Sandbox traffic leaves through the host, so it reaches whatever the host can: LAN, VPN tunnels, the host's own services (§4a) | Pick `strict` or `allowlist` for agent workloads; `proxy-only` keeps private ranges open by design and does **not** help here |
+| Egress fences `lan` / `none` / `allowlist` are convenience, not a boundary | They are rules inside the sandbox; on VMs root in the guest can flush them | `strict` (v0.8.0) enforces the allowlist outside the sandbox (isolated network + egress proxy); see §4a |
+| Default egress `allow` reaches private networks | Sandbox traffic leaves through the host, so it reaches whatever the host can: LAN, VPN tunnels, the host's own services (§4a) | Pick `strict` or `allowlist` for agent workloads; `lan` (formerly `proxy-only`) keeps private ranges open by design and does **not** help here |
 | Root inside every sandbox | Agents install packages and hotbed manages VMs through the sandbox user's sudo; the container/VM is the boundary, not the user account | VM `dev` / container user have passwordless sudo, VM `dev` is in the `docker` group — treat everything inside as root-controlled (§4a) |
 | Budget enforcement may overshoot on concurrent bursts | Check-then-forward race inside the proxy; tiny window per request | Small overshoot bounded by in-flight requests per wallet; acceptable for a personal burn limiter |
 | Upstream key custody rests with config.json I/O | One file holds all provider secrets | `0600`/`0700` perms, masked API GET/merge round-trip; disk encryption is the real control |
@@ -95,8 +95,8 @@ In short: **a sandbox with egress `allow` can reach everything the host can.**
 For agent workloads use `strict` (containers without published ports,
 libvirt VMs: an isolated network whose only way out is the allowlist proxy,
 enforced outside the sandbox) or at least `allowlist` (in-sandbox fence;
-root in a VM guest could lift it). `proxy-only` keeps RFC1918 ranges open by
-design — it stops public egress, not lateral movement. Container fences hold
+root in a VM guest could lift it). `lan` (formerly `proxy-only`) keeps RFC1918
+ranges open by design — it stops public egress, not lateral movement. Container fences hold
 against root in the container (no `NET_ADMIN`); VM guest fences do not.
 
 **Root inside.** The VM user `dev` and the container sandbox user have

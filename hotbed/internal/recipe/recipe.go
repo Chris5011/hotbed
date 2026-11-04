@@ -12,7 +12,7 @@
 //	  - /tmp/cache:/cache:ro
 //	budget: 5                     # USD wallet (0 = unlimited)
 //	budget_tokens: 500000         # token wallet (0 = unlimited)
-//	egress: proxy-only            # allow | proxy-only | none | allowlist
+//	egress: lan                   # allow | lan | none | allowlist | strict ("proxy-only" = lan)
 //	egress_allowlist: [api.openai.com, opencode.ai]   # allowlist domains (optional)
 //	dns_track: true               # record DNS lookups (allow / allowlist only)
 //	sync: true                    # push proxy-backed opencode config after spawn
@@ -43,7 +43,7 @@ type Recipe struct {
 	Env          map[string]string
 	Budget       *float64 // nil = leave wallet untouched
 	BudgetTokens *int     // nil = leave wallet untouched
-	Egress       string   // "", "allow", "proxy-only", "none", "allowlist"
+	Egress       string   // "", "allow", "lan" (alias "proxy-only"), "none", "allowlist", "strict"
 	EgressAllow  []string // allowlist domains (nil = keep the config's list)
 	DNSTrack     bool     // record DNS lookups via the fence
 	Sync         bool
@@ -327,9 +327,9 @@ func (r *Recipe) Validate() error {
 		return fmt.Errorf("name %q: spaces and path characters are not allowed", r.Name)
 	}
 	switch r.Egress {
-	case "", "allow", "proxy-only", "none", "allowlist":
+	case "", "allow", "lan", "proxy-only", "none", "allowlist", "strict":
 	default:
-		return fmt.Errorf("egress %q: use allow | proxy-only | none | allowlist", r.Egress)
+		return fmt.Errorf("egress %q: use allow | lan | none | allowlist | strict", r.Egress)
 	}
 	if r.DNSTrack && r.Egress != "allow" && r.Egress != "allowlist" {
 		return fmt.Errorf("dns_track: needs egress allow or allowlist (got %q)", r.Egress)
