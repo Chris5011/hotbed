@@ -1,7 +1,39 @@
-# Session hand-off — 2026-11-03
+# Session hand-off — 2026-11-03 / 2026-11-04
 
-State of `main`: **1 commit ahead of `origin/main`, not pushed** (as asked).
-`v0.8.0` is released and pushed; the VS Code work (`7c12e58`) is local only.
+State of `main`: **3 commits ahead of `origin/main`, not pushed**.
+`v0.8.0` is released and pushed; VS Code (`7c12e58`), this hand-off and the
+image builder (`bd6cebf`) are local only. Gate suite on `bd6cebf`: 146/0.
+
+## 2026-11-04 — #1 image builder (`bd6cebf`, local)
+
+All three parts, as chosen:
+
+- **Declarative images** — `hotbedd image build NAME --from STACK --apt …
+  --run … --env …` → `hotbed-custom:NAME`, spec stored for `image rebuild`.
+  Used as stack `custom:NAME` (wizard, recipes, API).
+- **Save a container** — commit → throwaway network-less copy → scrub →
+  verify → flatten (`export | import`). Live test: planted hotbed key,
+  `sk-ant-…` file, JSON refresh token and root history were gone from the
+  image, harmless files kept, the source sandbox untouched, a new sandbox
+  ran from the snapshot. Spec env kept, sandbox `--env` dropped.
+- **Save a VM** (shut off) — flattened standalone qcow2, `virt-sysprep`,
+  cloud-init state dropped, scrub via guestfish, machine-id emptied.
+  Live test: new VMs from the image on **both backends** booted with their
+  own machine-id / host keys, cloud-init `done`, planted secrets and the
+  local workspace gone, other files kept; the source VM kept its identity.
+- Found + fixed on the way: VMs from an image all shared one machine-id
+  (guest commands after sysprep regenerated it); the seed's kernel-purge
+  `runcmd` reported cloud-init `error` when nothing was left to purge.
+- **Not verified:** the Images page / Save-as-image dialog visually — the
+  headless Edge screenshot helper stopped working after the reboot (Edge's
+  DevTools port refuses connections); the JS passes the static checks and
+  the API job flow was tested directly.
+- **Limits** (README): the scrub knows paths + token *shapes*; a secret in
+  an unknown format stays. Flattened images lose layer sharing (a saved
+  image is as big as the filesystem).
+- Your containers `hotbed-asdf` and `sbx-moon-sweepers-analysis` were
+  **stopped** when I checked (exit 127 at 15:43 UTC, right after the
+  reboot, no log output, before any test ran) — I left them alone.
 
 ## Done today
 
@@ -59,19 +91,9 @@ extension.
   editor on your desktop), the Dev Containers attach (extension missing),
   native-Linux VS Code, the first-connect "platform" prompt of Remote-SSH.
 
-## Not started
-
-- **#1 Image builder** (all three parts in one release, as you chose):
-  declarative custom stacks → `hotbed-custom:<name>`; "save sandbox as
-  image" with secret scrubbing (no `hbk-` keys / agent env files — verify on
-  the image); VM base images (cloud-init clean, machine-id, ssh host keys,
-  standalone qcow2) for both backends; Images page. Plan unchanged from the
-  build plan.
-
 ## Next steps
 
 1. Try **VS Code** on a VM (`hotbedd ide <vm>`) and on a container after
-   installing the Dev Containers extension; then push `7c12e58` and cut
-   v0.8.1/v0.9.0 (`scratchpad/release-080.sh` pattern).
-2. Confirm #3/#4/#5 on your side and close them.
-3. #1 image builder.
+   installing the Dev Containers extension, and look at the **Images** page.
+2. Then push and cut **v0.9.0** (VS Code + images), comment on #1 and #2.
+3. Confirm #3/#4/#5 on your side and close them.
