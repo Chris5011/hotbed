@@ -149,7 +149,9 @@ swall="$(curl -s -o /tmp/hotbedd-smoke.hbd.out -w '%{time_total}' --max-time 20 
 awk -v w="$swall" 'BEGIN{exit !(w < 8)}' \
     && pass "wedged engine: sandboxes answer promptly (wall ${swall%%.*}s < 8s)" \
     || fail "wedged engine: sandboxes answered slowly (wall=${swall}s)"
-grep -aqF '"sandboxes":[]' /tmp/hotbedd-smoke.hbd.out \
+# an array, never null - not necessarily empty: libvirt VMs are not faked
+# and a running one (real host) is listed correctly
+grep -aqF '"sandboxes":[' /tmp/hotbedd-smoke.hbd.out && ! grep -aqF '"sandboxes":null' /tmp/hotbedd-smoke.hbd.out \
     && pass "empty engine: sandboxes payload is an array, not null (renderList contract)" \
     || fail "empty engine: sandboxes payload must be an array, not null"
 kill "$FDPID" 2>/dev/null
