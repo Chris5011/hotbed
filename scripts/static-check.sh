@@ -146,6 +146,28 @@ else
     FAIL=1
 fi
 
+# executable bits as git records them: a clone or release tarball gets
+# exactly these modes, and editing a file from Windows (\\wsl.localhost) or
+# through a rewrite-and-rename drops +x silently - hbd then fails with
+# "Permission denied" on every fresh install
+EXEC_FILES="bin/hbd vm/hotbedvm.sh vm/hotbedvmd/entry install.sh quick-install.sh
+  scripts/update.sh scripts/release.sh scripts/static-check.sh containers/entrypoint.sh
+  tests/hotbedd-smoke.sh tests/smoke.sh tests/vmsmoke.sh tests/vmdsmoke.sh"
+if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+    lost=""
+    for f in $EXEC_FILES; do
+        m="$(git -C "$ROOT" ls-files -s -- "$f" | cut -d' ' -f1)"
+        [ -n "$m" ] && [ "$m" != "100755" ] && lost="$lost $f"
+    done
+    if [ -n "$lost" ]; then
+        echo "exec bits      FAILED - not executable in git:$lost"
+        echo "               (git update-index --chmod=+x$lost; chmod +x$lost)"
+        FAIL=1
+    else
+        echo "exec bits      ok"
+    fi
+fi
+
 if [ "$FAIL" -ne 0 ]; then
     echo "== static-check: FAILED =="
     exit 1

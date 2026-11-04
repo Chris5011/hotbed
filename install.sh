@@ -189,6 +189,9 @@ if [[ ! -x "$SBXD" ]]; then
 fi
 
 # ---- install entry points ----------------------------------------------------
+# the symlinked kit scripts must be executable: trees fetched without their
+# modes (zip downloads, copies) would leave hbd "Permission denied"
+chmod +x "$ROOT/bin/hbd" "$ROOT/vm/hotbedvm.sh" "$ROOT/scripts/update.sh" "$ROOT/install.sh" 2>/dev/null || true
 ln -sf "$ROOT/bin/hbd" "$BIN_DIR/hbd"        # kit CLI self-locates its root
 ln -sf "$SBXD" "$BIN_DIR/hotbedd"               # CLI (needs HOTBED_ROOT, see wrapper)
 rm -f "$BIN_DIR/hotbedd-serve"   # never write through a stale symlink
