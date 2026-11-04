@@ -85,3 +85,17 @@ func TestSecretPattern(t *testing.T) {
 		}
 	}
 }
+
+func TestMaskEnvByValue(t *testing.T) {
+	for in, want := range map[string]string{
+		"OPENAI_API_KEY=x":                           "OPENAI_API_KEY=<masked>",
+		"HBD_X=hbk-codex-openwebui-0123456789abcdef": "HBD_X=<masked>",
+		"GH=ghp_" + strings.Repeat("a", 36):          "GH=<masked>",
+		"PATH=/usr/bin:/bin":                         "PATH=/usr/bin:/bin",
+		"HBD_UID=1000":                               "HBD_UID=1000",
+	} {
+		if got := MaskEnv(in); got != want {
+			t.Fatalf("MaskEnv(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

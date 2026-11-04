@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -241,7 +242,9 @@ type Mount struct {
 
 // InspectContainer collects details for one docker container.
 func InspectContainer(name string) (*Detail, error) {
-	out, err := RunJSON("docker", "inspect", name)
+	// one object on one line: RunJSON reads JSON lines, the default pretty
+	// array never parsed (every container came back "not found")
+	out, err := RunJSON("docker", "inspect", "--format", "{{json .}}", name)
 	if err != nil || len(out) == 0 {
 		return nil, fmt.Errorf("inspect %s: not found", name)
 	}
@@ -300,7 +303,11 @@ func InspectContainer(name string) (*Detail, error) {
 	return detail, nil
 }
 
-var secretKeyRe = []string{"KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL"}
+var secretKeyRe = []string{"KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL", "AUTH"}
+
+// secretValueRe masks token-shaped values whatever their variable is called
+// (the image scrub's SecretPattern: hotbed keys, provider and GitHub tokens).
+var secretValueRe = regexp.MustCompile(SecretPattern)
 
 // MaskEnv masks the value of env entries whose key looks secret-bearing.
 func MaskEnv(v string) string {
@@ -314,6 +321,9 @@ func MaskEnv(v string) string {
 		if strings.Contains(up, s) {
 			return key + "=<masked>"
 		}
+	}
+	if secretValueRe.MatchString(v[i+1:]) {
+		return key + "=<masked>"
 	}
 	return v
 }

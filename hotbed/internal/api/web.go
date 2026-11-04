@@ -153,7 +153,7 @@ html[data-theme=light]{
 }
 *{box-sizing:border-box}
 html,body{height:100%}
-body{margin:0;background:var(--bg);color:var(--fg);font:13.5px/1.5 var(--sans);display:flex;flex-direction:column;-webkit-font-smoothing:antialiased}
+body{margin:0;background:var(--bg);color:var(--fg);font:13.5px/1.5 var(--sans);display:flex;flex-direction:column;-webkit-font-smoothing:antialiased;overflow:hidden}
 [hidden]{display:none !important}
 ::-webkit-scrollbar{width:10px;height:10px}
 ::-webkit-scrollbar-thumb{background:var(--line2);border-radius:8px;border:2px solid transparent;background-clip:content-box}
@@ -176,7 +176,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13.5px/1.5 var(--sans);d
 
 /* ---------- sidebar ---------- */
 #shell{display:flex;flex:1;min-height:0}
-#sidebar{width:268px;min-width:236px;flex:none;background:var(--bg2);border-right:1px solid var(--line);overflow-y:auto;padding:var(--s4) var(--s3) var(--s4);display:flex;flex-direction:column}
+#sidebar{width:268px;min-width:236px;flex:none;background:var(--bg2);border-right:1px solid var(--line);overflow-y:auto;overscroll-behavior:contain;padding:var(--s4) var(--s3) var(--s4);display:flex;flex-direction:column}
 .cta{display:flex;align-items:center;justify-content:center;gap:var(--s2);background:linear-gradient(135deg,var(--acc),#6d79ff);color:#fff;font-weight:600;font-size:.84rem;text-decoration:none;border-radius:var(--r2);padding:.6rem .8rem;box-shadow:0 4px 14px rgba(91,140,255,.25)}
 .cta:hover{filter:brightness(1.08)}
 .side-h{color:var(--faint);text-transform:uppercase;font-size:.66rem;font-weight:700;letter-spacing:.09em;margin:var(--s5) var(--s2) var(--s2);display:flex;align-items:center;gap:var(--s1)}
@@ -240,7 +240,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13.5px/1.5 var(--sans);d
 #sidebar-foot a:hover{color:var(--fg);background:var(--bg3)}
 
 /* ---------- main / panes ---------- */
-#main{flex:1;display:flex;flex-direction:column;min-width:0;overflow:auto}
+#main{flex:1;display:flex;flex-direction:column;min-width:0;overflow:auto;overscroll-behavior:contain}
 #empty{color:var(--dim);margin:auto;text-align:center}
 .emptycard h3{font-size:1.05rem;font-weight:600;color:var(--fg);margin:0 0 var(--s2)}
 .emptycard p{font-size:.82rem;margin:0 0 var(--s4)}
@@ -2120,7 +2120,7 @@ function select(sb){
      (sb.project? ' · '+esc(short(sb.project)):'') + (sb.stack? ' · '+esc(sb.stack):'');
   updateButtons(sb);
   $('d-agentbtns').innerHTML='';
-  renderOverview(sb);
+  renderOverview(sb, true);
   renderConn(sb);
   // keep the burned tab live across sandbox switches too - switching
   // machines with the burn pane open must swap the data, not just the name
@@ -2130,8 +2130,11 @@ function select(sb){
   if(activeTab==='agents'){ renderAgentsTab(sb); }
   saveView();
 }
-function renderOverview(sb){
-  var stat=function(v){return {v:v};};
+// detail (docker inspect, snapshots, installed agents) per sandbox: the
+// inventory refresh re-renders the overview every few seconds - it reuses
+// this instead of refetching (each fetch costs a docker inspect + exec)
+var detailCache={};
+function renderOverview(sb, refetch){
   var cards=[
     {t:'state', v:pillFor(sb)+' '+esc(sb.status||''), cls:'stat'},
     {t:'image', v:sb.image?esc(sb.image):'<span class="dim">-</span>'},
@@ -2144,22 +2147,43 @@ function renderOverview(sb){
   extra.push({t:'created',v:esc(sb.uptime||sb.createdAt||'-')});
   if(sb.netIO) extra.push({t:'net i/o',v:esc(sb.netIO)});
   if(sb.blockIO) extra.push({t:'disk i/o',v:esc(sb.blockIO)});
-  cardrowRender($('ov-cards'), extra);
-  s.FetchDetail(sb);
+  var key=keyOf(sb), c=detailCache[key];
+  cardrowRender($('ov-cards'), extra.concat(c ? detailCards(sb, c.j) : []));
+  if(refetch || !c || Date.now()-c.at > 30000){ fetchDetail(sb, extra); }
 }
 function cardrowRender(host, cards){
+  // same cards as on screen (titles + classes): update only the values that
+  // changed - live cpu/mem/io would otherwise rewrite the row every refresh
+  var shape=cards.map(function(c){ return (c.cls||'')+'|'+c.t; }).join('\n');
+  if(host.getAttribute('data-shape')===shape && host.children.length===cards.length){
+    cards.forEach(function(c,i){
+      var v=host.children[i].querySelector('.v'), html=(c.v==null?'-':c.v);
+      if(v && v.getAttribute('data-html')!==html){ v.innerHTML=html; v.setAttribute('data-html',html); }
+    });
+    return;
+  }
   host.innerHTML='';
   cards.forEach(function(c){
-    var el=h('div',{class:'card'+(c.cls?' '+c.cls:'')},'<h4>'+esc(c.t)+'</h4><div class="v">'+(c.v==null?'-':c.v)+'</div>');
+    var html=(c.v==null?'-':c.v);
+    var el=h('div',{class:'card'+(c.cls?' '+c.cls:'')},'<h4>'+esc(c.t)+'</h4><div class="v">'+html+'</div>');
+    el.querySelector('.v').setAttribute('data-html',html);
     host.appendChild(el);
   });
+  host.setAttribute('data-shape',shape);
 }
-/* detail fetch merges mounts/env into overview */
-var s={FetchDetail:function(sb){
+/* detail fetch merges mounts/env/snapshots into the overview */
+function fetchDetail(sb, base){
+  var key=keyOf(sb);
   fetch('/api/sandboxes/'+sb.kind+'/'+sb.name).then(function(r){return r.json();}).then(function(j){
-    if(j && state.sel===keyOf(sb)){ renderAgentButtons(sb, j.agents); }
-    if(!j || !j.detail) { $('ov-cards').appendChild(h('div',{class:'card'},'<h4>detail</h4><div class="v small">container detail needs docker inspect (daemon has it)</div>')); if(j && j.conn) fillDetailConn(j.conn); return; }
-    var d=j.detail; extras=[];
+    if(!j || j.error){ return; }
+    detailCache[key]={j:j, at:Date.now()};
+    if(state.sel!==key || activeTab!=='overview'){ return; }
+    renderAgentButtons(sb, j.agents);
+    cardrowRender($('ov-cards'), base.concat(detailCards(sb, j)));
+  }).catch(function(){ console.warn('dashboard: sandbox detail request failed'); });
+}
+function detailCards(sb, j){
+    var d=j.detail||{}, extras=[];
     if(j.snapshots && j.snapshots.length){
       extras.push({t:'snapshot timeline ('+j.snapshots.length+')',v:'<ul class="sntl">'+j.snapshots.map(function(s){
         return '<li>'+esc(s.tag)+(s.info?' <span class="small">'+esc(s.info)+'</span>':'')+'</li>'; }).join('')+'</ul>'+
@@ -2177,10 +2201,8 @@ var s={FetchDetail:function(sb){
       extras.push({t:'env ('+d.env.length+', masked secrets)',v:'<ul>'+ENV+'</ul>'});
     }
     if(d.createdAt) extras.push({t:'started',v:esc(d.createdAt)});
-    cardrowRender($('ov-cards'), extra.concat(extras));
-  }).catch(function(){ console.warn('dashboard: request failed silently in cardrowRender'); });
-}};
-var extra=[], extras=[];
+    return extras;
+}
 
 /* ---------- connection tab ---------- */
 function renderConn(sb){
