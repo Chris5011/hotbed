@@ -31,18 +31,42 @@ Implements issues #1 (image builder) and #2 (IDE integration).
     line to your ssh config (backed up once). Works from Windows VS Code on
     WSL through a `hotbedd ide-pipe` ProxyCommand with a separate
     Windows-side key; the VM key stays in the distro
+  - containers are attached as the **sandbox user** (not root) with the
+    same environment as *Open Terminal*: OpenCode finds the synced proxy
+    config and its sessions (hotbed writes the extension's per-container
+    config; your own keys in it are kept)
+  - **agents in any terminal**: `claude`, `codex`, … typed in a VS Code (or
+    ssh/exec) terminal run with their own hotbed settings — agent sync
+    writes one wrapper per agent, sourced from `~/.bashrc`
+  - usage on the Help page
 
 ## Fixes
 
+- **`hbd: Permission denied` on fresh installs** — seven kit scripts
+  (`bin/hbd`, `vm/hotbedvm.sh`, `install.sh`, `scripts/update.sh`, …) had
+  lost their executable bit in git, so clones and release tarballs got
+  non-executable files. Restored; `install.sh` now sets the bits itself and
+  the static check fails on a lost bit
+- **Dashboard overview** — container detail (mounts, workdir, env) never
+  loaded (`docker inspect` output was parsed line by line), so the card
+  always read "container detail needs docker inspect"; the overview also
+  flickered on every refresh. Detail now loads, is cached, and unchanged
+  cards update in place
+- **Scrolling** past the end of the main pane or the sidebar no longer
+  moves the whole page
+- env in the detail view is also masked by value (token-shaped values
+  under any variable name)
 - VMs created from a saved image no longer share one machine-id
 - cloud-init no longer reports `error` on VMs whose cloud kernel was
   already removed (seed purge step)
+- the strict-egress watcher no longer re-syncs a sandbox on unrelated
+  egress changes (e.g. while it is being deleted)
 
 ## Upgrade from v0.8.0
 
 ```bash
 cd ~/hotbed
-scripts/update.sh --yes
+bash scripts/update.sh --yes   # "bash": the script may not be executable yet on v0.8.0 installs
 ```
 
 ---
