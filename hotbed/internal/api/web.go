@@ -80,6 +80,7 @@ const indexHTML = `<!doctype html>
 
       <div id="tabs">
         <button class="tab active" data-tab="overview">Overview</button>
+        <button class="tab" data-tab="files">Files</button>
         <button class="tab" data-tab="logs">Logs</button>
         <button class="tab" data-tab="conn">Connection</button>
         <button class="tab" data-tab="burn">Burn</button>
@@ -90,6 +91,10 @@ const indexHTML = `<!doctype html>
       <div id="tab-overview" class="tabpane">
         <div id="ov-stats" class="cardrow"></div>
         <div id="ov-cards" class="cardrow wrap"></div>
+      </div>
+
+      <div id="tab-files" class="tabpane" hidden>
+        <div id="files-body"></div>
       </div>
 
       <div id="tab-logs" class="tabpane" hidden>
@@ -363,6 +368,20 @@ select{appearance:none;-webkit-appearance:none;padding-right:1.6rem;background-i
 .kvt td{padding:.18rem .9rem .18rem 0;vertical-align:top;color:var(--fg);word-break:break-all}
 .kvt td.kvt-m{color:var(--faint);width:2.2rem}
 .kvt td.kvt-s{color:var(--dim)}
+.ftools{margin-bottom:var(--s2)}
+.ftools #files-jump{width:280px;max-width:100%;font-family:var(--mono)}
+.fcrumbs{font:.8rem var(--mono);color:var(--dim);display:flex;flex-wrap:wrap;align-items:center;gap:2px}
+.fcrumbs a{color:var(--dim);text-decoration:none;padding:.1rem .25rem;border-radius:var(--r1)}
+.fcrumbs a:hover{color:var(--fg);background:var(--bg3)}
+.fcrumbs b{color:var(--fg);font-weight:600;padding:.1rem .25rem}
+.fsep{color:var(--faint)}
+.ftbl td.fname{font-family:var(--mono);font-size:.78rem;word-break:break-all}
+.ftbl .fnum{text-align:right;white-space:nowrap;color:var(--dim)}
+.ftbl tr.fdir{cursor:pointer}
+.ftbl tr.fdir td.fname{color:var(--fg);font-weight:600}
+.ftbl tr.ffile td.fname{color:var(--dim)}
+.ftbl tr.fhid td.fname{color:var(--faint);font-weight:400}
+.ftbl .flink{color:var(--faint);font-weight:400}
 .codelist{list-style:none;margin:.1rem 0 0 !important;padding:0;columns:2 320px;column-gap:var(--s6)}
 .codelist li{font:.76rem/1.6 var(--mono) !important;color:var(--fg);break-inside:avoid;word-break:break-all}
 .card{background:var(--bg2);border:1px solid var(--line);border-radius:var(--r2);padding:.8rem .9rem}
@@ -1318,8 +1337,8 @@ function renderCreator(){
     });
     Array.prototype.forEach.call(document.querySelectorAll('#cw-mounts .drow'),function(row){
       var s=row.querySelector('.msrc').value.trim(), t=row.querySelector('.mtgt').value.trim();
-      if(s&&t){ mounts.push({source:s,target:t,mode:row.querySelector('.mro').checked?'ro':''}); }
-      else if(s||t){ bad.push('mounts'); }
+      if(s){ mounts.push({source:s,target:t,mode:row.querySelector('.mro').checked?'ro':''}); } // empty target: /workspace
+      else if(t){ bad.push('mounts'); }
     });
     if(bad.length){
       bad=bad.filter(function(x,i,a){ return a.indexOf(x)===i; });
@@ -1405,7 +1424,7 @@ function mountRow(host){
     '<div class="mwrap"><input class="msrc" placeholder="/home/…  folder on this machine" spellcheck="false">'+
     '<button type="button" class="browse">Browse…</button></div>'+
     '<span class="dsep">→</span>'+
-    '<input class="mtgt" placeholder="/workspace/…  inside sandbox" spellcheck="false">'+
+    '<input class="mtgt" placeholder="/workspace (default)" spellcheck="false" title="path inside the sandbox - empty mounts the folder at /workspace">'+
     '<label class="ro"><input type="checkbox" class="mro"><span class="box"></span>read-only</label>');
   row.querySelector('.browse').addEventListener('click',function(){
     openFS(function(p){ row.querySelector('.msrc').value=p; });
@@ -2268,6 +2287,7 @@ function select(sb){
   if(activeTab==='logs'){ openLogs(sb); }
   if(activeTab==='dns'){ renderDnsTab(sb); }
   if(activeTab==='agents'){ renderAgentsTab(sb); }
+  if(activeTab==='files'){ renderFilesTab(sb); }
   saveView();
 }
 // detail (docker inspect, snapshots, installed agents) per sandbox: the
@@ -2349,6 +2369,64 @@ function fmtStamp(iso){
   var t=new Date(iso);
   if(isNaN(t.getTime())) return iso;
   try{ return t.toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'}); }catch(e){ return t.toLocaleString(); }
+}
+
+/* ---------- Files tab: browse a running sandbox (listing only) ---------- */
+var filesPath={}; // sandbox key -> directory on screen
+function humanSize(n){
+  n=Number(n)||0; if(n<1024) return n+' B';
+  var u=['KB','MB','GB','TB'], i=-1; do{ n/=1024; i++; }while(n>=1024 && i<u.length-1);
+  return (n<10?n.toFixed(1):Math.round(n))+' '+u[i];
+}
+function renderFilesTab(sb, dir){
+  var host=$('files-body'); if(!sb){ host.innerHTML=''; return; }
+  var key=keyOf(sb);
+  dir=dir||filesPath[key]||'/workspace';
+  if(host.getAttribute('data-sb')!==key){ host.innerHTML='<div class="hint">loading…</div>'; host.setAttribute('data-sb',key); }
+  fetch('/api/sandboxes/'+sb.kind+'/'+encodeURIComponent(sb.name)+'/files?path='+encodeURIComponent(dir))
+    .then(function(r){ return r.json(); }).then(function(j){
+      if(host.getAttribute('data-sb')!==key || activeTab!=='files') return;
+      if(j.error){
+        host.innerHTML=filesBar(sb, dir, '')+'<div class="hint err">'+esc(j.error)+'</div>';
+        filesWire(sb, host); return;
+      }
+      filesPath[key]=j.path;
+      var rows=(j.entries||[]).map(function(e){
+        var hidden=e.name.charAt(0)==='.';
+        var name=esc(e.name)+(e.type==='link'?' <span class="flink">→ '+esc(e.link||'')+'</span>':'')+(e.dir?'/':'');
+        return '<tr class="'+(e.dir?'fdir':'ffile')+(hidden?' fhid':'')+'"'+(e.dir?' data-go="'+esc(j.path.replace(/\/$/,'')+'/'+e.name).split('"').join('&quot;')+'"':'')+'>'+
+          '<td class="fname">'+name+'</td><td class="fnum">'+(e.dir?'':humanSize(e.size))+'</td>'+
+          '<td class="fnum">'+(e.mtime?esc(fmtStamp(new Date(e.mtime*1000).toISOString())):'')+'</td></tr>';
+      }).join('');
+      host.innerHTML=filesBar(sb, j.path, j.parent)+
+        (rows?'<table class="tbl ftbl"><thead><tr><th>name</th><th class="fnum">size</th><th class="fnum">modified</th></tr></thead><tbody>'+rows+'</tbody></table>'
+             :'<div class="hint">empty directory</div>')+
+        (j.truncated?'<div class="hint">only the first 5000 entries are listed</div>':'');
+      filesWire(sb, host);
+    }).catch(function(e){ host.innerHTML='<div class="hint err">listing failed: '+esc(e)+'</div>'; });
+}
+function filesBar(sb, path, parent){
+  var crumbs='<a href="#" data-go="/">/</a>', acc='';
+  path.split('/').filter(Boolean).forEach(function(p, i, all){
+    acc+='/'+p;
+    crumbs+=(i?'<span class="fsep">/</span>':'')+(i===all.length-1?'<b>'+esc(p)+'</b>':'<a href="#" data-go="'+esc(acc).split('"').join('&quot;')+'">'+esc(p)+'</a>');
+  });
+  return '<div class="dnstools ftools">'+
+    '<button class="tool" data-go="'+esc(parent||'').split('"').join('&quot;')+'"'+(parent?'':' disabled')+'>Up</button>'+
+    '<button class="tool" data-go="/workspace">Workspace</button>'+
+    '<span class="fcrumbs">'+crumbs+'</span><span class="grow"></span>'+
+    '<input id="files-jump" type="text" spellcheck="false" autocomplete="off" placeholder="go to path" value="'+esc(path).split('"').join('&quot;')+'">'+
+    '</div><div class="hint">Read-only view of the sandbox filesystem (listed as root, so everything present shows up). Folders first; hidden entries after the rest.</div>';
+}
+function filesWire(sb, host){
+  host.onclick=function(ev){
+    var t=ev.target.closest && ev.target.closest('[data-go]');
+    if(!t || t.disabled) return;
+    ev.preventDefault();
+    var go=t.getAttribute('data-go'); if(go) renderFilesTab(sb, go);
+  };
+  var jump=$('files-jump');
+  if(jump){ jump.onkeydown=function(ev){ if(ev.key==='Enter'){ var v=jump.value.trim(); if(v) renderFilesTab(sb, v); } }; }
 }
 
 /* ---------- connection tab ---------- */
@@ -2529,11 +2607,12 @@ function initTabs(){
       activeTab=t.getAttribute('data-tab');
       saveView();
       Array.prototype.forEach.call(document.querySelectorAll('.tab'),function(x){x.classList.toggle('active',x===t);});
-      ['overview','logs','conn','burn','agents','dns'].forEach(function(id){ $('tab-'+id).hidden=(id!==activeTab); });
+      ['overview','files','logs','conn','burn','agents','dns'].forEach(function(id){ $('tab-'+id).hidden=(id!==activeTab); });
       if(activeTab==='logs' && state.sel){ var sb=currentSB(); if(sb) openLogs(sb); }
       if(activeTab==='burn'){ var sb2=currentSB(); renderBurnTab(sb2); }
       if(activeTab==='dns'){ renderDnsTab(currentSB()); }
       if(activeTab==='agents'){ renderAgentsTab(currentSB()); }
+      if(activeTab==='files'){ renderFilesTab(currentSB()); }
       if(activeTab!=='logs'){ closeLogs(); }
     });
   });

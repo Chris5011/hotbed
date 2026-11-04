@@ -224,6 +224,8 @@ func (s *Server) sandboxRoute(w http.ResponseWriter, r *http.Request) {
 		s.dnsRoute(w, r, sb)
 	case "ide":
 		s.ideRoute(w, r, sb)
+	case "files":
+		s.filesRoute(w, r, sb)
 	case "agents":
 		s.sandboxAgentsRoute(w, r, sb)
 	case "start":
@@ -996,6 +998,13 @@ func (s *Server) createRoute(w http.ResponseWriter, r *http.Request) {
 			httpError(w, 400, fmt.Sprintf("mount %d: source must be absolute or ~/", i))
 			return
 		}
+		if strings.TrimSpace(m.Target) == "" { // no target given: the workspace
+			if seen["/workspace"] {
+				httpError(w, 400, fmt.Sprintf("mount %d: no target given and /workspace is already mounted - name a container path", i))
+				return
+			}
+			m.Target = "/workspace"
+		}
 		if !filepath.IsAbs(m.Target) {
 			httpError(w, 400, fmt.Sprintf("mount %d: target must be an absolute container path", i))
 			return
@@ -1467,15 +1476,21 @@ func (s *Server) fsRoute(w http.ResponseWriter, r *http.Request) {
 		Name string `json:"name"`
 		Dir  bool   `json:"dir"`
 	}
-	var dirs, files []fsEnt
-	for _, e := range ents { // os.ReadDir already sorts by name; keep that order
-		if e.IsDir() {
-			dirs = append(dirs, fsEnt{Name: e.Name(), Dir: true})
-		} else {
-			files = append(files, fsEnt{Name: e.Name()})
+	sorted := make([]fileEnt, 0, len(ents))
+	for _, e := range ents {
+		dir := e.IsDir()
+		if !dir && e.Type()&os.ModeSymlink != 0 { // a link to a folder is a folder here
+			if fi, err := os.Stat(filepath.Join(cur, e.Name())); err == nil && fi.IsDir() {
+				dir = true
+			}
 		}
+		sorted = append(sorted, fileEnt{Name: e.Name(), Dir: dir})
 	}
-	out := append(dirs, files...) // folders first for the picker
+	sortEntries(sorted) // folders first, visible before hidden, case-insensitive
+	out := make([]fsEnt, 0, len(sorted))
+	for _, e := range sorted {
+		out = append(out, fsEnt{Name: e.Name, Dir: e.Dir})
+	}
 	parent := ""
 	if cur != "/" {
 		parent = filepath.Dir(cur)

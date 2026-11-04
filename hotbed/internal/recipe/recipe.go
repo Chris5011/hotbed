@@ -260,7 +260,11 @@ func fromNode(root node) (*Recipe, error) {
 		r.Ports = append(r.Ports, n.scalar)
 	}
 	for _, n := range root.listOrEmpty("mounts") {
-		r.Mounts = append(r.Mounts, n.scalar)
+		m := n.scalar
+		if !strings.Contains(m, ":") { // HOST alone: mounted at the workspace
+			m += ":/workspace"
+		}
+		r.Mounts = append(r.Mounts, m)
 	}
 	for _, n := range root.listOrEmpty("egress_allowlist") {
 		r.EgressAllow = append(r.EgressAllow, n.scalar)
