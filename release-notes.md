@@ -1,3 +1,36 @@
+# Hotbed v0.9.5 — a calmer dashboard
+
+## Changed
+
+- **Top navigation** — Overview, Burn, DNS, Images, Providers, Agents and
+  Help moved from the sidebar footer into a navigation bar; the sidebar
+  holds only New sandbox and your sandboxes.
+- **Sandbox header** — frequent actions stay visible; Save as image and
+  Delete moved into a More menu.
+- **Overview** — compact fact cards, mounts as an aligned table,
+  environment as a two-column list, start time in local time; start page
+  cards show one line of facts instead of a row of chips.
+- **Visual language** — neutral graphite instead of blue-tinted navy, one
+  accent colour, no gradients, glows, emoji icons or uppercase labels.
+- **Contrast** — every text colour meets WCAG AA (≥ 4.5:1) on every
+  surface, in both themes (dark grey labels were at 2.6–3.5:1).
+
+## Fixes
+
+- the Connection and Burn tabs no longer show under the Overview on a
+  fresh page load
+- the Burn table's columns line up with their headers again
+- paths show as `~/…` instead of `~/<user>/…`
+
+## Upgrade from v0.9.4
+
+```bash
+cd ~/hotbed
+bash scripts/update.sh --yes
+```
+
+---
+
 # Hotbed v0.9.4 — strict fix for custom proxy ports
 
 ## Fixes
