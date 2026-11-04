@@ -1,3 +1,24 @@
+# Hotbed v0.9.4 — strict fix for custom proxy ports
+
+## Fixes
+
+- **Strict on libvirt VMs with a custom `proxy.port`** — when a VM
+  switches into or out of `strict` it gets a new address, and hotbed ends
+  the guest side of the old LLM ssh tunnel so the new one can take the
+  port. That cleanup looked at the default port (7775) instead of the
+  configured `proxy.port`, so with a custom port the old listener
+  survived and the VM's LLM calls hung until the stale session timed out.
+  It now uses the configured port. Default setups are unaffected.
+
+## Upgrade from v0.9.3
+
+```bash
+cd ~/hotbed
+bash scripts/update.sh --yes
+```
+
+---
+
 # Hotbed v0.9.3 — research views and CSV exports
 
 ## New
