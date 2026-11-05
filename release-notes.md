@@ -1,3 +1,36 @@
+# Hotbed v0.9.6 — browse sandbox files
+
+## New
+
+- **Files tab** — browse a running container's or VM's filesystem: click
+  through folders (`..` goes up), breadcrumb path, a Workspace shortcut and
+  a go-to-path field; size, modified time and symlink targets. Sorted
+  like `ls -1` (en_US.UTF-8); dot-files hidden by default behind a "show
+  hidden files" toggle. Read-only: no file contents, no upload or
+  download; listed as root, so everything present shows up.
+- **Mounts without a target go to `/workspace`** — in the create wizard,
+  the API and recipes (`- ~/proj`). A second untargeted mount is refused
+  with an explanation.
+
+## Fixes
+
+- **Folder picker order** — the mount folder picker listed raw byte order
+  (dot-files first, capitals before lowercase) and showed symlinks to
+  folders as files; it now lists folders first, case-insensitively,
+  hidden entries last, and treats links to folders as folders.
+- **"created …" toast shown twice** when creating a sandbox.
+- **Connection tab** — Windows Terminal first; shell, OpenCode one-shot
+  and tmux re-attach moved under "More ways to connect".
+
+## Upgrade from v0.9.5
+
+```bash
+cd ~/hotbed
+bash scripts/update.sh --yes
+```
+
+---
+
 # Hotbed v0.9.5 — a calmer dashboard
 
 ## Changed
