@@ -72,11 +72,19 @@ RUN apt-get update \
 # fallback opencode binary (official release channel); if the host has its own
 # opencode binary it gets bind-mounted over /usr/local/bin/opencode at runtime.
 # The download retries a few times: a transient TLS sway (curl exit 35) used to
-# kill the whole one-time build on fresh boxes.
+# kill the whole one-time build on fresh boxes. The asset follows the image's
+# architecture (amd64 -> x64, arm64 -> arm64); anything else stops here with a
+# readable message instead of an "Exec format error" further down.
 RUN set -e \
+ && arch="$(dpkg --print-architecture)" \
+ && case "$arch" in \
+      amd64) oc_arch=x64 ;; \
+      arm64) oc_arch=arm64 ;; \
+      *) echo "hotbed: unsupported architecture '$arch' - the sandbox images support amd64 and arm64" >&2; exit 1 ;; \
+    esac \
  && for a in 1 2 3 4 5; do \
       curl -fsSL \
-        "https://github.com/sst/opencode/releases/download/v${OPENCODE_FALLBACK_VERSION}/opencode-linux-x64.tar.gz" \
+        "https://github.com/sst/opencode/releases/download/v${OPENCODE_FALLBACK_VERSION}/opencode-linux-${oc_arch}.tar.gz" \
         -o /tmp/opencode.tgz && break \
         || { rm -f /tmp/opencode.tgz; echo "opencode download attempt $a failed — retrying"; sleep 3; }; \
     done \
@@ -145,11 +153,15 @@ RUN apt-get update \
 FROM common AS go
 
 RUN set -e \
+ && GARCH="$(dpkg --print-architecture)" \
+ && case "$GARCH" in amd64|arm64) ;; \
+      *) echo "hotbed: unsupported architecture '$GARCH' for the go stack (amd64, arm64)" >&2; exit 1 ;; \
+    esac \
  # latest stable go from the official dist API, fall back to a pinned version
  && GVER="$(curl -fsSL 'https://go.dev/dl/?mode=json' | jq -r '.[0].version' | sed 's/^go//')" \
  && if [ -z "$GVER" ]; then GVER=1.24.0; fi \
  && echo "installing go $GVER" \
- && curl -fsSL "https://go.dev/dl/go${GVER}.linux-amd64.tar.gz" | tar -xz -C /usr/local \
+ && curl -fsSL "https://go.dev/dl/go${GVER}.linux-${GARCH}.tar.gz" | tar -xz -C /usr/local \
  && /usr/local/go/bin/go version
 
 ENV PATH="/usr/local/go/bin:${PATH}" \

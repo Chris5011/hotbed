@@ -5,7 +5,9 @@
 #
 # Covers: engine reachability, bind-mounts, stack detection, per-stack tools,
 # ownership translation, exit codes, persistence lifecycle, fresh mode, opencode,
-# and teardown hygiene. Exits nonzero on the first failing section.
+# unattended exec (-T) and explicit sandbox selection, and teardown hygiene.
+# NOTE: the cleanup section runs 'hbd prune --yes', which removes EVERY hbd
+# container on this machine, not just the ones made here. Exits nonzero on the first failing section.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -77,6 +79,32 @@ timeout 120 "$HBD" opencode -- --version 2>/dev/null | grep -q opencode \
                                                  && pass "opencode via hbd"        || fail "opencode via hbd"
 "$HBD" exec -- bash -c 'exit 42' 2>/dev/null; [[ $? -eq 42 ]] \
                                                  && pass "exit codes propagate"    || fail "exit codes propagate"
+
+# unattended exec (issue #6): a caller stdin that never closes must not reach
+# the command with -T, a tty under timeout(1) must not stop the client, and
+# exit codes / timeout's 124 come through unchanged
+out="$(timeout 20 "$HBD" -T exec -- sh -c 'cat >/dev/null; echo t-ok' 2>/dev/null < <(sleep 25))"
+[[ "$out" == t-ok ]]                             && pass "-T: open caller stdin does not hang" || fail "-T: open caller stdin does not hang (out=$out)"
+"$HBD" exec -T -- bash -c 'exit 7' 2>/dev/null; [[ $? -eq 7 ]] \
+                                                 && pass "exec -T keeps exit codes" || fail "exec -T keeps exit codes"
+timeout 5 "$HBD" -T exec -- sleep 30 >/dev/null 2>&1; [[ $? -eq 124 ]] \
+                                                 && pass "timeout still reports 124" || fail "timeout still reports 124"
+if command -v script >/dev/null 2>&1; then
+    out="$(script -qec "timeout 20 $HBD -T exec -- echo bg-ok" /dev/null 2>/dev/null)"
+    [[ "$out" == *bg-ok* ]]                      && pass "-T under timeout with a tty" || fail "-T under timeout with a tty (out=$out)"
+fi
+
+# explicit sandbox selection (issue #6)
+cn="$("$HBD" status 2>&1 | grep -o 'container [^ ]*' | cut -d' ' -f2)"
+[[ "$(cd / && "$HBD" --sandbox "$cn" -T exec -- pwd 2>/dev/null)" == /workspace ]] \
+                                                 && pass "--sandbox NAME from another dir" || fail "--sandbox NAME from another dir"
+[[ "$(cd / && "$HBD" -C "$SCRATCH/b1" --no-create -T exec -- printenv HBD_PROJECT 2>/dev/null)" == "$SCRATCH/b1" ]] \
+                                                 && pass "-C DIR selects that dir's sandbox" || fail "-C DIR selects that dir's sandbox"
+mkdir -p "$SCRATCH/none"
+if ! (cd "$SCRATCH/none" && "$HBD" --no-create -T exec -- true >/dev/null 2>&1) \
+   && [[ "$("$HBD" ls)" != *"$SCRATCH/none"* ]]; then pass "--no-create refuses, creates nothing"; else fail "--no-create refuses, creates nothing"; fi
+! "$HBD" --sandbox hotbed-no-such-box -T exec -- true >/dev/null 2>&1 \
+                                                 && pass "--sandbox unknown name fails" || fail "--sandbox unknown name fails"
 
 "$HBD" rm --yes >/dev/null 2>&1
 if [[ "$("$HBD" status 2>&1)" == *"no sandbox yet"* ]]; then pass "rm deletes sandbox"; else fail "rm deletes sandbox"; fi

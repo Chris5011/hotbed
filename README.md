@@ -87,6 +87,11 @@ waiting to happen. This kit gives every project a throwaway environment:
 
 - Any Linux host works; on Windows run the kit inside **WSL2** — the notes
   below that mention Docker Desktop apply to any WSL2 distro.
+- **amd64 or arm64.** Container sandboxes (`hbd`, hotbedd) build and run
+  on both; the images pick the matching opencode and Go downloads. VMs
+  (`hotbedvm`) are **amd64-only** for now: on an arm64 host `fetch-image`,
+  `create` and `start` stop with a clear message (the master image, kernel
+  and baked opencode are x86_64 builds; arm64 guests are untested).
 - CPU with nested virtualization (`nested=Y` under
   `/sys/module/kvm_intel/parameters/nested`), `/dev/kvm` writable.
 - RAM budget: ≥ 8 GB for the docker engine plus 2–4 GB per running VM.
@@ -458,7 +463,7 @@ Helpers for the strict case: `hbd --fresh --no-auth --no-ssh --net none`.
 ```text
 hbd (no args) | shell     interactive shell in this project's sandbox
 hbd opencode [-- args]    opencode TUI inside the sandbox
-hbd exec [--] cmd...      one-shot command in the sandbox (tty-aware)
+hbd exec [-T] [--] cmd... one-shot command in the sandbox (tty-aware; -T: no stdin/tty)
 hbd root [--] cmd...      as root inside the sandbox (apt-get update ...)
 hbd status | stop | rm    manage THIS project's sandbox (--yes skips prompt)
 hbd ls | ps               all hbd sandboxes (stack, state, project)
@@ -474,7 +479,29 @@ hbd version | help        meta
 
 Global options (place **before** the command): `--stack NAME`, `--fresh`,
 `--net MODE`, `--no-auth`, `--no-occonf`, `--no-git`, `--no-ssh`,
-`--mount HOST:CT[:ro]`, `--env KEY=VAL`, `--yes`, `--no-cache`.
+`--mount HOST:CT[:ro]`, `--env KEY=VAL`, `--yes`, `--no-cache`,
+`-T`/`--no-stdin`, `-C DIR`, `--sandbox NAME`, `--no-create`.
+
+#### Scripts and agents (unattended `hbd exec`)
+
+- **Which sandbox:** a sandbox belongs to one directory (its resolved path,
+  not the git root) plus one stack. Running `hbd` from a subfolder or from
+  another directory selects, and creates, a different sandbox. Pin it with
+  `-C DIR` (act as if run in DIR) or `--sandbox NAME` (an existing container
+  from `hbd ls`; never creates one), and add `--no-create` so a typo fails
+  instead of starting an empty sandbox.
+- **No stdin, no tty:** `hbd exec` forwards stdin (so `echo x | hbd exec --
+  cmd` works) and adds a tty when it sees a terminal. A caller that never
+  closes stdin leaves commands that read it - `opencode run` among them -
+  waiting forever, and `timeout hbd exec` from an interactive shell gets
+  stopped by the kernel for touching the terminal from the background. Pass
+  `-T` (`hbd -T exec -- ...` or `hbd exec -T -- ...`) for anything
+  unattended. Exit codes come through unchanged; `timeout` still reports 124.
+
+```bash
+timeout 300 hbd --sandbox hotbed-base-d3b084f4 --no-create -T exec -- \
+  opencode run -m hotbed-proxy/vllm/GLM-5.3-Flash-NVFP4 "Reply with OK"
+```
 
 ---
 

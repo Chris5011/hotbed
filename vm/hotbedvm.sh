@@ -39,6 +39,15 @@ warn()  { printf '\e[33;1mhotbedvm:\e[0m %s\n' "$*" >&2; }
 info()  { printf '\e[36;1mhotbedvm:\e[0m %s\n' "$*" >&2; }
 ok()    { printf '\e[32;1mhotbedvm:\e[0m %s\n' "$*" >&2; }
 
+# VMs are amd64-only for now: the master image, its kernel package and the
+# baked opencode are x86_64 builds, and arm64 guests would need another qemu
+# machine type plus UEFI firmware that has never been tested (issue #7).
+# Booting is refused early; ls/stop/destroy keep working.
+require_amd64() {
+    local m; m="$(uname -m)"
+    [[ $m == x86_64 ]] || die "VMs are amd64-only for now (this host is $m). Container sandboxes (hbd, hotbedd) work on arm64."
+}
+
 require_cmds() {
     local c missing=0
     if [[ $BACKEND == docker ]]; then
@@ -1023,10 +1032,10 @@ EOF
 SUBCMD="${1:-help}"; shift || true
 
 case "$SUBCMD" in
-    fetch-image) require_cmds; fetch_image ;;
-    create)      require_cmds; create "$@" ;;
-    postboot)    require_cmds; postboot "$@" ;;
-    start)       require_cmds; cmd_start "$@" ;;
+    fetch-image) require_amd64; require_cmds; fetch_image ;;
+    create)      require_amd64; require_cmds; create "$@" ;;
+    postboot)    require_amd64; require_cmds; postboot "$@" ;;
+    start)       require_amd64; require_cmds; cmd_start "$@" ;;
     stop)        require_cmds; cmd_stop "$@" ;;
     destroy)     require_cmds; cmd_destroy "$@" ;;
     ssh|shell)
@@ -1051,5 +1060,5 @@ case "$SUBCMD" in
         exec "${VIRSH[@]}" console "$(domain "$1")" ;;
     help|-h|--help) help ;;
     version|-V)  printf 'hotbedvm %s (backend: %s)\n' "$VERSION" "$BACKEND" ;;
-    *)           help >&2; die "unknown command '$command'" ;;
+    *)           help >&2; die "unknown command '$SUBCMD'" ;;
 esac

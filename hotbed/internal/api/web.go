@@ -2156,6 +2156,8 @@ function renderHelp(){
       ['hbd|hbd shell','shell inside this project\'s sandbox'],
       ['hbd opencode [args]','run the OpenCode TUI inside the sandbox'],
       ['hbd exec [--] cmd / hbd root [--] cmd','run one command as user / as root'],
+      ['hbd -T exec -- cmd','unattended (scripts, agents, timeout): no stdin, no tty'],
+      ['hbd -C DIR / --sandbox NAME / --no-create','pick the sandbox explicitly; never create one by accident'],
       ['hbd status|stop|rm','manage THIS project\'s sandbox; rm deletes it fully'],
       ['hbd ls / hbd prune','list all hbd sandboxes / remove all'],
       ['hbd --stack NAME --fresh --net none','options at spawn: stack, ephemeral, network fence'],
