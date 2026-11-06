@@ -1,3 +1,45 @@
+# Hotbed v0.9.7 — unattended hbd exec, arm64 images
+
+## Fixes
+
+- **`hbd exec` hung for unattended callers** (#6) — `hbd exec` always
+  forwarded the caller's stdin, and `opencode run` reads stdin to the end
+  when it is not a terminal; an orchestrator that never closes stdin left it
+  waiting until `timeout` killed it (exit 124). New **`-T` / `--no-stdin`**
+  (`hbd -T exec -- …` or `hbd exec -T -- …`) attaches neither stdin nor a
+  tty. The default is unchanged, so `echo x | hbd exec -- cmd` still works;
+  exit codes and `timeout`'s 124 come through as before.
+- **arm64 builds failed** (#7) — the opencode fallback and the go stack
+  were downloaded as x86_64 binaries (`Exec format error`, exit 126). Both
+  now follow the image's architecture (amd64/arm64); any other
+  architecture stops early with a readable message. All five stacks build
+  and run on arm64 (verified under emulation; not yet on native arm64).
+- `hotbedvm` with an unknown command crashed with "unbound variable".
+
+## New
+
+- **Explicit sandbox selection** for scripts — a sandbox belongs to one
+  directory plus one stack, so running `hbd` elsewhere selects (and
+  creates) a different one. Pin it with `-C DIR` or `--sandbox NAME` (an
+  existing container from `hbd ls`, dashboard sandboxes included; never
+  creates one), and add `--no-create` to fail instead of creating. The
+  "creating new sandbox" line now names the project directory.
+- **VMs are amd64-only, said clearly** — on an arm64 host `hotbedvm`
+  refuses `fetch-image`, `create` and `start` with an explanation;
+  `ls`, `stop` and `destroy` still work.
+
+## Upgrade from v0.9.6
+
+```bash
+cd ~/hotbed
+bash scripts/update.sh --yes
+```
+
+Existing amd64 images keep working as they are; on an arm64 host run
+`hbd build` once.
+
+---
+
 # Hotbed v0.9.6 — browse sandbox files
 
 ## New
